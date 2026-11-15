@@ -61,7 +61,7 @@ flowchart LR
 | Database | PostgreSQL 17, managed, Multi-AZ in production | Row locks, deferred constraint triggers, partial unique indexes, schemas/roles, full-text search — everything the PRD needs in one engine. |
 | DB access | Kysely (typed SQL builder) + plain SQL migrations | The purchase path needs explicit `SELECT … FOR UPDATE` ordering and BIGINT handling; an ORM that hides locking is a liability here. BIGINT columns map to JS `bigint`; API money is decimal strings (§7.4). |
 | Job queue | Graphile Worker (Postgres-backed) | Jobs can be enqueued inside the business transaction; no Redis to run, back up or reconcile. |
-| Auth | Session-cookie auth with email magic link + Google OAuth, sessions stored in our Postgres (Better Auth or equivalent library) — **Decision D1** | See §8.1. |
+| Auth | Session-cookie auth with email magic link + Google OAuth, sessions stored in our Postgres (Better Auth or equivalent library) — **Decision D1** | See §8.2 of this plan. |
 | Object storage / CDN | S3 (one private, one public bucket) + CloudFront | §7.8. |
 | Validation / contract | Zod schemas shared by API and UI, OpenAPI generated from them | Single source for request/response shapes and stable error codes. |
 | UI | React, Tailwind with the PRD design tokens (§6.2), Radix primitives for accessible dialogs/menus | WCAG 2.2 AA target; focus trapping and announcements come from tested primitives. |
