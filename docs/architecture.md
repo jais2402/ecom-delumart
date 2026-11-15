@@ -65,6 +65,7 @@ flowchart LR
 | Object storage / CDN | One private and one public bucket behind a CDN, through a storage adapter (free tier first, S3 + CloudFront later) | §7.8. |
 | Validation / contract | Zod schemas shared by API and UI, OpenAPI generated from them | Single source for request/response shapes and stable error codes. |
 | UI | React, Tailwind with the PRD design tokens (§6.2), Radix primitives for accessible dialogs/menus | WCAG 2.2 AA target; focus trapping and announcements come from tested primitives. |
+| Caching | CDN page cache with tag-based invalidation for public pages; in-memory browser cache for private data; nothing private in any shared cache | Fast public browsing at no cost; see §5.8. |
 | Search | Postgres full-text (`tsvector`) + `pg_trgm` over approved product versions | Catalog is hundreds of rows in beta. |
 | Rate limits / quotas | Postgres counters for per-account and per-company limits; WAF rate rules for coarse network limits | Publication and draft caps are pooled per company and must be transactional anyway (§7.14). |
 | AI generation | Not in V1. Manual text and a template illustration library only | Scope decision; the PRD's no-AI fallback path (§7.8) becomes the only path. |
@@ -189,6 +190,44 @@ A validation failure writes a `FAILED` attempt with no journal and commits that 
 | Discovery ranking (Fresh / Player favorites) | approved versions, qualified saves | ≤ 5 min |
 
 Rollups are disposable and rebuildable for anything order-derived. Funnel metrics (impressions, views) are the exception: raw events are kept only 90 days (§7.7), so the daily rollup is the durable record for those and must be backed up with the database.
+
+### 5.8 Caching
+
+Goal: public pages feel instant and navigation feels continuous, without ever serving one person's data to another or letting a cached value authorise anything. All of this uses what the hosting platform and framework already provide; no cache server is added in V1.
+
+**Two hard rules**
+
+1. **Public and private never share a response.** Cached pages are rendered with no cookies and contain nothing about the viewer. Everything personal (balance, "you own this", saved state, blocked creators, portal data) is loaded separately by the browser from uncached endpoints and layered on top.
+2. **A cache is for display only.** Balance, entitlement, price, stock, ownership and block checks are read from the primary database inside the transaction (§5.4). A stale cached page can at worst show an outdated price or "available" badge; the pay step then returns `PRICE_CHANGED` or `SOLD_OUT` with no debit.
+
+**Layers**
+
+| Layer | What is cached | Lifetime | Invalidation |
+|---|---|---|---|
+| Browser + CDN, immutable | JS, CSS, fonts, template illustrations and their responsive derivatives (content-hashed filenames) | One year | New filename on change |
+| CDN page cache (static generation with on-demand revalidation) | Landing page, category and shelf pages, product detail, public store page, public shelf | Until invalidated, with a 60 s safety-net expiry (5 min for Fresh / Player favorites, matching the PRD's ranking freshness) | Tags such as `product:{id}`, `store:{id}`, `shelf:{id}`, `catalog`, purged by the command that changes them: publish, approved edit, price change, hide, archive, sold out, store rename, deletion |
+| Server data cache | Catalog and search query results keyed by normalised filters + cursor; active configuration version; category list | 30–60 s | Same tags; configuration reloads on version change |
+| Share cards | Rendered card image | Short (about 60 s), after a publication-status check on each miss | `product:{id}` / `store:{id}` tags |
+| Browser memory (query cache) | The signed-in user's wallet summary, collection, saves, portal tables | In memory for the session only | Refetched after every mutation; cleared on sign-out and on portal workspace switch (§7.15) |
+| Database precomputation | Wallet projection, discovery rankings, partner daily rollups, collector progress (§5.7) | As listed in §5.7 | Outbox consumers and scheduled jobs |
+
+**Never cached at any shared layer:** anything behind a session — bank balance and statements, checkout sessions and payment attempts, orders, collection, drafts, every `/partner` and admin response, exports. These are sent with `Cache-Control: private, no-store`. Nothing sensitive is written to `localStorage` or a service worker cache, so a shared device does not retain it.
+
+**Safety-critical invalidation**
+
+- Moderation hide, account deletion and creator suspension purge their tags synchronously as part of the command, before it reports success; the short safety-net expiry bounds the damage if a purge call fails, and a retry job repeats it.
+- Cache keys are built only from the path and an allow-list of query parameters; unknown parameters and request headers are ignored, and no request header is ever reflected into a cached page. This closes cache-poisoning and cache-deception routes.
+- An automated check fails the build if any authenticated route can return a cacheable response, and an end-to-end test hides a product and asserts that its page, search entry and share card are gone.
+
+**Making it feel seamless**
+
+- Prefetch likely next pages when their links enter the viewport; cached pages then open with no visible load.
+- Stream pages with skeletons that reserve the final layout, so personal overlays (balance, owned badge) appear without shifting content (CLS target in §7.11 of the PRD).
+- Keep the previous results on screen while the next page or filter loads.
+- Optimistic updates for low-stakes actions only: save, unsave, shelf arrangement, draft edits, with rollback on failure. Payments are never optimistic: the receipt appears only from the committed order (§7.13 of the PRD), and the new balance comes from that same response rather than a refetch.
+- Because public pages are served from the cache, browsing stays available during a database or integrity incident while purchases are switched off (§7.11 of the PRD).
+
+**Later:** a shared in-memory store (Redis) is added only at scaling step 6 in §9.7, for rate-limit counters and hot query results. It will follow the same two rules.
 
 ---
 
@@ -460,7 +499,7 @@ The beta design is sized for hundreds of users, but nothing in it has to be rewr
 | Step | Trigger | Change | Design seam that makes it cheap |
 |---|---|---|---|
 | 1. Scale web horizontally | CPU or latency on web tasks | Autoscale tasks behind the load balancer | Web is stateless; sessions and limits live in Postgres |
-| 2. Cache public reads harder | Catalog and product page traffic dominates | CDN caching of public pages with tag-based invalidation on publish/hide | Public pages never contain wallet or viewer-specific data; those load separately |
+| 2. Cache public reads harder | Catalog and product page traffic dominates | Already in place from V1 (§5.8); lengthen lifetimes and add a shared server cache | Public pages never contain wallet or viewer-specific data; those load separately |
 | 3. Connection pooling | Connection count nears the database limit | Managed pooler in transaction mode | All transactions are short and never span requests |
 | 4. Read replica | Partner portal, analytics and search load compete with checkout | Route portal/reporting/search queries to a replica | Queries and commands are already separate functions; wallet, entitlement and buy-eligibility reads stay on the primary (§7.8) |
 | 5. Partition large tables | Postings, orders, outbox or events pass tens of millions of rows | Time-based partitioning; archive old partitions | Append-only tables with time-ordered keys |
