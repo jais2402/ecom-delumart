@@ -7,14 +7,15 @@ Status: proposal for kickoff. Items marked **Decision** need an owner's sign-off
 
 ## 1. What shapes the architecture
 
-The PRD describes a small-traffic product with bank-grade correctness rules. Five constraints drive almost every choice below:
+The PRD describes a small-traffic product with bank-grade correctness rules. Security is the first priority: where a choice trades security against speed of delivery, cost or convenience, security wins, and §8 is the part of this plan to review first. Six constraints drive almost every choice below:
 
 | # | Constraint (PRD) | Architectural consequence |
 |---|---|---|
+| 0 | Security first: private wallets and histories, per-company isolation, untrusted AI output, staff powers over a ledger (§7.7, §7.15) | Defence in depth: every rule is enforced on the server and again in the database (grants, constraints, row-level security); least privilege per process; threat model in §8.1 drives the control list. |
 | 1 | Ledger integrity is a release blocker: zero unexplained imbalance, no negative wallet, no double grant/debit (§4.2, §7.4) | One relational database; every money/stock/entitlement change is a single ACID transaction with a documented lock order, DB-level constraints, and idempotency keys. No distributed transactions, no eventual consistency on the write path. |
 | 2 | NPC activity must be "separate by construction" (§7.6) | NPC data lives in its own schema with its own DB role that has no privileges on the ledger. Separation is enforced by Postgres grants and constraints, not by application discipline. |
 | 3 | AI is slow, costs real money, and its output is untrusted (§7.7, §7.8) | AI runs only in background workers behind provider adapters, with a real-spend budget reservation, pinned versions, and no access to wallet/DB tools. Nothing AI-produced becomes public without passing the moderation state machine. |
-| 4 | Load is tiny: 200-account beta, 20 checkouts/s and 100 browsing sessions as test loads (§7.11) | Optimise for correctness and operability, not scale. One deployable, one database, no Redis, no search cluster, no message broker. |
+| 4 | Load is tiny: 200-account beta, 20 checkouts/s and 100 browsing sessions as test loads (§7.11) | Start with one deployable and one database, but keep every seam that scaling needs (stateless web, queue behind an interface, read/write separation in code). §9.7 gives the scaling path and the trigger for each step. |
 | 5 | Two engineers, 16–18 weeks (§8.1) | Managed infrastructure, infrastructure-as-code, as few moving parts as possible. |
 
 The PRD's own proposal (§7.8) — modular monolith, TypeScript, PostgreSQL, object storage + CDN, background queue, provider adapters — is the right shape. This plan makes it concrete.
@@ -237,34 +238,90 @@ One state machine for products (`DRAFT → SCREENING → PUBLISHED / NEEDS_REVIE
 
 ---
 
-## 8. Security and access control
+## 8. Security architecture
 
-### 8.1 Authentication — Decision D1
+Principles: deny by default; enforce on the server and again in the database; least privilege for every process, role and person; no secret or private datum reaches the browser, a log or an AI provider unless it must; every privileged action is attributable and reversible only by an appended correction.
 
-Requirements: magic link + OAuth; unverified accounts can do nothing economic; duplicate provider identities resolve through explicit linking, never automatically; immediate session revocation on deletion/suspension; staff MFA; provisioning must be idempotent under concurrent callbacks.
+### 8.1 Threat model
+
+| Threat | Example | Primary controls |
+|---|---|---|
+| Economic exploitation | Double grant, double spend, overdraw, replayed pay request, refund/rebuy farming, relief farming | Single-transaction writes, canonical lock order, unique constraints, idempotency records, non-negative wallet CHECK, daily reconciliation (§5) |
+| Broken access control (IDOR) | Changing a company, order, card or export id in a URL; a worker calling finance endpoints | Central policy layer, server-resolved company scope, Postgres row-level security on tenant tables, authorisation matrix in CI (§8.3) |
+| Account takeover | Stolen session, magic-link interception, OAuth account-linking abuse | Short-lived single-use links, session rotation, explicit linking only, re-authentication for sensitive actions, staff MFA (§8.2) |
+| Insider or compromised staff account | Arbitrary reversal, minting compensation, reading private wallets | Separate admin surface, MFA, least-privilege staff roles, two-person approval for minting actions, tamper-evident audit log (§8.5) |
+| Prompt injection and unsafe AI output | Concept text that instructs the model, output carrying markup or links | AI has no tools and no data access; schema validation; output escaped and screened; never auto-published (§7.1) |
+| Injection and XSS | Stored script in a product name, formula injection in CSV | Parameterised SQL only, React escaping, strict CSP, inert CSV cells, no user HTML |
+| SSRF and data exfiltration | Tricking the worker into fetching internal URLs | No user-supplied URL is ever fetched; worker egress restricted to an allowlist of provider hosts |
+| Abuse and automation | Signup farms, scraping, generation spend exhaustion | WAF, bot challenge, per-account and per-company quotas, real-spend budget ceiling |
+| Supply chain | Malicious dependency or build step | Lockfile-only installs, dependency and image scanning, pinned actions, signed images (§8.6) |
+| Data exposure | Leaked backup, public bucket, verbose logs | Encryption at rest and in transit, private-by-default buckets, log redaction, separate accounts per environment |
+| Privacy failure | Deleted user restored from backup, reporter identity leaked to a creator | Deletion tombstones reapplied on restore, restricted reporter fields, pseudonymised ledger references |
+
+### 8.2 Authentication — Decision D1
+
+Controls regardless of provider: magic links are single-use, expire in 15 minutes and are bound to the requesting browser; session ids rotate at sign-in and privilege change; cookies are Secure, HTTP-only, SameSite=Lax with the `__Host-` prefix; idle and absolute session timeouts; re-authentication before card replacement, data export, account deletion and company registration; all sessions revoked on suspension or deletion; staff accounts require phishing-resistant MFA (passkeys) and cannot use magic links alone.
+
+Functional requirements: magic link + OAuth; unverified accounts can do nothing economic; duplicate provider identities resolve through explicit linking, never automatically; immediate session revocation on deletion/suspension; staff MFA; provisioning must be idempotent under concurrent callbacks.
 
 Recommendation: a well-maintained auth library with sessions and identities in our own Postgres, rather than a hosted identity service. Reasons: revocation and "one grant per verified identity" become ordinary rows and constraints in the same database as the ledger; no user PII leaves the primary region; no per-user vendor cost. The PRD says "managed authentication" (§7.8), so this is a deviation to approve. If the team prefers hosted, the `identity` module hides the choice behind `auth_subject`, and the rest of this plan is unchanged.
 
 Provisioning (`POST /account/provision`) is one transaction keyed on `auth_subject`: user row, bank account, ledger account, wallet, starter grant journal, card. Unique constraints make a concurrent second callback return the existing records (US-01, US-14).
 
-### 8.2 Authorisation
+### 8.3 Authorisation
 
 A single policy layer in `core` is called by every command and query — web routes, worker jobs and generation callbacks alike (§7.14). Inputs: actor, verified/suspended state, company tier, membership role, draft assignment, resource owner. Rules of thumb:
 
 - Every partner query is scoped by `company_id` resolved from the actor's memberships on the server, never from a URL or filter alone; cache keys and export jobs include it.
 - Workers have no route to orders, finances, analytics or bank data; these are separate endpoints that require the owner role, not hidden UI.
 - Staff is a separate role set with MFA, least-privilege permissions and its own route group; a portal account is never a staff role.
-- CI runs an authorisation matrix test: owner, stranger, worker, removed worker, suspended user and moderator against every private endpoint (§7.8).
+- CI runs an authorisation matrix test: owner, stranger, worker, removed worker, suspended user and moderator against every private endpoint (§7.8). A new route without a matrix entry fails the build.
+- **Database backstop**: Postgres row-level security on company-scoped and owner-scoped tables (orders, drafts, finances, exports, bank accounts, cards, statements). Each request sets the actor and company for its transaction; a query that forgets its `WHERE` clause returns nothing instead of another tenant's data.
+- Public identifiers are random and unguessable; sequential ids never appear in URLs.
 
-### 8.3 Platform controls
+### 8.4 Application, data and network controls
 
-Secure, HTTP-only, SameSite session cookies; CSRF tokens on state-changing requests; strict Content-Security-Policy; restrictive MIME handling on asset responses; secrets in the cloud secret manager, separate per environment; card and invitation tokens stored only as hashes; bot challenge on signup, generation and reports; WAF rate rules by coarse network; per-account limits from §7.5 in Postgres.
+**Application**
+- CSRF tokens plus origin checks on every state-changing request; strict Content-Security-Policy with nonces, no inline script; `frame-ancestors 'none'`; HSTS; restrictive MIME types and `nosniff` on asset responses.
+- All input validated against shared schemas at the edge of the API; all SQL parameterised; error responses use stable codes and never echo internals or card tokens.
+- Card, invitation and magic-link tokens are stored only as hashes and compared in constant time.
+- Bot challenge on signup, generation and reports; WAF managed rules and rate rules by coarse network; per-account limits from §7.5 in Postgres.
+
+**Process isolation (least privilege)**
+- Web, worker, NPC worker and migration task each have their own cloud role and database role. Web holds no AI provider keys; the worker holds no session-signing keys; the NPC role cannot touch the ledger; only the migration task can alter schema.
+- No process uses a database superuser or object-owner role at runtime.
+
+**Data protection**
+- TLS everywhere, including app-to-database; encryption at rest with managed keys for database, backups and buckets.
+- Data minimisation as specified in §7.7: no real name, address, payment or location data is collected at all, which removes the most damaging breach classes outright.
+- Secrets live only in the secret manager, are distinct per environment and are rotated on a schedule and on any staff departure.
+- Retention jobs enforce the §7.7 schedule; logs and analytics are redacted at source (no email, raw prompt, token or full IP).
+
+**Network**
+- Database and tasks in private subnets with no public addresses; security groups allow only load balancer → web and web/worker → database.
+- The origin accepts traffic only from the CDN, so the WAF cannot be bypassed.
+- Outbound traffic from the worker is restricted to an allowlist of provider hostnames; web has no general outbound access.
+- Buckets block all public access; the public bucket is readable only through the CDN.
 
 Risk signals for linked-account review are limited to session/device identifiers and truncated, hashed network prefixes, kept 30 days. What may be collected needs the privacy reviewer's approval before the first invite (**Decision D5**).
 
-### 8.4 Kill switches and audit
+### 8.5 Staff access, kill switches and audit
 
-`system_switch` rows for purchases, signup grants, generation, NPC, publication (§7.12), read inside the relevant transactions and toggled from `/admin`. Every staff action (reversal, entitlement change, hide, switch toggle, quota override) writes an append-only audit row with actor, reason and target; reversals are compensating journals, never edits.
+- The admin surface is served on a separate hostname with its own session cookie, shorter timeouts and passkey MFA; it is not reachable with a player session.
+- Staff roles are granular (moderator, support, economy, admin). Moderators cannot issue reversals; support cannot change entitlements.
+- Any action that mints currency (compensation) or revokes an entitlement requires a second staff member's approval before it executes.
+- Staff can see provenance and source before acting (§7.12) but have no screen that edits a balance; the only money tool is a compensating journal.
+- `system_switch` rows for purchases, signup grants, generation, NPC and publication (§7.12) are read inside the relevant transactions and toggled from the admin surface.
+- Every staff action writes an append-only audit row with actor, reason, target and a hash of the previous row, so deletion or alteration of history is detectable. Audit rows are also shipped to a write-once bucket in a separate account.
+- Engineers have no standing production database access; break-glass access is time-limited, logged and reviewed.
+
+### 8.6 Secure delivery and assurance
+
+- Branch protection with required review; secret scanning, dependency audit, static analysis and container image scanning on every pull request; third-party CI actions pinned by commit hash; images signed and deployed by digest.
+- Deployment uses short-lived federated credentials; there are no long-lived cloud keys in CI or on laptops.
+- Cloud audit trail, threat detection and configuration-compliance checks enabled in both accounts, with alerts routed to the on-call channel.
+- Security gates on the roadmap: threat-model review at the end of week 1; authorisation and ledger abuse-case tests from week 2; internal security review before the first invite; independent penetration test before public expansion (§8.2 of the PRD requires a permission/security review there).
+- Published security contact and a written incident-response runbook: contain with kill switches, preserve evidence, reconcile, notify per the privacy reviewer's guidance.
 
 ---
 
@@ -338,6 +395,26 @@ Logs are structured and carry no email, raw prompt, token or full IP (§7.10).
 
 First-party only. The browser batches events to `POST /api/events`; the server validates the envelope, pseudonymises, deduplicates on `event_id` and inserts into day-partitioned tables dropped after 90 days. Server-authoritative events (purchase, unlock, grant) come from the outbox, never from the client. Metric definitions are versioned rows so a dashboard number can always be traced to a definition and an as-of time (§7.15).
 
+### 9.7 Scaling path
+
+The beta design is sized for hundreds of users, but nothing in it has to be rewritten to grow. Each step below is taken only when its trigger is observed; the order reflects where this system will actually feel pressure first.
+
+| Step | Trigger | Change | Design seam that makes it cheap |
+|---|---|---|---|
+| 1. Scale web horizontally | CPU or latency on web tasks | Autoscale tasks behind the load balancer | Web is stateless; sessions and limits live in Postgres |
+| 2. Cache public reads harder | Catalog and product page traffic dominates | CDN caching of public pages with tag-based invalidation on publish/hide | Public pages never contain wallet or viewer-specific data; those load separately |
+| 3. Connection pooling | Connection count nears the database limit | Managed pooler in transaction mode | All transactions are short and never span requests |
+| 4. Read replica | Partner portal, analytics and search load compete with checkout | Route portal/reporting/search queries to a replica | Queries and commands are already separate functions; wallet, entitlement and buy-eligibility reads stay on the primary (§7.8) |
+| 5. Partition large tables | Postings, orders, outbox or events pass tens of millions of rows | Time-based partitioning; archive old partitions | Append-only tables with time-ordered keys |
+| 6. Dedicated rate-limit store and queue | Quota counters or job volume become a visible share of database load | Redis for counters; a managed queue for generation and assets | Limits and queue sit behind interfaces; the outbox stays in Postgres as the source of truth |
+| 7. Hot-row relief | One popular seller or one exclusive drop serialises checkouts | Seller credits accumulated through an append-only pending-credit table settled in batches; per-product purchase queue for drops | Seller proceeds already go through one ledger function; system accounts (MINT, SINK) carry no cached balance row, so they are never a lock hotspot |
+| 8. Search and analytics services | Catalog passes roughly 100k listings; reporting needs outgrow Postgres | Dedicated search index fed from the outbox; event stream to a warehouse | Outbox events are versioned and already carry what both need |
+| 9. Vertical then functional database split | Primary is saturated after steps 2–7 | Larger instance first; then move analytics and sandbox schemas to their own databases | Schemas have no cross-schema foreign keys into `ledger` except from `core` |
+
+Two things stay fixed at any scale: the money path remains a single-database ACID transaction (sharding the ledger is the last resort, and far beyond any plausible size for this product), and correctness never depends on a cache.
+
+Load tests in staging should be rerun at 10× the PRD targets before public expansion to confirm where the first limit actually is, rather than assuming.
+
 ---
 
 ## 10. Verification strategy
@@ -362,7 +439,7 @@ Mapped to the PRD roadmap (§8.1); infrastructure items in bold.
 
 | Weeks | Application | Infrastructure |
 |---|---|---|
-| 1 | Prototype; confirm decisions D1–D6 | **Repo scaffold, CI, local Compose stack, cloud accounts, IaC skeleton** |
+| 1 | Prototype; confirm decisions D1–D6; threat-model review | **Repo scaffold, CI, local Compose stack, cloud accounts, IaC skeleton** |
 | 2–4 | Identity, provisioning, ledger, bank/card, DeluluPay, seed catalog, purchase, collection, receipts | **Staging environment, DB roles/grants, migrations pipeline, reconciliation job + alert, kill switches, Sentry/logging** |
 | 5–6 | Unlock paths, company registration + sponsorship, studio, generation, moderation, reports/appeals | **Worker service, private/public buckets + CDN, provider adapters and budget, safety-eval harness, WAF + bot challenge** |
 | 7–10 | Partner Portal, rollups, exports, share cards, `/admin` | **Analytics intake and partitions, internal dashboards, production environment, backup + first restore drill** |
@@ -393,7 +470,7 @@ These do not block starting, but each needs an answer before the phase that depe
 
 | ID | Decision | Recommendation | Owner (PRD role) |
 |---|---|---|---|
-| D1 | Auth: in-database library vs hosted identity service | Library with sessions in Postgres | Engineering, privacy |
+| D1 | Auth: in-database library vs hosted identity service | Library with sessions in Postgres, subject to the controls in §8.2 | Engineering, privacy |
 | D2 | Canonical lock order (§5.3) | As listed | Engineering lead |
 | D3 | AI vendors: text, image, text safety, image safety | Choose on measured cost per approved listing (target ≤ ₹50) and safety-eval results; image cost will dominate | Engineering, safety |
 | D4 | Hosting | AWS Mumbai, two accounts | Engineering |
