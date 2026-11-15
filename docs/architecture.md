@@ -61,15 +61,16 @@ flowchart LR
 | Database | PostgreSQL 17, managed, Multi-AZ in production | Row locks, deferred constraint triggers, partial unique indexes, schemas/roles, full-text search — everything the PRD needs in one engine. |
 | DB access | Kysely (typed SQL builder) + plain SQL migrations | The purchase path needs explicit `SELECT … FOR UPDATE` ordering and BIGINT handling; an ORM that hides locking is a liability here. BIGINT columns map to JS `bigint`; API money is decimal strings (§7.4). |
 | Job queue | Graphile Worker (Postgres-backed) | Jobs can be enqueued inside the business transaction; no Redis to run, back up or reconcile. |
-| Auth | Session-cookie auth with email magic link + Google OAuth, sessions stored in our Postgres (Better Auth or equivalent library) — **Decision D1** | See §8.2 of this plan. |
-| Object storage / CDN | S3 (one private, one public bucket) + CloudFront | §7.8. |
+| Auth | Managed auth bundled with the database: email magic link + Google OAuth, TOTP MFA for staff — **Decision D1** | See §8.2 of this plan. |
+| Object storage / CDN | One private and one public bucket behind a CDN, through a storage adapter (free tier first, S3 + CloudFront later) | §7.8. |
 | Validation / contract | Zod schemas shared by API and UI, OpenAPI generated from them | Single source for request/response shapes and stable error codes. |
 | UI | React, Tailwind with the PRD design tokens (§6.2), Radix primitives for accessible dialogs/menus | WCAG 2.2 AA target; focus trapping and announcements come from tested primitives. |
 | Search | Postgres full-text (`tsvector`) + `pg_trgm` over approved product versions | Catalog is hundreds of rows in beta. |
 | Rate limits / quotas | Postgres counters for per-account and per-company limits; WAF rate rules for coarse network limits | Company AI quotas are pooled and must be transactional anyway (§7.14). |
 | Job status to browser | Polling `GET /generation-jobs/:id` | PRD explicitly allows it; keeps web stateless. |
 | AI providers | Adapters for text drafting, image generation, text safety, image safety — vendors **Decision D3** | §7.8, §8.4 leave vendors open. |
-| IaC / CI | OpenTofu (Terraform), GitHub Actions with OIDC to the cloud account | Reproducible environments; no long-lived deploy keys. |
+| Hosting | Free tiers for the build and beta; AWS Mumbai as the paid target | Self-funded project; see §9.1. |
+| IaC / CI | GitHub Actions; database roles, grants and policies as migrations; OpenTofu when on the paid profile | Reproducible environments; no long-lived deploy keys. |
 
 Deliberately **not** in the beta: microservices, Redis, Kafka/SQS, Elasticsearch, Kubernetes, websockets, a separate analytics warehouse, a third-party product-analytics SDK.
 
@@ -264,7 +265,7 @@ Controls regardless of provider: magic links are single-use, expire in 15 minute
 
 Functional requirements: magic link + OAuth; unverified accounts can do nothing economic; duplicate provider identities resolve through explicit linking, never automatically; immediate session revocation on deletion/suspension; staff MFA; provisioning must be idempotent under concurrent callbacks.
 
-Recommendation: a well-maintained auth library with sessions and identities in our own Postgres, rather than a hosted identity service. Reasons: revocation and "one grant per verified identity" become ordinary rows and constraints in the same database as the ledger; no user PII leaves the primary region; no per-user vendor cost. The PRD says "managed authentication" (§7.8), so this is a deviation to approve. If the team prefers hosted, the `identity` module hides the choice behind `auth_subject`, and the rest of this plan is unchanged.
+Recommendation: the managed auth service bundled with the free database (Supabase Auth). It matches the PRD's "managed authentication" (§7.8), costs nothing, keeps identities in the same Mumbai-region database as the ledger, and removes credential handling from our code. The `identity` module hides the provider behind `auth_subject`, so it can be replaced later without touching the rest of the system. Automatic linking of identities that share an email must be switched off so linking stays explicit (US-01).
 
 Provisioning (`POST /account/provision`) is one transaction keyed on `auth_subject`: user row, bank account, ledger account, wallet, starter grant journal, card. Unique constraints make a concurrent second callback return the existing records (US-01, US-14).
 
@@ -297,7 +298,7 @@ A single policy layer in `core` is called by every command and query — web rou
 - Secrets live only in the secret manager, are distinct per environment and are rotated on a schedule and on any staff departure.
 - Retention jobs enforce the §7.7 schedule; logs and analytics are redacted at source (no email, raw prompt, token or full IP).
 
-**Network**
+**Network** (paid profile; see §9.1.2 for what the zero-cost profile substitutes)
 - Database and tasks in private subnets with no public addresses; security groups allow only load balancer → web and web/worker → database.
 - The origin accepts traffic only from the CDN, so the WAF cannot be bypassed.
 - Outbound traffic from the worker is restricted to an allowlist of provider hostnames; web has no general outbound access.
@@ -312,15 +313,15 @@ Risk signals for linked-account review are limited to session/device identifiers
 - Any action that mints currency (compensation) or revokes an entitlement requires a second staff member's approval before it executes.
 - Staff can see provenance and source before acting (§7.12) but have no screen that edits a balance; the only money tool is a compensating journal.
 - `system_switch` rows for purchases, signup grants, generation, NPC and publication (§7.12) are read inside the relevant transactions and toggled from the admin surface.
-- Every staff action writes an append-only audit row with actor, reason, target and a hash of the previous row, so deletion or alteration of history is detectable. Audit rows are also shipped to a write-once bucket in a separate account.
+- Every staff action writes an append-only audit row with actor, reason, target and a hash of the previous row, so deletion or alteration of history is detectable. Audit rows are also shipped to a bucket at a separate provider using a write-only credential.
 - Engineers have no standing production database access; break-glass access is time-limited, logged and reviewed.
 
 ### 8.6 Secure delivery and assurance
 
-- Branch protection with required review; secret scanning, dependency audit, static analysis and container image scanning on every pull request; third-party CI actions pinned by commit hash; images signed and deployed by digest.
+- Branch protection; secret scanning, dependency audit and static analysis on every pull request using free open-source scanners (gitleaks, osv-scanner, Semgrep); third-party CI actions pinned by commit hash; images signed and deployed by digest.
 - Deployment uses short-lived federated credentials; there are no long-lived cloud keys in CI or on laptops.
 - Cloud audit trail, threat detection and configuration-compliance checks enabled in both accounts, with alerts routed to the on-call channel.
-- Security gates on the roadmap: threat-model review at the end of week 1; authorisation and ledger abuse-case tests from week 2; internal security review before the first invite; independent penetration test before public expansion (§8.2 of the PRD requires a permission/security review there).
+- Security gates on the roadmap: threat-model review at the end of week 1; authorisation and ledger abuse-case tests from week 2; self-assessment against OWASP ASVS and an automated ZAP baseline scan before the first invite; an independent penetration test before public expansion once there is budget, or an invited peer review until then (§8.2 of the PRD requires a permission/security review there).
 - Published security contact and a written incident-response runbook: contain with kill switches, preserve evidence, reconcile, notify per the privacy reviewer's guidance.
 
 ---
@@ -329,7 +330,64 @@ Risk signals for linked-account review are limited to session/device identifiers
 
 ### 9.1 Hosting — Decision D4
 
-Recommendation: **AWS, Mumbai (ap-south-1)**. The initial cohort is India-based, so latency and data-residency questions are simplest in-region, and RDS gives point-in-time recovery that meets the recovery objectives without custom work.
+The project is self-funded, so the beta runs on a **zero-cost profile** built from free tiers. The application code is the same for both profiles; only `packages/providers`, environment configuration and the worker entrypoint differ. The paid profile further down is the target to move to when the limits in §9.1.3 are reached.
+
+Free-tier limits below are from memory and change often; confirm each one on the provider's pricing page when signing up.
+
+#### 9.1.1 Zero-cost profile (build and beta on this)
+
+| Component | Free service | Notes and limits to design around |
+|---|---|---|
+| Web (UI + API) | Vercel Hobby, functions pinned to Mumbai | Personal, non-commercial use only — acceptable while there is no monetisation (§8.4 of the PRD); moving to a commercial product means the paid plan. |
+| Worker | A second Vercel project (`jobs`) from the same repo, exposing one authenticated job-runner endpoint | No always-on process on a free tier. The runner drains the Postgres queue in short, time-boxed batches (Graphile Worker run-once mode). It is invoked every minute by `pg_cron` + `pg_net` inside the database and immediately after an enqueue. A separate project keeps AI keys and the worker DB role out of the web deployment. |
+| Database | Supabase Free, Mumbai region | About 500 MB; project pauses after a week without activity (the per-minute cron prevents this); **no backups or point-in-time recovery on the free plan**. |
+| Auth | Supabase Auth: magic link + Google, TOTP MFA for staff | Managed, as the PRD asks (§7.8). Resolves D1 at no cost. |
+| Object storage | Supabase Storage: one private bucket, one public bucket | About 1 GB; enough for a few thousand listings at the image budgets in §7.11 of the PRD. |
+| Backups and audit copies | Cloudflare R2 (free allowance, separate vendor from the database) | Encrypted dumps and audit-log exports, written with a write-only token. |
+| Bot protection | Cloudflare Turnstile | Signup, generation, reports. |
+| Edge / DDoS / basic firewall | Vercel's built-in CDN and firewall rules | No managed WAF rule sets on the free plan. |
+| Email | Resend or Brevo free tier via custom SMTP in Supabase Auth | Supabase's built-in mailer is limited to a few emails per hour. Requires a domain. |
+| AI text drafting | A free-tier LLM API (for example Gemini or Groq free tiers) | Free tiers may use submitted prompts for product improvement; only the concept text and category are ever sent, and the privacy notice must say so. |
+| AI text/image safety | A free moderation endpoint plus an open safety model on a free inference tier | Screening failure or quota exhaustion leaves items pending, never approved. |
+| AI images | Cloudflare Workers AI free daily allocation; template illustrations otherwise | Templates are the default. The PRD already requires them as the zero-generation fallback (§7.8). |
+| Errors / uptime | Sentry free plan, a free uptime monitor | |
+| CI/CD | GitHub Actions free minutes; Vercel Git deployments | |
+| Internal dashboards | Pages in the admin surface over the `reporting_ro` role | Replaces a hosted BI tool. |
+
+The only unavoidable spend is a domain name (roughly ₹800–1,000 a year), needed for email sending and a stable origin for cookies. To defer even that, run the first cohort on Google sign-in only with the free `vercel.app` address.
+
+The real-spend AI ceiling (§7.2) is set to ₹0: the budget table then acts purely as a daily quota counter, and no code path can incur a bill.
+
+#### 9.1.2 What the zero-cost profile gives up
+
+Stated plainly, because security is the first priority and these are real reductions:
+
+| Lost | Consequence | Free mitigation |
+|---|---|---|
+| Point-in-time recovery and managed backups | The PRD recovery objective (≤ 15 min data loss) **cannot be met** | Hourly encrypted `pg_dump` to R2 from a scheduled GitHub Action, 30-day retention, monthly restore test into the staging project. Realistic data-loss window: up to one hour. The append-only ledger means a restored database can still be reconciled. |
+| Multi-AZ database | A provider incident means downtime | Accept for an invite beta; browse-only mode and honest in-app notice. |
+| Private networking | The database endpoint is internet-reachable (TLS only) | Long random credentials per role, least-privilege roles, no superuser at runtime, connection strings only in deployment secrets. |
+| Outbound allowlist | Serverless functions can reach any host | No user-supplied URL is ever fetched; provider hostnames are constants in code; a lint rule bans ad-hoc `fetch` outside `packages/providers`. |
+| Managed WAF rules | Less automated filtering | Firewall rules for obvious abuse, Turnstile, strict per-account limits in Postgres. |
+| Separate cloud accounts per environment | Weaker blast-radius separation | Separate Supabase projects and Vercel projects for staging and production, with different secrets. |
+| Independent penetration test | No external assurance | Self-assessment against OWASP ASVS, automated OWASP ZAP baseline scan in CI, and an invited peer review before public expansion. |
+
+**Supabase-specific hardening (mandatory):** Supabase exposes an auto-generated public data API over the database. This application talks to Postgres only from its own server code, so that API must be closed: remove the application schemas from the exposed list and revoke all privileges on them from the `anon` and `authenticated` roles. Enable row-level security on every table as a backstop, never ship the service-role key to the browser or to the web project, and add a CI check that fails if either built-in role can read any application table.
+
+Everything else in §8 is unchanged and costs nothing: the ledger design, row-level security, per-role database grants, the admin surface with MFA and two-person approval, hash-chained audit log, kill switches and the delivery checks.
+
+#### 9.1.3 When to start paying, and for what first
+
+| Trigger | First paid step |
+|---|---|
+| Real users depend on their data, or the database nears its size limit | Database paid plan (daily backups, no pausing); add point-in-time recovery when the one-hour window is no longer acceptable |
+| Any monetisation, or function limits are hit | Paid web hosting plan |
+| Free AI quotas throttle creators | A small real AI budget with the ceiling from §7.2 |
+| Public expansion | Move to the paid target profile below |
+
+#### 9.1.4 Paid target profile (later)
+
+**AWS, Mumbai (ap-south-1)**: in-region for an India-based cohort, and RDS gives point-in-time recovery that meets the recovery objectives without custom work.
 
 | Component | Service | Beta sizing (production) |
 |---|---|---|
@@ -347,7 +405,7 @@ Recommendation: **AWS, Mumbai (ap-south-1)**. The initial cohort is India-based,
 
 This comfortably covers the stated test loads; the first scaling step, if ever needed, is a larger DB instance and more web tasks, with no design change.
 
-Rough running cost: on the order of US$200–300/month for production and about US$100 for staging, before AI spend. AI spend is separately capped at ₹5,000/day by the application. These are estimates to check against current pricing.
+Rough running cost of the paid profile: on the order of US$200–300/month for production and about US$100 for staging, before AI spend. AI spend is separately capped at ₹5,000/day by the application. These are estimates to check against current pricing.
 
 A lighter alternative (a container PaaS plus hosted Postgres with PITR) would run the same container images and cost less. The application has no AWS-specific code outside `packages/providers`, so this is reversible.
 
@@ -356,10 +414,10 @@ A lighter alternative (a container PaaS plus hosted Postgres with PITR) would ru
 | Env | Where | Data | Purpose |
 |---|---|---|---|
 | Local | Docker Compose: Postgres, S3-compatible store, mail catcher, fake AI providers | Seed catalog + fixtures | Development and CI integration tests |
-| Staging | Separate non-production AWS account, single-AZ, smaller instances | Synthetic only; never a copy of production PII | Release candidate, load tests, restore drills, staff QA of inventory (§7.16) |
-| Production | Production AWS account | Real beta data | |
+| Staging | Second free database project + preview deployments (zero-cost profile); separate non-production AWS account (paid profile) | Synthetic only; never a copy of production PII | Release candidate, load tests, restore drills, staff QA of inventory (§7.16) |
+| Production | Production database project + production deployments; production AWS account later | Real beta data | |
 
-Separate accounts give the "separate secrets and datasets" the PRD asks for (§7.8) by default rather than by convention.
+Each environment has its own secrets and dataset (§7.8). The free database plan allows two projects, which is exactly staging and production.
 
 ### 9.3 Delivery pipeline
 
@@ -371,7 +429,7 @@ Migrations follow expand/contract so the previous image keeps working during and
 
 ### 9.4 Backup, recovery and incidents
 
-- Objectives (§7.8): ≤ 15 min data loss, ≤ 4 h restore. RDS PITR typically restores to within about five minutes; Multi-AZ covers instance failure.
+- Objectives (§7.8): ≤ 15 min data loss, ≤ 4 h restore. On the zero-cost profile the data-loss window is up to one hour (hourly dumps, §9.1.2); this deviation needs the engineering lead's explicit acceptance for the invite beta. On the paid profile, RDS PITR typically restores to within about five minutes and Multi-AZ covers instance failure.
 - Recovery runbook: enable the purchases and grants kill switches → restore → reapply deletion tombstones (kept in a small table that is also exported to S3, so a restore cannot resurrect deleted users) → run reconciliation → re-enable.
 - A staging restore-and-reconcile drill is an exit gate before public expansion (§8.2).
 - Integrity incidents put the site in browse-only mode: cached public pages stay up, purchases and new grants are off (§7.11).
@@ -470,9 +528,10 @@ These do not block starting, but each needs an answer before the phase that depe
 
 | ID | Decision | Recommendation | Owner (PRD role) |
 |---|---|---|---|
-| D1 | Auth: in-database library vs hosted identity service | Library with sessions in Postgres, subject to the controls in §8.2 | Engineering, privacy |
+| D1 | Auth provider | Managed auth bundled with the free database, subject to the controls in §8.2 | Engineering, privacy |
 | D2 | Canonical lock order (§5.3) | As listed | Engineering lead |
 | D3 | AI vendors: text, image, text safety, image safety | Choose on measured cost per approved listing (target ≤ ₹50) and safety-eval results; image cost will dominate | Engineering, safety |
-| D4 | Hosting | AWS Mumbai, two accounts | Engineering |
+| D4 | Hosting | Zero-cost profile for build and beta (§9.1.1), accepting the reductions in §9.1.2; AWS Mumbai when moving to paid | Engineering |
+| D7 | Recovery objective on the zero-cost profile | Accept up to one hour of data loss for the invite beta | Engineering lead |
 | D5 | Risk-signal collection and retention | Hashed truncated network prefix + session/device id, 30 days | Privacy / legal |
 | D6 | Introduce inventory columns in the week-2 purchase transaction | Yes | Engineering, product |
