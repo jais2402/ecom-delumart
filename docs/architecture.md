@@ -1,6 +1,7 @@
 # DeluluMart — Architecture and Infrastructure Plan
 
 Source: DeluluMart PRD v1.4 (19 Oct 2026, build baseline). Section references (§) point at the PRD.
+Scope change from the PRD: **V1 ships without AI-assisted creation ("Build with AI").** Creators write their own listing text and choose a template illustration. The PRD lists AI text/image as P0 (§7.1), so this needs a PRD revision; this plan already reflects it (§7).
 Status: proposal for kickoff. Items marked **Decision** need an owner's sign-off (collected in §13).
 
 ---
@@ -11,14 +12,14 @@ The PRD describes a small-traffic product with bank-grade correctness rules. Sec
 
 | # | Constraint (PRD) | Architectural consequence |
 |---|---|---|
-| 0 | Security first: private wallets and histories, per-company isolation, untrusted AI output, staff powers over a ledger (§7.7, §7.15) | Defence in depth: every rule is enforced on the server and again in the database (grants, constraints, row-level security); least privilege per process; threat model in §8.1 drives the control list. |
+| 0 | Security first: private wallets and histories, per-company isolation, untrusted user-written content, staff powers over a ledger (§7.7, §7.15) | Defence in depth: every rule is enforced on the server and again in the database (grants, constraints, row-level security); least privilege per process; threat model in §8.1 drives the control list. |
 | 1 | Ledger integrity is a release blocker: zero unexplained imbalance, no negative wallet, no double grant/debit (§4.2, §7.4) | One relational database; every money/stock/entitlement change is a single ACID transaction with a documented lock order, DB-level constraints, and idempotency keys. No distributed transactions, no eventual consistency on the write path. |
 | 2 | NPC activity must be "separate by construction" (§7.6) | NPC data lives in its own schema with its own DB role that has no privileges on the ledger. Separation is enforced by Postgres grants and constraints, not by application discipline. |
-| 3 | AI is slow, costs real money, and its output is untrusted (§7.7, §7.8) | AI runs only in background workers behind provider adapters, with a real-spend budget reservation, pinned versions, and no access to wallet/DB tools. Nothing AI-produced becomes public without passing the moderation state machine. |
+| 3 | V1 has no AI generation; all public content is user-written text plus template art and must be moderated before it is public (§7.7) | No AI provider, no real-money spend and no long-running jobs in V1. Every text field passes the moderation state machine. The draft model keeps a seam (`image_source`, a provider interface) so generation can be added later without schema rework. |
 | 4 | Load is tiny: 200-account beta, 20 checkouts/s and 100 browsing sessions as test loads (§7.11) | Start with one deployable and one database, but keep every seam that scaling needs (stateless web, queue behind an interface, read/write separation in code). §9.7 gives the scaling path and the trigger for each step. |
 | 5 | Two engineers, 16–18 weeks (§8.1) | Managed infrastructure, infrastructure-as-code, as few moving parts as possible. |
 
-The PRD's own proposal (§7.8) — modular monolith, TypeScript, PostgreSQL, object storage + CDN, background queue, provider adapters — is the right shape. This plan makes it concrete.
+The PRD's own proposal (§7.8) — modular monolith, TypeScript, PostgreSQL, object storage + CDN, background queue — is the right shape. This plan makes it concrete.
 
 ---
 
@@ -40,13 +41,12 @@ flowchart LR
   WEB -. signed URLs .-> PRIV[(Private assets bucket)]
   WRK --> PRIV
   WRK --> PUB
-  WRK --> AI[AI adapters<br/>text · image · safety]
   WRK --> MAIL[Email provider]
   WEB --> MAIL
 ```
 
-- **Web** handles every request synchronously, including checkout. It never calls an AI provider.
-- **Worker** runs the same code with a different entrypoint: outbox relay, generation, moderation screening, image derivatives, share cards, rollups, reconciliation, expiry sweeps, exports, deletion.
+- **Web** handles every request synchronously, including checkout. 
+- **Worker** runs the same code with a different entrypoint: outbox relay, moderation screening, share cards, rollups, reconciliation, expiry sweeps, exports, deletion.
 - **PostgreSQL** is the only stateful service besides object storage. The job queue and the outbox live in it, so "commit the purchase and enqueue the follow-up" is one transaction.
 
 ---
@@ -66,9 +66,8 @@ flowchart LR
 | Validation / contract | Zod schemas shared by API and UI, OpenAPI generated from them | Single source for request/response shapes and stable error codes. |
 | UI | React, Tailwind with the PRD design tokens (§6.2), Radix primitives for accessible dialogs/menus | WCAG 2.2 AA target; focus trapping and announcements come from tested primitives. |
 | Search | Postgres full-text (`tsvector`) + `pg_trgm` over approved product versions | Catalog is hundreds of rows in beta. |
-| Rate limits / quotas | Postgres counters for per-account and per-company limits; WAF rate rules for coarse network limits | Company AI quotas are pooled and must be transactional anyway (§7.14). |
-| Job status to browser | Polling `GET /generation-jobs/:id` | PRD explicitly allows it; keeps web stateless. |
-| AI providers | Adapters for text drafting, image generation, text safety, image safety — vendors **Decision D3** | §7.8, §8.4 leave vendors open. |
+| Rate limits / quotas | Postgres counters for per-account and per-company limits; WAF rate rules for coarse network limits | Publication and draft caps are pooled per company and must be transactional anyway (§7.14). |
+| AI generation | Not in V1. Manual text and a template illustration library only | Scope decision; the PRD's no-AI fallback path (§7.8) becomes the only path. |
 | Hosting | Free tiers for the build and beta; AWS Mumbai as the paid target | Self-funded project; see §9.1. |
 | IaC / CI | GitHub Actions; database roles, grants and policies as migrations; OpenTofu when on the paid profile | Reproducible environments; no long-lived deploy keys. |
 
@@ -86,9 +85,9 @@ packages/
   core/       domain modules (below); no HTTP, no framework imports
   db/         migrations, Kysely types, role grants, seed catalog (60 originals)
   contracts/  Zod schemas, error codes, event envelope definitions
-  providers/  AI text/image/safety adapters, email, storage; fake implementations for tests
+  providers/  email, storage, text-screening adapter; fake implementations for tests
 infra/        OpenTofu modules and per-environment stacks
-tests/        e2e (Playwright), load (k6), safety-eval prompt set
+tests/        e2e (Playwright), load (k6), moderation-eval text set
 ```
 
 Domain modules in `packages/core`, each exposing commands and queries only:
@@ -104,7 +103,7 @@ Domain modules in `packages/core`, each exposing commands and queries only:
 | `inventory` | warehouses, inventory units, stock movements, exclusive editions | |
 | `progression` | creator entitlement, passport, brand entitlement, collector levels | All evaluators are idempotent recomputations from authoritative records. |
 | `company` | companies/stores, memberships, invitations, draft review workflow | |
-| `studio` | drafts, generation jobs, assets, AI budget | |
+| `studio` | drafts, revisions, template illustration selection | No generation in V1. |
 | `moderation` | screening pipeline, cases, reports, appeals, blocks | |
 | `npc` | NPC actors, simulation runs, sandbox orders | May not import `ledger`, `orders` or `inventory` write APIs — enforced by a lint rule **and** by DB grants. |
 | `partner` | portal read models, rollups, exports | Read-only over other modules. |
@@ -198,50 +197,54 @@ Rollups are disposable and rebuildable for anything order-derived. Funnel metric
 | Queue / schedule | Work | Notes |
 |---|---|---|
 | `outbox-relay` | Fan out committed events to consumers | Triggered on insert + 1-minute sweep |
-| `generation` | Screen input → reserve budget → call text/image provider → validate schema → screen output → store private asset | Bounded concurrency; 120 s timeout; late results cannot overwrite a newer draft revision (§7.8) |
-| `screening` | Text and image safety checks for submissions and profile edits | Scanner outage leaves items pending, never approved (§7.7) |
-| `assets` | Derivatives (AVIF/WebP at 320/640/1024, thumbnails ≤ 100 KB), promotion private → public on approval, removal + CDN invalidation on hide | |
+| `screening` | Text checks for submissions and profile edits | Scanner outage leaves items pending, never approved (§7.7) |
 | `share-cards` | Render product/store/receipt/milestone cards | Player totals only; NPC template watermarked |
 | `npc` | Deterministic rules-based simulation runs | Runs as `npc_worker` |
 | `exports` | Partner CSV, statement downloads, user data export | Formula-injection-safe cells; 24 h expiry; re-authorised at download |
 | `deletion` | Unpublish, revoke sessions, retire balance to SINK, pseudonymise, purge assets, write tombstone | 30-day target |
 | every 5 min | Brand-progression catch-up, ranking refresh, rollup refresh | |
 | every minute | Expire checkout sessions, name reservations, invitations (release seats), resolve stuck `PENDING` attempts | |
-| daily | Ledger reconciliation, inventory/edition invariant audit, retention purge, AI spend reconcile, analytics partition maintenance | Alerts on any mismatch |
+| daily | Ledger reconciliation, inventory/edition invariant audit, retention purge, analytics partition maintenance | Alerts on any mismatch |
 
 ---
 
-## 7. AI, moderation and assets
+## 7. Creation, moderation and assets
 
-### 7.1 Provider adapters
+### 7.1 Creation without AI (V1)
 
-Four interfaces in `packages/providers`: `TextDrafter`, `ImageGenerator`, `TextSafety`, `ImageSafety`. Each job records provider, model, prompt-template and safety-policy versions (§7.8). Fakes with deterministic output back all automated tests; the template-illustration path is a first-class "provider" so the product works with AI paused.
+- A draft is user-written: name, hook, description, category, alt text, price, stock mode. The passport concept (§7.2 J3 of the PRD) can seed the first draft.
+- The image is chosen from a **template illustration library**: original artwork shipped with the application, organised by the six categories, with colour and layout variants. Alt text is pre-written per template and editable.
+- Templates are static, versioned application assets served from the CDN. There are no user uploads and no generated images, so no image can enter the system from outside. This removes image moderation, image storage growth and the pending-image privacy problem from V1.
+- Producing the library (and the 60 seed products' art) is a content task that must be scheduled; it replaces the AI vendor work in the build plan.
+- Not built in V1: generation jobs, provider adapters, real-money budget, generation quotas, the `BUDGET_PAUSED` path, the ₹50-per-listing cost goal (§4.1 of the PRD).
+- Kept as seams for later: `draft.image_source` (only `TEMPLATE` in V1), an `asset` table, and the rule that anything entering a draft goes through screening. Adding generation later means adding a worker task and a provider adapter, not changing the publish path.
 
-Rules the adapters enforce:
-- Input sent to a model is the concept text and category only — never email, IP, balances or profile data (§7.7).
-- Output is parsed against a strict schema and treated as untrusted text; it is escaped on render and never executed or fetched.
-- Price is never taken from model output.
+### 7.2 Text screening — Decision D3
 
-### 7.2 Real-money budget
+With no AI drafting, all risk is in what users type. Screening runs on every listing field, handle, store name, alt text and review note:
 
-A `provider_budget` row per UTC day holds ceiling (₹5,000 default), reserved and actual spend. Enqueue reserves an estimate under a row lock; completion reconciles to actual; at ceiling new jobs return `BUDGET_PAUSED` while reserved jobs finish. Alert at 80%. This table is in real rupees and is kept out of every fictional-money view and dashboard (§7.10).
+1. **Rules pass (always on, no external service):** length and character rules, a maintained blocklist, patterns for links, contact details and payment solicitation, reserved and impersonating handles.
+2. **Classifier pass (optional adapter):** a free moderation endpoint to catch what rules miss. This is a moderation tool, not a creator feature, and only the submitted text is sent. If "no AI in V1" is meant to exclude this too, switch it off and rely on step 3.
+3. **Human review:** anything flagged or uncertain goes to the staff queue. With the classifier off, every first listing from a new store should be reviewed by a person before it goes public.
+
+A scanner outage leaves submissions pending, never approved (§7.7).
 
 ### 7.3 Moderation
 
-One state machine for products (`DRAFT → SCREENING → PUBLISHED / NEEDS_REVIEW / REJECTED`, `PUBLISHED → HIDDEN / ARCHIVED`) with the brand workflow (`OWNER_REVIEW → OWNER_APPROVED → PLATFORM_SCREENING`) in front of it for worker-authored drafts. The same screening service handles handles, store names, descriptions, alt text and review notes. Staff queue, decisions, appeals and reporter-identity restriction live in `/admin`. A "publication paused" kill switch covers lapses in staff coverage.
+One state machine for products (`DRAFT → SCREENING → PUBLISHED / NEEDS_REVIEW / REJECTED`, `PUBLISHED → HIDDEN / ARCHIVED`) with the brand workflow (`OWNER_REVIEW → OWNER_APPROVED → PLATFORM_SCREENING`) in front of it for worker-authored drafts. Staff queue, decisions, appeals and reporter-identity restriction live in the admin surface. A "publication paused" kill switch covers lapses in staff coverage.
 
 ### 7.4 Assets and share cards
 
-- **Private bucket**: drafts, pending images, exports, statement downloads. Reached only through short-lived signed URLs issued after a permission check on every request (covers "removing a worker revokes private downloads immediately").
-- **Public bucket** behind the CDN: approved image derivatives under content-addressed keys.
-- **Hide/remove**: delete the public objects and invalidate the CDN paths; the product page returns the unavailable state.
+- **Private bucket**: exports and statement downloads only (drafts are text in the database). Reached only through short-lived signed URLs issued after a permission check on every request (covers "removing a worker revokes private downloads immediately").
+- **Template illustrations**: static assets with pre-built responsive derivatives, served from the CDN.
+- **Hide/remove**: the product page and its share card return the unavailable state immediately; there is no per-listing image object to purge.
 - **Share cards** are served through an app route that re-checks publication status and returns a short-TTL response, rather than as permanent public objects, so they can be revoked (§7.7 "revalidated on request").
 
 ---
 
 ## 8. Security architecture
 
-Principles: deny by default; enforce on the server and again in the database; least privilege for every process, role and person; no secret or private datum reaches the browser, a log or an AI provider unless it must; every privileged action is attributable and reversible only by an appended correction.
+Principles: deny by default; enforce on the server and again in the database; least privilege for every process, role and person; no secret or private datum reaches the browser, a log or a third party unless it must; every privileged action is attributable and reversible only by an appended correction.
 
 ### 8.1 Threat model
 
@@ -251,10 +254,10 @@ Principles: deny by default; enforce on the server and again in the database; le
 | Broken access control (IDOR) | Changing a company, order, card or export id in a URL; a worker calling finance endpoints | Central policy layer, server-resolved company scope, Postgres row-level security on tenant tables, authorisation matrix in CI (§8.3) |
 | Account takeover | Stolen session, magic-link interception, OAuth account-linking abuse | Short-lived single-use links, session rotation, explicit linking only, re-authentication for sensitive actions, staff MFA (§8.2) |
 | Insider or compromised staff account | Arbitrary reversal, minting compensation, reading private wallets | Separate admin surface, MFA, least-privilege staff roles, two-person approval for minting actions, tamper-evident audit log (§8.5) |
-| Prompt injection and unsafe AI output | Concept text that instructs the model, output carrying markup or links | AI has no tools and no data access; schema validation; output escaped and screened; never auto-published (§7.1) |
+| Unsafe user-written content | Abusive, sexual, impersonating or scam text in listings, handles and store names | Rules pass, optional classifier, human review; nothing public before approval (§7.2) |
 | Injection and XSS | Stored script in a product name, formula injection in CSV | Parameterised SQL only, React escaping, strict CSP, inert CSV cells, no user HTML |
 | SSRF and data exfiltration | Tricking the worker into fetching internal URLs | No user-supplied URL is ever fetched; worker egress restricted to an allowlist of provider hosts |
-| Abuse and automation | Signup farms, scraping, generation spend exhaustion | WAF, bot challenge, per-account and per-company quotas, real-spend budget ceiling |
+| Abuse and automation | Signup farms, scraping, submission flooding | WAF, bot challenge, per-account and per-company quotas |
 | Supply chain | Malicious dependency or build step | Lockfile-only installs, dependency and image scanning, pinned actions, signed images (§8.6) |
 | Data exposure | Leaked backup, public bucket, verbose logs | Encryption at rest and in transit, private-by-default buckets, log redaction, separate accounts per environment |
 | Privacy failure | Deleted user restored from backup, reporter identity leaked to a creator | Deletion tombstones reapplied on restore, restricted reporter fields, pseudonymised ledger references |
@@ -271,7 +274,7 @@ Provisioning (`POST /account/provision`) is one transaction keyed on `auth_subje
 
 ### 8.3 Authorisation
 
-A single policy layer in `core` is called by every command and query — web routes, worker jobs and generation callbacks alike (§7.14). Inputs: actor, verified/suspended state, company tier, membership role, draft assignment, resource owner. Rules of thumb:
+A single policy layer in `core` is called by every command and query — web routes and worker jobs alike (§7.14). Inputs: actor, verified/suspended state, company tier, membership role, draft assignment, resource owner. Rules of thumb:
 
 - Every partner query is scoped by `company_id` resolved from the actor's memberships on the server, never from a URL or filter alone; cache keys and export jobs include it.
 - Workers have no route to orders, finances, analytics or bank data; these are separate endpoints that require the owner role, not hidden UI.
@@ -286,17 +289,17 @@ A single policy layer in `core` is called by every command and query — web rou
 - CSRF tokens plus origin checks on every state-changing request; strict Content-Security-Policy with nonces, no inline script; `frame-ancestors 'none'`; HSTS; restrictive MIME types and `nosniff` on asset responses.
 - All input validated against shared schemas at the edge of the API; all SQL parameterised; error responses use stable codes and never echo internals or card tokens.
 - Card, invitation and magic-link tokens are stored only as hashes and compared in constant time.
-- Bot challenge on signup, generation and reports; WAF managed rules and rate rules by coarse network; per-account limits from §7.5 in Postgres.
+- Bot challenge on signup, publication submission and reports; WAF managed rules and rate rules by coarse network; per-account limits from §7.5 in Postgres.
 
 **Process isolation (least privilege)**
-- Web, worker, NPC worker and migration task each have their own cloud role and database role. Web holds no AI provider keys; the worker holds no session-signing keys; the NPC role cannot touch the ledger; only the migration task can alter schema.
+- Web, worker, NPC worker and migration task each have their own cloud role and database role. Web holds no third-party service keys beyond auth; the worker holds no session-signing keys; the NPC role cannot touch the ledger; only the migration task can alter schema.
 - No process uses a database superuser or object-owner role at runtime.
 
 **Data protection**
 - TLS everywhere, including app-to-database; encryption at rest with managed keys for database, backups and buckets.
 - Data minimisation as specified in §7.7: no real name, address, payment or location data is collected at all, which removes the most damaging breach classes outright.
 - Secrets live only in the secret manager, are distinct per environment and are rotated on a schedule and on any staff departure.
-- Retention jobs enforce the §7.7 schedule; logs and analytics are redacted at source (no email, raw prompt, token or full IP).
+- Retention jobs enforce the §7.7 schedule; logs and analytics are redacted at source (no email, token or full IP).
 
 **Network** (paid profile; see §9.1.2 for what the zero-cost profile substitutes)
 - Database and tasks in private subnets with no public addresses; security groups allow only load balancer → web and web/worker → database.
@@ -312,7 +315,7 @@ Risk signals for linked-account review are limited to session/device identifiers
 - Staff roles are granular (moderator, support, economy, admin). Moderators cannot issue reversals; support cannot change entitlements.
 - Any action that mints currency (compensation) or revokes an entitlement requires a second staff member's approval before it executes.
 - Staff can see provenance and source before acting (§7.12) but have no screen that edits a balance; the only money tool is a compensating journal.
-- `system_switch` rows for purchases, signup grants, generation, NPC and publication (§7.12) are read inside the relevant transactions and toggled from the admin surface.
+- `system_switch` rows for purchases, signup grants, NPC and publication (§7.12) are read inside the relevant transactions and toggled from the admin surface.
 - Every staff action writes an append-only audit row with actor, reason, target and a hash of the previous row, so deletion or alteration of history is detectable. Audit rows are also shipped to a bucket at a separate provider using a write-only credential.
 - Engineers have no standing production database access; break-glass access is time-limited, logged and reviewed.
 
@@ -339,24 +342,22 @@ Free-tier limits below are from memory and change often; confirm each one on the
 | Component | Free service | Notes and limits to design around |
 |---|---|---|
 | Web (UI + API) | Vercel Hobby, functions pinned to Mumbai | Personal, non-commercial use only — acceptable while there is no monetisation (§8.4 of the PRD); moving to a commercial product means the paid plan. |
-| Worker | A second Vercel project (`jobs`) from the same repo, exposing one authenticated job-runner endpoint | No always-on process on a free tier. The runner drains the Postgres queue in short, time-boxed batches (Graphile Worker run-once mode). It is invoked every minute by `pg_cron` + `pg_net` inside the database and immediately after an enqueue. A separate project keeps AI keys and the worker DB role out of the web deployment. |
+| Worker | A second Vercel project (`jobs`) from the same repo, exposing one authenticated job-runner endpoint | No always-on process on a free tier. The runner drains the Postgres queue in short, time-boxed batches (Graphile Worker run-once mode). It is invoked every minute by `pg_cron` + `pg_net` inside the database and immediately after an enqueue. A separate project keeps the worker DB role and service keys out of the web deployment. With no generation in V1, every job is short, which suits this model well. |
 | Database | Supabase Free, Mumbai region | About 500 MB; project pauses after a week without activity (the per-minute cron prevents this); **no backups or point-in-time recovery on the free plan**. |
 | Auth | Supabase Auth: magic link + Google, TOTP MFA for staff | Managed, as the PRD asks (§7.8). Resolves D1 at no cost. |
-| Object storage | Supabase Storage: one private bucket, one public bucket | About 1 GB; enough for a few thousand listings at the image budgets in §7.11 of the PRD. |
+| Object storage | Supabase Storage: one private bucket | Exports and statements only; template art ships with the app, so the 1 GB limit is not a concern in V1. |
 | Backups and audit copies | Cloudflare R2 (free allowance, separate vendor from the database) | Encrypted dumps and audit-log exports, written with a write-only token. |
-| Bot protection | Cloudflare Turnstile | Signup, generation, reports. |
+| Bot protection | Cloudflare Turnstile | Signup, submissions, reports. |
 | Edge / DDoS / basic firewall | Vercel's built-in CDN and firewall rules | No managed WAF rule sets on the free plan. |
 | Email | Resend or Brevo free tier via custom SMTP in Supabase Auth | Supabase's built-in mailer is limited to a few emails per hour. Requires a domain. |
-| AI text drafting | A free-tier LLM API (for example Gemini or Groq free tiers) | Free tiers may use submitted prompts for product improvement; only the concept text and category are ever sent, and the privacy notice must say so. |
-| AI text/image safety | A free moderation endpoint plus an open safety model on a free inference tier | Screening failure or quota exhaustion leaves items pending, never approved. |
-| AI images | Cloudflare Workers AI free daily allocation; template illustrations otherwise | Templates are the default. The PRD already requires them as the zero-generation fallback (§7.8). |
+| Text screening classifier (optional) | A free moderation endpoint | Only submitted text is sent; outage or quota exhaustion leaves items pending, never approved (§7.2). |
 | Errors / uptime | Sentry free plan, a free uptime monitor | |
 | CI/CD | GitHub Actions free minutes; Vercel Git deployments | |
 | Internal dashboards | Pages in the admin surface over the `reporting_ro` role | Replaces a hosted BI tool. |
 
 The only unavoidable spend is a domain name (roughly ₹800–1,000 a year), needed for email sending and a stable origin for cookies. To defer even that, run the first cohort on Google sign-in only with the free `vercel.app` address.
 
-The real-spend AI ceiling (§7.2) is set to ₹0: the budget table then acts purely as a daily quota counter, and no code path can incur a bill.
+V1 calls no paid API, so no code path can incur a bill.
 
 #### 9.1.2 What the zero-cost profile gives up
 
@@ -382,7 +383,7 @@ Everything else in §8 is unchanged and costs nothing: the ledger design, row-le
 |---|---|
 | Real users depend on their data, or the database nears its size limit | Database paid plan (daily backups, no pausing); add point-in-time recovery when the one-hour window is no longer acceptable |
 | Any monetisation, or function limits are hit | Paid web hosting plan |
-| Free AI quotas throttle creators | A small real AI budget with the ceiling from §7.2 |
+| AI-assisted creation is added in a later version | A capped real budget for generation, designed then |
 | Public expansion | Move to the paid target profile below |
 
 #### 9.1.4 Paid target profile (later)
@@ -393,19 +394,19 @@ Everything else in §8 is unchanged and costs nothing: the ledger design, row-le
 |---|---|---|
 | Edge | CloudFront + AWS WAF, ACM certificates, Route 53 | One distribution: app origin + public-assets origin |
 | Web | ECS Fargate service behind an ALB | 2 tasks × 0.5 vCPU / 1 GB, across two AZs |
-| Worker | ECS Fargate service | 1 task × 0.5 vCPU / 1 GB (2 when generation is enabled) |
+| Worker | ECS Fargate service | 1 task × 0.5 vCPU / 1 GB |
 | Migrations | One-off Fargate task run by the deploy pipeline | Uses the `migrator` role |
 | Database | RDS PostgreSQL, Multi-AZ, encrypted, PITR, 30-day backup retention | db.t4g.small–medium, 50 GB gp3 |
-| Storage | S3 private + S3 public (CloudFront origin access only), versioning on, lifecycle rules for exports and raw prompts | |
+| Storage | S3 private + S3 public (CloudFront origin access only), versioning on, lifecycle rules for exports | |
 | Email | SES (magic links only) | |
 | Secrets / config | Secrets Manager, SSM Parameter Store | |
 | Network | VPC, private subnets for tasks and DB, one NAT gateway for provider egress | |
 | Observability | CloudWatch logs/metrics/alarms, Sentry for errors, OpenTelemetry traces | Alarms to an on-call channel |
-| Internal dashboards | Metabase (or Grafana) on the `reporting_ro` role | Economy, funnel, moderation, AI cost |
+| Internal dashboards | Metabase (or Grafana) on the `reporting_ro` role | Economy, funnel, moderation |
 
 This comfortably covers the stated test loads; the first scaling step, if ever needed, is a larger DB instance and more web tasks, with no design change.
 
-Rough running cost of the paid profile: on the order of US$200–300/month for production and about US$100 for staging, before AI spend. AI spend is separately capped at ₹5,000/day by the application. These are estimates to check against current pricing.
+Rough running cost of the paid profile: on the order of US$200–300/month for production and about US$100 for staging. These are estimates to check against current pricing.
 
 A lighter alternative (a container PaaS plus hosted Postgres with PITR) would run the same container images and cost less. The application has no AWS-specific code outside `packages/providers`, so this is reversible.
 
@@ -413,7 +414,7 @@ A lighter alternative (a container PaaS plus hosted Postgres with PITR) would ru
 
 | Env | Where | Data | Purpose |
 |---|---|---|---|
-| Local | Docker Compose: Postgres, S3-compatible store, mail catcher, fake AI providers | Seed catalog + fixtures | Development and CI integration tests |
+| Local | Docker Compose: Postgres, S3-compatible store, mail catcher, fake screening adapter | Seed catalog + fixtures | Development and CI integration tests |
 | Staging | Second free database project + preview deployments (zero-cost profile); separate non-production AWS account (paid profile) | Synthetic only; never a copy of production PII | Release candidate, load tests, restore drills, staff QA of inventory (§7.16) |
 | Production | Production database project + production deployments; production AWS account later | Real beta data | |
 
@@ -443,11 +444,10 @@ Migrations follow expand/contract so the previous image keeps working during and
 | Checkout technical success rate | < 99.5% over the window |
 | Purchase p95 / catalog p95 | > 800 ms / > 500 ms |
 | Outbox lag, job queue depth, stuck `PENDING` attempts | Thresholds |
-| AI spend | 80% and 100% of the daily ceiling |
 | Moderation queue age | Beyond staffed targets → consider pausing publication |
 | Unlabelled NPC rows / any NPC write outside `sandbox` | Should be impossible; alert on permission-denied errors from `npc_worker` |
 
-Logs are structured and carry no email, raw prompt, token or full IP (§7.10).
+Logs are structured and carry no email, token or full IP (§7.10).
 
 ### 9.6 Analytics pipeline
 
@@ -464,7 +464,7 @@ The beta design is sized for hundreds of users, but nothing in it has to be rewr
 | 3. Connection pooling | Connection count nears the database limit | Managed pooler in transaction mode | All transactions are short and never span requests |
 | 4. Read replica | Partner portal, analytics and search load compete with checkout | Route portal/reporting/search queries to a replica | Queries and commands are already separate functions; wallet, entitlement and buy-eligibility reads stay on the primary (§7.8) |
 | 5. Partition large tables | Postings, orders, outbox or events pass tens of millions of rows | Time-based partitioning; archive old partitions | Append-only tables with time-ordered keys |
-| 6. Dedicated rate-limit store and queue | Quota counters or job volume become a visible share of database load | Redis for counters; a managed queue for generation and assets | Limits and queue sit behind interfaces; the outbox stays in Postgres as the source of truth |
+| 6. Dedicated rate-limit store and queue | Quota counters or job volume become a visible share of database load | Redis for counters; a managed queue for background jobs | Limits and queue sit behind interfaces; the outbox stays in Postgres as the source of truth |
 | 7. Hot-row relief | One popular seller or one exclusive drop serialises checkouts | Seller credits accumulated through an append-only pending-credit table settled in batches; per-product purchase queue for drops | Seller proceeds already go through one ledger function; system accounts (MINT, SINK) carry no cached balance row, so they are never a lock hotspot |
 | 8. Search and analytics services | Catalog passes roughly 100k listings; reporting needs outgrow Postgres | Dedicated search index fed from the outbox; event stream to a warehouse | Outbox events are versioned and already carry what both need |
 | 9. Vertical then functional database split | Primary is saturated after steps 2–7 | Larger instance first; then move analytics and sandbox schemas to their own databases | Schemas have no cross-schema foreign keys into `ledger` except from `core` |
@@ -483,9 +483,9 @@ Load tests in staging should be rerun at 10× the PRD targets before public expa
 | Integration (real Postgres) | Vitest + Testcontainers, tests that launch truly concurrent transactions | Simultaneous sign-in callbacks, competing purchases on insufficient funds, last-unit race, freeze vs pay, price edit vs buy, hide vs buy, final worker seat, final warehouse, reversal after seller spent funds, outbox replay |
 | Isolation | Tests that add and delete NPC data and assert wallets, rankings, qualified counts and north-star metrics are byte-identical | US-10 across every surface in §7.6 |
 | Authorisation matrix | Generated from the route table | US-23, US-32 |
-| End to end | Playwright + axe; manual keyboard/screen-reader passes | Journeys J1–J7, no-AI fallback, deletion and share-card purge |
+| End to end | Playwright + axe; manual keyboard/screen-reader passes | Journeys J1–J7 (J4 with manual text and templates), deletion and share-card purge |
 | Load | k6 against staging | 20 checkouts/s, 100 browsing sessions |
-| Safety evaluation | Versioned set of ≥ 100 safe/unsafe prompts run through the real pipeline | Gate before enabling generation (§7.12) |
+| Moderation evaluation | Versioned set of ≥ 100 safe/unsafe listing texts, handles and store names run through the screening pipeline | Gate before the first invite (adapts §7.12 to user-written content) |
 
 Concurrency tests are the highest-value tests in the project and are written alongside the ledger in weeks 2–4, not after.
 
@@ -499,12 +499,12 @@ Mapped to the PRD roadmap (§8.1); infrastructure items in bold.
 |---|---|---|
 | 1 | Prototype; confirm decisions D1–D6; threat-model review | **Repo scaffold, CI, local Compose stack, cloud accounts, IaC skeleton** |
 | 2–4 | Identity, provisioning, ledger, bank/card, DeluluPay, seed catalog, purchase, collection, receipts | **Staging environment, DB roles/grants, migrations pipeline, reconciliation job + alert, kill switches, Sentry/logging** |
-| 5–6 | Unlock paths, company registration + sponsorship, studio, generation, moderation, reports/appeals | **Worker service, private/public buckets + CDN, provider adapters and budget, safety-eval harness, WAF + bot challenge** |
+| 5–6 | Unlock paths, company registration + sponsorship, manual studio, template library, moderation, reports/appeals | **Job runner, private bucket, screening adapter, moderation-eval harness, firewall rules + bot challenge** |
 | 7–10 | Partner Portal, rollups, exports, share cards, `/admin` | **Analytics intake and partitions, internal dashboards, production environment, backup + first restore drill** |
 | 11–12 | Solo-company smoke beta (50 users) | **On-call alerts tuned, runbooks, load test** |
 | 13–14 | Brand tier, invitations, worker workflow | Authorisation matrix extended to worker roles |
 | 15–16 | Warehouses, stock, exclusives, collector levels | **Inventory audit job and alerts** |
-| 17–18 | Observation and expansion decision | Restore-and-reconcile drill, security review, AI unit-cost review |
+| 17–18 | Observation and expansion decision | Restore-and-reconcile drill, security review |
 
 One sequencing change from the PRD worth considering: the `inventory_unit` lock and `inventory_mode` column should exist in the purchase transaction from week 2 (with every product initially `UNLIMITED_SEED`), so that weeks 15–16 add behaviour rather than rewriting the most safety-critical code path after two beta cohorts have used it.
 
@@ -530,7 +530,7 @@ These do not block starting, but each needs an answer before the phase that depe
 |---|---|---|---|
 | D1 | Auth provider | Managed auth bundled with the free database, subject to the controls in §8.2 | Engineering, privacy |
 | D2 | Canonical lock order (§5.3) | As listed | Engineering lead |
-| D3 | AI vendors: text, image, text safety, image safety | Choose on measured cost per approved listing (target ≤ ₹50) and safety-eval results; image cost will dominate | Engineering, safety |
+| D3 | Text screening in V1: rules + human review only, or also a free moderation classifier | Include the classifier behind a switch; it is not a creator-facing AI feature and cuts the daily review load | Product, safety |
 | D4 | Hosting | Zero-cost profile for build and beta (§9.1.1), accepting the reductions in §9.1.2; AWS Mumbai when moving to paid | Engineering |
 | D7 | Recovery objective on the zero-cost profile | Accept up to one hour of data loss for the invite beta | Engineering lead |
 | D5 | Risk-signal collection and retention | Hashed truncated network prefix + session/device id, 30 days | Privacy / legal |
