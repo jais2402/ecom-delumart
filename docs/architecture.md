@@ -504,7 +504,7 @@ The beta design is sized for hundreds of users, but nothing in it has to be rewr
 | 4. Read replica | Partner portal, analytics and search load compete with checkout | Route portal/reporting/search queries to a replica | Queries and commands are already separate functions; wallet, entitlement and buy-eligibility reads stay on the primary (§7.8) |
 | 5. Partition large tables | Postings, orders, outbox or events pass tens of millions of rows | Time-based partitioning; archive old partitions | Append-only tables with time-ordered keys |
 | 6. Dedicated rate-limit store and queue | Quota counters or job volume become a visible share of database load | Redis for counters; a managed queue for background jobs | Limits and queue sit behind interfaces; the outbox stays in Postgres as the source of truth |
-| 7. Hot-row relief | One popular seller or one exclusive drop serialises checkouts | Seller credits accumulated through an append-only pending-credit table settled in batches; per-product purchase queue for drops | Seller proceeds already go through one ledger function; system accounts (MINT, SINK) carry no cached balance row, so they are never a lock hotspot |
+| 7. Hot-row relief (basic admission control is already in V1, §14.2) | One popular seller or one exclusive drop serialises checkouts | Seller credits accumulated through an append-only pending-credit table settled in batches; per-product purchase queue for drops | Seller proceeds already go through one ledger function; system accounts (MINT, SINK) carry no cached balance row, so they are never a lock hotspot |
 | 8. Search and analytics services | Catalog passes roughly 100k listings; reporting needs outgrow Postgres | Dedicated search index fed from the outbox; event stream to a warehouse | Outbox events are versioned and already carry what both need |
 | 9. Vertical then functional database split | Primary is saturated after steps 2–7 | Larger instance first; then move analytics and sandbox schemas to their own databases | Schemas have no cross-schema foreign keys into `ledger` except from `core` |
 
@@ -574,3 +574,63 @@ These do not block starting, but each needs an answer before the phase that depe
 | D7 | Recovery objective on the zero-cost profile | Accept up to one hour of data loss for the invite beta | Engineering lead |
 | D5 | Risk-signal collection and retention | Hashed truncated network prefix + session/device id, 30 days | Privacy / legal |
 | D6 | Introduce inventory columns in the week-2 purchase transaction | Yes | Engineering, product |
+
+---
+
+## 14. Lessons from large commerce platforms
+
+Researched November 2026 from public engineering write-ups. The primary pages (shopify.engineering, stripe.com, web.dev) could not be opened from the build environment, so the facts below rest on search summaries of those pages and on secondary coverage; figures are as reported there and were not independently checked. Sources are listed at the end.
+
+### 14.1 What they do, and what it means for us
+
+| Platform practice | What is reported | Status in this plan | Action |
+|---|---|---|---|
+| **Modular monolith with enforced boundaries** (Shopify) | One codebase and one deployable, split into components by commerce domain, with a static-analysis tool that fails the build on boundary violations. Boundaries are reported to erode without tooling. | Already the design (§4), including the boundary lint. | None. Strong confirmation that microservices are not what makes commerce platforms scale. |
+| **Read path and write path treated as different systems** (Shopify) | Storefront is read-heavy and cacheable; checkout is write-heavy and protected separately. | Already the design: cached public pages (§5.8) vs. the pay transaction (§5.4). | Keep them independently switchable; never let browse traffic consume checkout capacity (see 14.2 item 1). |
+| **Tenant isolation as the unit of scale** (Shopify "pods") | Shops are grouped into isolated units, each with its own datastores, so one hot shop or failure cannot take down the rest; adopted when a single database could no longer be bought bigger. | Not needed at this size. | Recorded as the far end of the scaling path. Note the difference: our ledger moves money *between* users, so it cannot be split per company the way independent shops can. This is why §9.7 keeps the ledger whole and relieves hot rows instead. |
+| **Per-shop checkout queue for flash sales** (Shopify) | When one shop exceeds its checkout concurrency, buyers for that shop are queued, protecting checkout for everyone else. | Gap. An exclusive-edition drop is our flash sale; §9.7 deferred this to "later". | **Add in V1**, in simple form (14.2 item 1). |
+| **Fast before cached** (Shopify storefront renderer) | The rewrite's stated order was simplify, batch, then cache: fetch everything a page needs in one database round trip, and add caching only to something already fast. | Partly. §5.8 covers caching; nothing limits queries per page. | **Add** a query budget (14.2 item 2). |
+| **Idempotency keys with disciplined client retries** (Stripe) | Client-generated key on every mutating request; clients retry with exponential backoff and random jitter so retries do not arrive in waves. | Keys are in the design (§5.2, §5.4). Client retry behaviour was unspecified. | **Add** the client retry policy (14.2 item 3). |
+| **Rehearse failure on the critical journeys** (Shopify peak-season preparation) | Year-round load tests above expected peak, and "game days" that deliberately break dependencies on checkout, payment and order creation, with findings tracked in one resiliency matrix. | Partly. Load tests and a restore drill exist (§10, §9.4); no failure rehearsal or matrix. | **Add** a small resiliency matrix and one game day per cohort (14.2 item 4). |
+| **Static stability and small blast radius** (Amazon) | A dependency failing should not take the workload down; keep running on the last known good state. Isolate so that one bad tenant or component affects a fraction of users. | Partly. Browse-only mode and kill switches exist. | Covered by the same matrix (14.2 item 4). |
+| **Largest-image priority beats image weight** (Nuvemshop, a large Latin American store platform) | Their biggest loading-speed gain came from telling the browser which image matters most, not from shrinking files; reported LCP pass rate went from 57% to 96%. | Gap. §5.8 covers caching and layout stability only. | **Add** image-priority rules (14.2 item 5). |
+| **One consistent writer for stock** (reported for Flipkart; weakly sourced) | Inventory decrements go through a single consistent path to prevent overselling, while reads are spread across replicas. | Already the design: stock is issued only inside the pay transaction (§5.3). | None. |
+
+### 14.2 Changes adopted into this plan
+
+1. **Admission control on the pay path.** Every pay transaction runs with a short lock timeout (about 2 s) and a statement timeout, so a queue behind one hot product or seller cannot hold database connections and starve other checkouts. A request that times out waiting returns a retryable "busy" result with no debit, and the browser retries with the same idempotency key. Each product also has a cap on concurrent pay attempts; beyond it, buyers see an honest "high demand, holding your place" state. On a free database tier with a small connection limit, this is the single most important protection for checkout.
+2. **Query budget.** Each public page is rendered from at most a handful of database round trips, with related data fetched together; a test fails when a page exceeds its budget or issues one query per list item. Caching is applied only after a page meets its latency target uncached.
+3. **Client retry policy.** For any mutating call, the browser generates the idempotency key once per user intent, retries network failures and "busy" results up to a fixed number of times with exponential backoff and jitter, and never generates a new key for a retry. Idempotency records are kept for at least 24 hours.
+4. **Resiliency matrix and game days.** Before each cohort, deliberately trigger each row and confirm the behaviour:
+
+   | Failure | Expected behaviour |
+   |---|---|
+   | Database unreachable | Cached public pages keep serving; purchases, grants and sign-up show a maintenance notice; no partial writes |
+   | Connection dropped mid-purchase | Client shows "checking payment status" and recovers the committed order or a clean decline by idempotency key |
+   | Job runner stopped | Purchases still complete; notifications, rollups and progression catch up from the outbox when it returns, with data-freshness shown in the portal |
+   | Cache purge call fails | Safety-net expiry removes the page within a minute; retry job repeats the purge; alert raised |
+   | Auth provider down | Signed-in sessions keep working; new sign-ins show a clear notice |
+   | Screening classifier down or over quota | Submissions stay pending; nothing is auto-approved |
+   | Email provider down | Google sign-in still works; magic-link requests show a retry message |
+   | Kill-switch table unreadable | Money-moving commands refuse to run (fail closed) |
+
+5. **Image-priority rules.** On every page the one largest above-the-fold image (the product image on a product page, the first card image on a shelf) is loaded eagerly with high fetch priority and explicit dimensions; every other image is lazy-loaded. The largest image is never lazy-loaded. Fonts are preloaded and self-hosted.
+
+### 14.3 What not to copy
+
+These platforms run microservice fleets, sharded databases, multi-region failover and event-streaming backbones because of traffic and team sizes thousands of times larger than this beta. Adopting those now would add cost, attack surface and failure modes with no benefit. The reusable lessons are the principles: enforce boundaries, separate reads from writes, make every write retry-safe, protect checkout from its own demand, measure before caching, and rehearse failure.
+
+### 14.4 Sources
+
+- Shopify Engineering, "A Pods Architecture to Allow Shopify to Scale": https://shopify.engineering/a-pods-architecture-to-allow-shopify-to-scale
+- Shopify Engineering, "Simplify, Batch, and Cache: How We Optimized Server-side Storefront Rendering": https://shopify.engineering/simplify-batch-cache-optimized-server-side-storefront-rendering
+- Shopify Engineering, "Deconstructing the Monolith": https://shopify.engineering/deconstructing-monolith-designing-software-maximizes-developer-productivity
+- Shopify Engineering, "Enforcing Modularity in Rails Apps with Packwerk": https://shopify.engineering/enforcing-modularity-rails-apps-packwerk
+- Shopify Engineering, BFCM readiness 2025: https://shopify.engineering/bfcm-readiness-2025
+- InfoQ, Shopify flash-sale architecture talk (QCon London 2022): https://www.infoq.com/presentations/shopify-architecture-flash-sale
+- ByteByteGo, "How Shopify Prepares for Black Friday": https://blog.bytebytego.com/p/how-shopify-prepares-for-black-friday
+- Stripe, "Designing robust and predictable APIs with idempotency": https://stripe.com/blog/idempotency
+- Amazon Builders' Library, "Workload isolation using shuffle sharding": https://aws.amazon.com/builders-library/workload-isolation-using-shuffle-sharding
+- AWS Well-Architected, bulkhead architectures: https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_fault_isolation_use_bulkhead.html
+- web.dev, Nuvemshop case study: https://web.dev/case-studies/nuvemshop
+- PingCAP, Flipkart case study (vendor): https://www.pingcap.com/case-study/flipkart-transforming-database-management-and-reducing-complexity-with-tidb/
