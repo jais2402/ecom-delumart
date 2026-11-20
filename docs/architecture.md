@@ -1,6 +1,6 @@
 # DeluluMart — Architecture and Infrastructure Plan
 
-Source: DeluluMart PRD v1.4 (19 Oct 2026, build baseline) plus Revision 1.5 (`docs/prd-v1.5-revision.md`), which adds cart, payment methods, simulated delivery, coupons, the Commerce Console and portal additions. Section references (§) point at the PRD; "R" references point at Revision 1.5. The architecture for the 1.5 modules is in §15, and the approach to building with AI coding agents is in §16. Research and experimentation (R15) is in §17.
+Source: DeluluMart PRD v1.4 (19 Oct 2026, build baseline) plus Revision 1.5 (`docs/prd-v1.5-revision.md`), which adds cart, payment methods, simulated delivery, coupons, the Commerce Console and portal additions. Section references (§) point at the PRD; "R" references point at Revision 1.5. The architecture for the 1.5 modules is in §15, and the approach to building with AI coding agents is in §16. Research and experimentation (R15) is in §17. The Super Admin module and analytics engine (R16) are in §18.
 Scope change from the PRD: **V1 ships without AI-assisted creation ("Build with AI").** Creators write their own listing text and choose a template illustration. The PRD lists AI text/image as P0 (§7.1), so this needs a PRD revision; this plan already reflects it (§7).
 Status: proposal for kickoff. Items marked **Decision** need an owner's sign-off (collected in §13).
 
@@ -918,3 +918,55 @@ Research use changes one assumption in §9.1.1: the free web-hosting plan is for
 ### 17.5 Verification additions
 
 Tests that: assignment is stable across sessions and devices and matches the configured weights within tolerance; exposure is recorded once; an order keeps its variant terms after the experiment stops; the research build contains no removed field (schema assertion) and no opted-out or deleted account; `research_ro` is denied on every non-research table; ledger reconciliation and the authorisation matrix pass with experiments active.
+
+---
+
+## 18. Super Admin module and analytics engine
+
+Revision 1.5 (R16) adds an owner role with its own workspace and formalises the analytics behind every dashboard. Both extend existing parts: the Console (§15.7), the event pipeline and rollups (§9.6), and the audit and approval mechanisms (§8.5).
+
+### 18.1 Placement
+
+- Route group `/console/super` on the admin hostname; module `superadmin` in `packages/core` for owner-only commands; the `analytics` module grows into the engine described below.
+- `SUPER_ADMIN` is a staff role that implies all area permissions plus an `owner` permission set. Area roles keep access to the dashboards relevant to them (a moderator sees Trust and safety), filtered by permission on the server.
+
+### 18.2 Analytics engine
+
+```
+committed orders, ledger, shipments ─┐
+outbox events (server-authoritative) ├─▶ rollup jobs ─▶ metric_hourly / metric_daily ─▶ query API ─▶ dashboards, exports, alerts, experiment reports
+client events (deduplicated)        ─┘                         ▲
+                                              metric catalogue (typed, versioned)
+```
+
+- **Metric catalogue in code.** Each metric is a typed definition: id, description, aggregation, source tables, allowed dimensions, default source filter (PLAYER), exclusions (reversed, fraud-excluded, staff), privacy rule, version. The catalogue is the only place a metric's logic lives; dashboards, CSV exports, alerts and experiment analysis all call it. Adding a metric is a reviewed code change with a test.
+- **Authoritative sources.** Money and order metrics are computed from orders and ledger postings, never from browser events (§7.15). Funnel and engagement metrics come from deduplicated events.
+- **Aggregate tables.** `metric_hourly` for the current and previous day, `metric_daily` beyond that, keyed by metric, period, dimension values, definition version, with `computed_at`. Rollup jobs are idempotent: a bucket is recomputed and replaced, never appended, so replays cannot double count. Late events, reversals and exclusion changes mark affected buckets dirty for recomputation.
+- **Query API.** `POST /console/analytics/query` accepts metric ids, dimensions, filters, period and comparison period, all validated against the catalogue's allow-lists. There is no SQL input and no arbitrary column access, which closes injection and accidental personal-data exposure. Responses carry `as_of` and coverage notes. The minimum-count suppression is applied here, on the server.
+- **Performance.** Dashboards read only aggregate tables; target under 800 ms for any dashboard query (§7.15 budget). Responses are cached per query and `as_of`, privately, for staff only.
+- **Near-live strip.** A handful of counters read directly from indexed operational tables for the last 15 minutes, polled every 30 seconds. No streaming infrastructure.
+- **Alerts.** A scheduled job evaluates alert rules against the latest aggregates and operational checks (reconciliation, job delay, free-tier usage), records state transitions so an alert fires once per breach, and sends email. Alert rules are configuration, audit-logged.
+- **Charts.** One small set of accessible chart components with an equivalent data table and text summary each, colour never the only signal (§7.15).
+- **Growth path.** On the free database the engine keeps raw events for 90 days and relies on aggregates. When event volume outgrows Postgres (tens of millions of rows), the rollup jobs and query API move to a column-oriented store fed from the outbox; the catalogue and dashboards do not change. For offline research, archived de-identified event files (§17.2) can be analysed with a local analytical engine at no hosting cost.
+
+### 18.3 Owner-only commands and safeguards
+
+- Staff management, role grants, forced sign-out, flags, kill switches, approvals, export approvals and alert rules are `superadmin` commands, each re-checking the `owner` permission and writing an audit entry.
+- **Approval or delay.** Sensitive commands create a `pending_action` row (payload hash, requester, required approvals, `not_before`). With two or more Super Admins it executes when a different Super Admin approves. With one, it executes after a 24-hour `not_before`, unless cancelled; creation sends an email to every Super Admin address. A scheduled job executes due actions idempotently. This replaces the two-person assumption flagged as the top residual risk in §8.8 with something a solo builder can actually operate.
+- **Invariants no role can break** are enforced below the application: no update or delete grant on ledger and audit tables (§5.1), no code path that writes a wallet outside the ledger module, PIN verification only in the web process with no read-back (§15.4), field-encrypted data readable only through the audited view command.
+- **Session rules.** Passkey sign-in, short idle timeout, step-up re-authentication for owner-only commands, sign-in alerts, and a database constraint that prevents removing the last Super Admin.
+- **Recovery.** A break-glass procedure for a lost passkey that requires direct database access with the migration role, is logged, and is rehearsed in staging.
+
+### 18.4 Security and privacy additions
+
+| Threat | Control |
+|---|---|
+| Super Admin account takeover | Passkey, separate hostname and identity, sign-in alerts, step-up re-authentication, approval-or-delay on irreversible actions |
+| Dashboards leaking personal data | Aggregates only, server-side suppression, catalogue allow-lists, audited drill-down through a separate permission |
+| Misleading figures driving decisions | One catalogue definition per metric, ledger-sourced money metrics, as-of and coverage labels, reconciliation test between dashboards and ledger |
+| Analytics load affecting checkout | Dashboards read aggregates; rollups run in the job runner with statement timeouts; analytics failure never blocks purchases |
+| Query interface abused to extract data | No free-form queries; validated metric and dimension ids only; staff-only, rate-limited, logged |
+
+### 18.5 Verification additions
+
+Tests that: each catalogue metric equals an independent calculation on a fixture dataset; rollup replay and late events do not change totals incorrectly; economy and sales dashboards reconcile to the ledger; suppression hides small groups in API responses; non-owner roles are refused on every `superadmin` command; a pending action executes exactly once, respects cancellation and `not_before`, and requires a different approver when one exists; the last Super Admin cannot be removed.

@@ -472,6 +472,9 @@ The console's moderation queue and kill switches are needed from phase 1; the re
 | Research purpose | Covered by the privacy notice and terms accepted at sign-up; no separate consent prompt; opt-out available in privacy settings | User requirement (research use, no separate consent step); legal basis to be confirmed; privacy/legal |
 | Experiment limits | Allowed and never-allowed lists in R15.3 | Proposed; product/safety |
 | Research dataset | De-identified, separate role, retained beyond 90 days | Proposed; privacy/analytics |
+| Super Admin | Owner role above Console roles; command-centre dashboards; staff, security, data and cost controls | User requirement; scope proposed; product/engineering |
+| Analytics engine | Metric catalogue, pre-computed aggregates, single query interface, alerts | User requirement; design proposed; analytics/engineering |
+| Single-owner safeguard | 24-hour delayed, cancellable execution in place of a second approver | Proposed; security |
 | Usage-by-place analytics | Approximate connection-derived country/region/city; aggregates only; minimum 10 accounts per named place; staff only | User requirement; method and privacy rules proposed; analytics/privacy |
 | Phone number | Required, with country code, verified by SMS code; one account per phone and per email | User requirement; verification and reassignment rules proposed; engineering/privacy |
 | SMS provider | Needed for phone verification; small real cost per sign-up and, for Indian numbers, sender registration | Open; engineering. Until chosen, numbers are unverified claims |
@@ -555,6 +558,87 @@ Players are not asked a separate question about taking part in research. Researc
 - **US-53 · Integrity under experiment:** with any combination of active experiments, ledger reconciliation, NPC separation, and the authorisation matrix pass unchanged. A guardrail breach stops the experiment without a deploy.
 - **US-54 · De-identification:** the research dataset contains none of the removed fields; research ids differ from production ids and cannot be joined to them with researcher access; a region with fewer than 10 accounts is not named.
 - **US-55 · Separation of duties:** a researcher cannot open any account, order, address or console action; a support agent cannot export a research dataset.
+
+---
+
+## R16. Super Admin module
+
+### R16.1 What existed before this section
+
+Partly planned. The event pipeline, daily rollups and metric definitions were specified (§7.10, §7.15), the Console had a Home page and an Analytics area (R7), and usage by place and experiments were added (R7.1, R15). What was missing: a top-level owner role, one place that brings every dashboard together, a defined analytics engine behind those dashboards, and the controls only the platform owner should hold. This section adds them.
+
+### R16.2 Role
+
+The Super Admin is the platform owner: the highest staff role, above the area roles in R7. There should be at least two Super Admin accounts when a second trusted person exists; one is acceptable for a solo builder under the safeguards in R16.6.
+
+A Super Admin can do everything any Console role can, plus the owner-only functions in R16.3. A Super Admin still **cannot**: edit a balance, read or set a card PIN, see a decrypted birthdate or address without the audited view, alter or delete the audit log, or bypass ledger rules. Those limits apply to every human and are enforced by the system, not by policy.
+
+### R16.3 Owner-only functions
+
+| Area | Functions |
+|---|---|
+| Command centre | The main dashboard (R16.4): health of the product, economy, platform and security on one page |
+| Staff and access | Invite and remove staff, assign roles, force sign-out, review who has which permission, see last activity per staff member |
+| Platform controls | Kill switches, maintenance and browse-only mode, feature flags, announcement banner |
+| Configuration approvals | Approve or reject economy-affecting changes and platform coupon budgets raised by other roles |
+| Experiments and research | Approve experiments, stop any experiment, approve research dataset exports (R15) |
+| Security centre | Audit log search, sign-in history for staff, failed-PIN and rate-limit activity, suspicious-account queue, active staff sessions, secret-rotation and backup status |
+| Data operations | Backup and restore-drill status, reconciliation history, deletion queue, data-retention job status |
+| Usage and cost | Consumption against each free-tier limit (database size, storage, email, SMS spend), with warnings before a limit is reached |
+
+### R16.4 Dashboards
+
+One home dashboard plus focused dashboards. Every chart states its period, time zone, data freshness and source, and has an equivalent table (§7.15 design rules). Fictional rupees and real rupees (SMS and other real costs) are never shown in the same chart.
+
+| Dashboard | Key measures |
+|---|---|
+| Home (command centre) | North-star metric (weekly creators with at least one qualified human buyer, §4.1); active players today / 7 days / 30 days; sign-ups; orders; checkout success rate; ledger reconciliation status; open alerts; a "last 15 minutes" strip |
+| Growth and retention | Visitors, sign-up funnel step by step (email, phone, birthdate, first purchase), activation, day-1/7/30 retention by weekly cohort, returning players |
+| Shopping | Orders, fictional sales value, average order value, cart-to-order conversion, cart abandonment by step, search with no results, top products and categories |
+| Payments | Success rate by method, decline reasons, time to pay, PIN and code failures, lockouts |
+| Delivery and membership | Speed mix, Zap eligibility and take-up, delivery fees collected, Delulu Plus members and renewals |
+| Promotions | Coupon redemptions, discount given, platform-coupon spend against budget, sale-price usage |
+| Merchants and creators | Unlock rate by path, companies registered, first-listing time, creators with and without a human buyer, brand unlocks, warehouse use, top stores |
+| Economy | Total supply, mint by source and sink by source, mint/sink ratio, balance distribution, share held by the top 1%, price distribution, inactive balances |
+| Places | Usage by country, region and city (R7.1) |
+| Experiments | Running experiments, exposure, results, guardrail status (R15) |
+| Trust and safety | Moderation queue and age, reports, appeals and outcomes, publishing rejections, linked-account flags |
+| Security | Staff sign-ins, privileged actions, failed PIN and code attempts, rate-limit hits, blocked requests, sessions revoked |
+| Platform health | Page and API speed against targets (§7.11), error rate, background-job delay, cache effectiveness, availability, free-tier usage |
+| NPC sandbox | Simulation runs and outcomes, always separate and labelled (§7.6) |
+
+### R16.5 Analytics engine
+
+The dashboards are served by one engine rather than by hand-written queries per chart.
+
+- **Metric catalogue.** Every metric has one definition: name, plain-language meaning, how it is calculated, which breakdowns it allows (time, place, category, method, source, cohort, experiment variant), which sources it includes (PLAYER by default; NPC and STAFF only when explicitly chosen), and a version. A number on any dashboard, export or experiment report traces back to one catalogue entry (§7.15).
+- **Pre-computed aggregates.** Metrics are calculated ahead of time per hour and per day, so dashboards load quickly and never read individual player records.
+- **One query interface.** A dashboard asks for metric, breakdowns, filters, period and comparison period. Only catalogue metrics and allowed breakdowns can be requested; there is no free-form query box.
+- **Honest numbers.** Late events, reversals and fraud exclusions restate history, and the dashboard shows "as of" time (§7.15). Missing data is "unavailable", never zero. Comparisons with no baseline say so.
+- **Privacy built in.** Dashboards show aggregates only; small groups are suppressed under the minimum-count rule (R7.1). Opening an individual account from a dashboard goes through the Customers permission and is audit-logged.
+- **Saved views and exports.** A Super Admin can save a filtered view, schedule nothing in this release, and export any chart's table as CSV under the export rules of §7.15.
+- **Alerts.** A threshold can be set on any catalogue metric (for example checkout success below 99.5%, mint/sink ratio above a limit, SMS spend above the daily ceiling, moderation queue age). Alerts appear in the command centre and are sent by email.
+- **Near-live strip.** A small set of counters (sign-ups, orders, payment failures, errors) refreshes about every 30 seconds; everything else is hourly or daily.
+
+Deferred: custom chart builder, scheduled email reports, forecasting, per-merchant benchmarking.
+
+### R16.6 Safeguards for the most powerful account
+
+- Separate identity from any player account, on the admin site, with a passkey; no email-link-only sign-in.
+- Every Super Admin sign-in and every owner-only action is audit-logged and triggers an email alert to all Super Admins.
+- **Two-person rule, or a delay when there is only one person.** Actions that mint currency, change economy rules, export research data or grant the Super Admin role need a second Super Admin's approval. Where only one Super Admin exists, the action is instead queued for 24 hours, announced by email, cancellable during that time, and then applied. A stolen session therefore cannot cause immediate irreversible damage.
+- Short sessions and re-sign-in before any owner-only action.
+- The last Super Admin cannot be removed or demoted.
+- An offline recovery procedure for a lost passkey, documented and tested before launch.
+
+### R16.7 Acceptance criteria
+
+- **US-56 · Role limits:** a Super Admin can reach every Console area; no other role can reach owner-only functions by any route. A Super Admin has no way to edit a balance, read a PIN, or change or delete an audit entry.
+- **US-57 · One definition per number:** the same metric, period and filters show the same value on the home dashboard, its focused dashboard and its CSV export. NPC and staff activity are excluded unless explicitly selected. A request for a metric or breakdown not in the catalogue is refused.
+- **US-58 · Reconciled dashboards:** fictional sales, fees and mint/sink totals on the Economy and Shopping dashboards equal the ledger for the same period and as-of time.
+- **US-59 · Dashboard privacy:** no dashboard, tooltip or export shows an individual player's data; a group below the minimum count is suppressed; opening an account from a dashboard is audit-logged.
+- **US-60 · Owner safeguards:** with one Super Admin, a minting action is queued, emailed, cancellable for 24 hours and then applied once; with two, it needs the second person. Every Super Admin sign-in sends an alert. The last Super Admin cannot be removed.
+- **US-61 · Alerts and freshness:** an alert fires once when its threshold is crossed and clears when it recovers; every chart shows its as-of time; delayed analytics never block checkout (§7.15).
 
 ---
 
