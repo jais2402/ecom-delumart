@@ -1,6 +1,6 @@
 # DeluluMart — Architecture and Infrastructure Plan
 
-Source: DeluluMart PRD v1.4 (19 Oct 2026, build baseline). Section references (§) point at the PRD.
+Source: DeluluMart PRD v1.4 (19 Oct 2026, build baseline) plus Revision 1.5 (`docs/prd-v1.5-revision.md`), which adds cart, payment methods, simulated delivery, coupons, the Commerce Console and portal additions. Section references (§) point at the PRD; "R" references point at Revision 1.5. The architecture for the 1.5 modules is in §15, and the approach to building with AI coding agents is in §16.
 Scope change from the PRD: **V1 ships without AI-assisted creation ("Build with AI").** Creators write their own listing text and choose a template illustration. The PRD lists AI text/image as P0 (§7.1), so this needs a PRD revision; this plan already reflects it (§7).
 Status: proposal for kickoff. Items marked **Decision** need an owner's sign-off (collected in §13).
 
@@ -59,12 +59,12 @@ flowchart LR
 | Web framework | Next.js (App Router), server-rendered public pages, REST route handlers under `/api` | Public catalog/product/store pages need SSR for share previews and the LCP ≤ 2.5 s target. The API follows the PRD's REST contract (§7.8) so idempotency, error codes and tests are uniform; the UI calls the same endpoints. |
 | Domain code | Framework-free packages (`packages/core`) called by both web and worker | Lets ledger/checkout logic be tested against a real database without booting the web app. |
 | Database | PostgreSQL 17, managed, Multi-AZ in production | Row locks, deferred constraint triggers, partial unique indexes, schemas/roles, full-text search — everything the PRD needs in one engine. |
-| DB access | Kysely (typed SQL builder) + plain SQL migrations | The purchase path needs explicit `SELECT … FOR UPDATE` ordering and BIGINT handling; an ORM that hides locking is a liability here. BIGINT columns map to JS `bigint`; API money is decimal strings (§7.4). |
+| DB access | Drizzle ORM: schema defined in TypeScript, generated migrations, plus hand-written SQL migrations for roles, grants, policies and triggers | The schema is one typed file set that both people and coding agents read; it supports explicit `FOR UPDATE` locking and raw SQL where the purchase path needs it. BIGINT columns map to JS `bigint`; API money is decimal strings (§7.4). |
 | Job queue | Graphile Worker (Postgres-backed) | Jobs can be enqueued inside the business transaction; no Redis to run, back up or reconcile. |
 | Auth | Managed auth bundled with the database: email magic link + Google OAuth, TOTP MFA for staff — **Decision D1** | See §8.2 of this plan. |
 | Object storage / CDN | One private and one public bucket behind a CDN, through a storage adapter (free tier first, S3 + CloudFront later) | §7.8. |
-| Validation / contract | Zod schemas shared by API and UI, OpenAPI generated from them | Single source for request/response shapes and stable error codes. |
-| UI | React, Tailwind with the PRD design tokens (§6.2), Radix primitives for accessible dialogs/menus | WCAG 2.2 AA target; focus trapping and announcements come from tested primitives. |
+| Validation / contract | Zod schemas shared by API and UI, typed API client and OpenAPI generated from them | Single source for request/response shapes and stable error codes; a contract change that breaks a caller fails the type check. |
+| UI | React, Tailwind with the PRD design tokens (§6.2), shadcn/ui components (built on Radix primitives) copied into the repo | WCAG 2.2 AA target; accessible primitives; the component source lives in the codebase, which is what coding agents work with best (§16). |
 | Caching | CDN page cache with tag-based invalidation for public pages; in-memory browser cache for private data; nothing private in any shared cache | Fast public browsing at no cost; see §5.8. |
 | Search | Postgres full-text (`tsvector`) + `pg_trgm` over approved product versions | Catalog is hundreds of rows in beta. |
 | Rate limits / quotas | Postgres counters for per-account and per-company limits; WAF rate rules for coarse network limits | Publication and draft caps are pooled per company and must be transactional anyway (§7.14). |
@@ -108,6 +108,11 @@ Domain modules in `packages/core`, each exposing commands and queries only:
 | `moderation` | screening pipeline, cases, reports, appeals, blocks | |
 | `npc` | NPC actors, simulation runs, sandbox orders | May not import `ledger`, `orders` or `inventory` write APIs — enforced by a lint rule **and** by DB grants. |
 | `partner` | portal read models, rollups, exports | Read-only over other modules. |
+| `cart` | carts, lines, delivery options and totals preview | No price or stock authority (R2.2). |
+| `fulfilment` | delivery spots, speeds, shipments, timelines, Zap hub eligibility | R5. |
+| `promotions` | coupons, redemptions, campaigns and budgets, sale and reference prices | R6. |
+| `membership` | Delulu Plus periods and benefits | R5.5. |
+| `console` | back-office configuration for catalog, merchandising, shipping, payments, promotions, economy | R7; every write is versioned and audited. |
 | `analytics` | event intake, dedupe, metric definitions | |
 | `admin` | staff commands, kill switches, audit log | |
 
@@ -145,12 +150,13 @@ Roles: `migrator` (owns objects, used only by the migration task), `app_web`, `a
 Every command that touches money, stock, cards, seats or entitlements acquires row locks in this order and re-validates after locking. This is the "one documented lock order" §7.4 requires; the engineering lead signs it off (**Decision D2**).
 
 1. `checkout_session`
+1a. `coupon` and `promo_campaign` (redemption cap and budget), `membership` row of the buyer
 2. `company` (company slot, publication cap, seat counter, warehouse count)
 3. `warehouse` rows, ascending id
 4. `product` (stock aggregate / current version)
 5. `inventory_unit` (lowest available serial)
 6. `virtual_card`
-7. `wallet` rows, ascending ledger-account id (buyer and seller)
+7. `wallet` rows, ascending ledger-account id (buyer and every seller in the order group)
 8. `creator_entitlement` / `brand_entitlement` / relief counter
 
 Isolation is READ COMMITTED with explicit locks; correctness never depends on a cached read. Card freeze/replace takes only lock 6, so a freeze/pay race resolves to exactly one of "paid, then frozen" or "frozen, declined with no debit" (US-15). A last-unit race resolves at locks 4–5: one buyer gets the serial, the other gets `SOLD_OUT` before any wallet is touched (US-30).
@@ -545,7 +551,7 @@ Mapped to the PRD roadmap (§8.1); infrastructure items in bold.
 | 15–16 | Warehouses, stock, exclusives, collector levels | **Inventory audit job and alerts** |
 | 17–18 | Observation and expansion decision | Restore-and-reconcile drill, security review |
 
-One sequencing change from the PRD worth considering: the `inventory_unit` lock and `inventory_mode` column should exist in the purchase transaction from week 2 (with every product initially `UNLIMITED_SEED`), so that weeks 15–16 add behaviour rather than rewriting the most safety-critical code path after two beta cohorts have used it.
+Revision 1.5 replaces this week-based sequence with the six phases in R12 of the revision; the infrastructure items above attach to the same milestones (foundation, creation, portal, beta). One sequencing change from the PRD worth considering: the `inventory_unit` lock and `inventory_mode` column should exist in the purchase transaction from week 2 (with every product initially `UNLIMITED_SEED`), so that weeks 15–16 add behaviour rather than rewriting the most safety-critical code path after two beta cohorts have used it.
 
 ---
 
@@ -634,3 +640,146 @@ These platforms run microservice fleets, sharded databases, multi-region failove
 - AWS Well-Architected, bulkhead architectures: https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_fault_isolation_use_bulkhead.html
 - web.dev, Nuvemshop case study: https://web.dev/case-studies/nuvemshop
 - PingCAP, Flipkart case study (vendor): https://www.pingcap.com/case-study/flipkart-transforming-database-management-and-reducing-complexity-with-tidb/
+
+---
+
+## 15. Architecture for the Revision 1.5 modules
+
+Revision 1.5 adds breadth, not new infrastructure. Everything below runs on the same web app, job runner and database, and every money movement still goes through the one pay transaction in §5.4.
+
+### 15.1 Module map
+
+| Requested module | Where it lives | Modules in `packages/core` |
+|---|---|---|
+| Storefront | `apps/web` route group `(shop)`: home, category, search, product, store, cart, checkout, confirmation, tracking, deals, membership, help | `catalog`, `cart`, `promotions`, `fulfilment` |
+| Account hub | `/account/*` | `identity`, `bank`, `orders`, `pay`, `fulfilment`, `membership` |
+| Payment simulator | `/pay/*` pages (bank-styled) and `pay` commands | `pay`, `bank`, `ledger` |
+| Simulated delivery | Checkout steps, tracking pages, minute sweep | `fulfilment`, `inventory`, `membership` |
+| Commerce Console | Admin hostname, `/console/*` | `console`, `admin`, `moderation` |
+| Merchant portal | `/partner/*` | `partner`, `company`, `promotions`, `fulfilment`, `inventory` |
+
+### 15.2 Cart and order groups
+
+- The cart is ordinary mutable data with no authority. Totals shown in the cart are a preview computed by the same pricing function the pay transaction uses, so the two cannot drift.
+- `POST /checkout-sessions` snapshots the cart into an immutable quote: lines, list prices, coupon, discounts, delivery choices and fees, total, configuration version, five-minute expiry.
+- The pay transaction (§5.4) is extended, not replaced. For an order group it locks, in the canonical order, the coupon/campaign and membership rows, every involved company, warehouse, product and inventory unit (ascending id within each class), the card, then every wallet. It writes one journal containing all postings, one seller order and one shipment per seller, and one ownership per line.
+- All-or-nothing: any failed validation on any line fails the whole attempt with no postings and returns `CART_CHANGED` with the differences.
+- A larger lock set raises contention and deadlock risk. Ascending-id ordering within each class prevents deadlocks; the lock timeout from §14.2 bounds waiting; the 20-line cap bounds the lock set.
+
+### 15.3 One pricing function
+
+A single pure function `price(quote inputs, config version) → amounts` computes, per line and per seller order: list amount, seller discount, platform discount, fee, delivery fee, seller proceeds, buyer total, and the postings. It is used for the cart preview, the quote, the pay transaction and the portal's order breakdown, and is covered by property tests (journal sums to zero; no negative amount; discounted price ≥ ₹100; fee = floor(5% × discounted list price)). Keeping this in one place is what makes coupons and delivery fees safe to add to a ledger.
+
+### 15.4 Payment simulator
+
+- The four methods are presentation and validation strategies in front of the same pay transaction. They share one funding source, so no method needs its own ledger path.
+- The bank authentication step is a separate, earlier request: `payment_challenge` stores a hash of the code, expiry and attempt count. Verifying it marks the attempt as authenticated; only then may the pay transaction run. No money moves and no hold exists while authenticating.
+- Method configuration (enabled, order, limits, maintenance windows) is versioned console data, read inside the pay transaction so a disabled method cannot be used by calling the API directly.
+- Test scenarios are keyed to reserved test identifiers and a staff flag, and are compiled out of the decision path for ordinary players.
+
+Security rules specific to the simulator (from R4.5), enforced in code and tests:
+- No input component for card number, expiry, CVV, PIN or password exists in the codebase; a lint rule bans the corresponding `autocomplete` values and field names.
+- Checkout text inputs reject card-number-like and real-UPI-like patterns on the server.
+- Codes are generated server-side with a cryptographic random source, stored hashed, compared in constant time, and never sent by email, SMS or push.
+- Bank-styled pages are served from the same origin, cannot be framed, and always carry the in-game label.
+
+### 15.5 Delivery simulation without a scheduler
+
+Shipment stage times are computed once, at commit, from the speed and the configuration version, and stored on the shipment. The current stage is a pure function of those timestamps and the clock, so tracking pages are always correct even if no background job runs. The minute sweep only emits `shipment_delivered` events (for notifications and analytics) for shipments whose delivered time has passed, idempotently. This suits the free hosting tier, where jobs are best-effort.
+
+Zap eligibility reuses inventory: a warehouse has a `zap_hub` flag (at most one per company), and "Zap available" means an `AVAILABLE` unit exists in that warehouse. A Zap purchase takes its unit from the hub under the same inventory locks, so the last-hub-unit race is the existing last-unit race.
+
+Delivery spots are two foreign keys into staff-managed lists. There is no address table and no free-text field to protect.
+
+### 15.6 Coupons and campaigns
+
+- Redemption happens inside the pay transaction: lock the coupon row, check validity, relationship rules, per-buyer uniqueness (unique constraint) and the redemption cap; for platform coupons also lock the campaign and check `spent + discount ≤ budget`.
+- A platform coupon adds a MINT posting to the purchase journal; the reconciliation identity and the mint/sink dashboard include a "promotional mint" term.
+- Code lookup is rate-limited per account and returns a uniform error so codes cannot be enumerated.
+- Reference-price display reads `price_history`; the 24-hour rule is evaluated on the server.
+
+### 15.7 Commerce Console
+
+- Same application, separate hostname and session (§8.5), route group `/console`. Permissions are per area and per action; the navigation is built from the permission set, and every endpoint re-checks it.
+- Console writes go through `console` commands that record before/after values, actor, reason and, where required, a second approver, and that create a new configuration version for economy-affecting settings.
+- Most console screens are tables and forms over existing data. They share one data-table and one form pattern, which keeps this large surface cheap to build and consistent to review.
+- Merchandising content (banners, shelves) is public data: publishing it purges the relevant cache tags (§5.8).
+
+### 15.8 Caching and personalisation for the new pages
+
+| Data | Cacheable? |
+|---|---|
+| Category, store, deals pages; product delivery speeds offered; public coupons; sale and reference price | Yes, public, with tags (`category:{id}`, `store:{id}`, `deals`, `product:{id}`) |
+| Zap availability badge | Public but short-lived (about 30 s); authoritative at payment |
+| Cart, delivery fees for this buyer, membership pricing, coupon validity, delivery spots, order tracking, account hub | Never shared-cached; `private, no-store` |
+| Console | Never cached |
+
+### 15.9 Additional threats and controls
+
+| Threat | Control |
+|---|---|
+| A realistic payment page used to harvest real card or UPI data, or mistaken for a real bank | No field accepts real payment data; system-generated codes only; in-app delivery only; persistent in-game label; no real brand names (15.4) |
+| Coupon abuse: enumeration, cap races, self-dealing, farming with linked accounts | Rate limit and uniform errors; cap and budget enforced under row locks; relationship rules; progression counts buyer-paid amounts only (R6.6) |
+| Price manipulation through the cart (stale or client-supplied totals) | Server-side quote; totals recomputed in the pay transaction by the single pricing function |
+| Fake discounts misleading players | Reference price rule enforced from price history |
+| Console misuse or over-broad staff access | Per-area roles, two-person approval for minting settings, versioned and audited configuration, no balance-editing screen |
+| Platform coupons or fee changes silently inflating supply | Ledgered MINT postings, campaign budgets, mint/sink reporting, announced versioned changes |
+| Larger multi-row transactions causing lock pile-ups | Canonical ordering, lock and statement timeouts, cart size cap, per-product admission control (§14.2) |
+
+### 15.10 Verification additions
+
+Concurrency tests for: two carts sharing the last unit; coupon cap and campaign budget under simultaneous redemptions; a method disabled or a price changed between quote and pay; membership expiring between quote and pay. Property tests for the pricing function. An end-to-end test per payment method, including three wrong codes and an expired code. The authorisation matrix is extended to every console role and to the new portal routes.
+
+---
+
+## 16. Building with AI coding agents
+
+The question was whether to switch to newer technology that is faster and better suited to building with AI assistance ("vibe coding"). This is an engineering judgement, not a benchmark result.
+
+### 16.1 Verdict
+
+Keep the core (TypeScript, Next.js, Postgres on Supabase) and tune the tooling around it. Coding agents produce their most reliable work on stacks that are widely used, strongly typed and convention-heavy, with fast automated feedback. That describes this stack. Moving to something newer and less common would make the generated code worse, not better, and for this product it would also remove the database-level safeguards that the security design depends on.
+
+What does change is listed in 16.2, and how the repository is organised for agents in 16.3.
+
+### 16.2 Tooling adopted for speed
+
+| Choice | Replaces | Why it helps AI-assisted building |
+|---|---|---|
+| Drizzle ORM with the schema in TypeScript | Kysely + hand-written types | The whole data model is readable, typed source that an agent can load and follow; mistakes surface as type errors. |
+| shadcn/ui on Tailwind | Bare Radix primitives | Components are plain files in the repo; agents generate and adapt this style of UI very reliably, which matters for the many console and portal screens. |
+| Current Next.js with the Turbopack bundler | — | Faster local builds and reloads shorten every edit-check cycle. |
+| Biome for lint and format | ESLint + Prettier | One fast tool; near-instant feedback on every change. |
+| pnpm workspaces with Turborepo caching | — | Only changed packages rebuild and retest. |
+| Supabase CLI local stack | Hand-rolled Docker Compose | The agent can start a real database, auth and storage locally and run migrations and tests against them. |
+| Vitest, Playwright, generated typed API client | — | Fast tests and compile-time contract checks are the agent's feedback loop. |
+
+### 16.3 Two-speed codebase
+
+Not all code carries the same risk, so not all code should be written the same way.
+
+| Zone | Contents | How it is built |
+|---|---|---|
+| **Fast zone** | Storefront pages, account hub screens, portal and console tables and forms, content, styling, read queries | Generate freely with an agent from the PRD and design tokens; review by using the screen and by automated accessibility, type and end-to-end checks. |
+| **Guarded zone** | `ledger`, `pay`, pricing function, `inventory`, `promotions` redemption, authorisation policy, database migrations, roles, grants and row-level-security policies, the admin approval flow | An agent may draft, but: tests are written first from the PRD's acceptance criteria; every change needs human review; the paths are protected by a code-owners rule; database constraints and the concurrency suite must pass. |
+
+The design already limits the damage a wrong generated change can do: a mistake in the guarded zone is caught by a constraint, a zero-sum trigger, a property test or the reconciliation job, rather than reaching a balance.
+
+### 16.4 Making the repository legible to agents
+
+- An agent instruction file at the repo root stating the invariants that must never be broken (integer paise, no float money, the lock order, no cached value authorises anything, public and private never share a response, no real-payment-data fields), the commands to run, and which paths are guarded.
+- The PRD and this document kept in `docs/` as the source of truth; each acceptance criterion (US-xx) maps to a named test, so "make US-41 pass" is a complete instruction.
+- One worked example of each pattern (a command, a query, a console table, a portal form) for the agent to copy.
+- Small modules with explicit public interfaces and the boundary lint (§4), so an agent can change one module without reading the rest.
+- Continuous integration is the judge: types, lint, boundaries, unit, concurrency, authorisation matrix, accessibility and bundle budget must pass before merge, whoever or whatever wrote the change.
+
+### 16.5 Alternatives considered
+
+| Option | Appeal | Why not for this product |
+|---|---|---|
+| A reactive backend-as-a-service with its own database (for example Convex) | Very fast to build with; end-to-end TypeScript | Gives up Postgres roles, grants, row-level security and constraint triggers, which are the second line of defence for the ledger and for NPC isolation; harder to leave later. |
+| Edge-native stack with a SQLite-based database | Low latency, generous free tiers | No row-level locking or per-role privileges of the kind the pay transaction and schema isolation rely on. |
+| App-builder tools that generate and host a whole app | Fastest first demo | Useful for throwaway UI prototypes; not for a system whose correctness rests on reviewed transactions and database policy. |
+| A different language or framework for the backend | — | Splits the codebase and the type system with no benefit at this scale. |
+
+App-builder and design-to-code tools remain a good way to prototype screens quickly; the output is then brought into the fast zone and held to the same checks.
