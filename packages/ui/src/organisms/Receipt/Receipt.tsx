@@ -30,7 +30,10 @@ export function Receipt({
   return (
     <section
       aria-label={`Receipt for order ${reference}`}
-      className={cn("flex flex-col gap-3 rounded-lg border border-border-strong bg-surface p-4 font-body", className)}
+      className={cn(
+        "flex flex-col gap-3 rounded-lg border border-border-strong bg-surface p-4 font-body",
+        className,
+      )}
       {...props}
     >
       <header>

@@ -41,10 +41,21 @@ describe("collectorLevel (US-31)", () => {
     for (const [items, level] of cases) expect(collectorLevel(items).level, String(items)).toBe(level);
   });
 
-  it("US-31: every level has a title and the next threshold", () => {
-    expect(collectorLevel(0)).toEqual({ level: 1, title: COLLECTOR_LEVELS[0]?.title, nextAt: 5 });
-    expect(collectorLevel(100).nextAt).toBeNull();
-    expect(new Set(COLLECTOR_LEVELS.map((l) => l.title)).size).toBe(6);
+  it("US-31: exact titles and next threshold at each level boundary", () => {
+    expect(collectorLevel(0)).toEqual({ level: 1, title: "New Arrival", nextAt: 5 });
+    expect(collectorLevel(5)).toEqual({ level: 2, title: "Curious Collector", nextAt: 15 });
+    expect(collectorLevel(15)).toEqual({ level: 3, title: "Curator", nextAt: 30 });
+    expect(collectorLevel(30)).toEqual({ level: 4, title: "Vault Builder", nextAt: 60 });
+    expect(collectorLevel(60)).toEqual({ level: 5, title: "Grand Collector", nextAt: 100 });
+    expect(collectorLevel(100)).toEqual({ level: 6, title: "Delulu Legend", nextAt: null });
+    expect(COLLECTOR_LEVELS.map((l) => l.title)).toEqual([
+      "New Arrival",
+      "Curious Collector",
+      "Curator",
+      "Vault Builder",
+      "Grand Collector",
+      "Delulu Legend",
+    ]);
   });
 
   it("level never decreases as the collection grows (property)", () => {

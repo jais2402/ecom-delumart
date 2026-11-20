@@ -33,7 +33,9 @@ export function SiteFooter({ links = defaultLinks, className, ...props }: SiteFo
             ))}
           </ul>
         </nav>
-        <p className="text-sm text-fg-muted">Fictional money only. Nothing real ships — delivery is simulated.</p>
+        <p className="text-sm text-fg-muted">
+          Fictional money only. Nothing real ships — delivery is simulated.
+        </p>
       </div>
     </footer>
   );

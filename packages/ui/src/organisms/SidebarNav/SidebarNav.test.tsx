@@ -1,5 +1,5 @@
-import { Home } from "lucide-react";
 import { render, screen } from "@testing-library/react";
+import { Home } from "lucide-react";
 import { describe, expect, it } from "vitest";
 import { SidebarNav } from "./SidebarNav";
 

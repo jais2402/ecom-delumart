@@ -15,7 +15,10 @@ export function AddressCard({ label, text, kind, onEdit, onDelete, className, ..
   return (
     <article
       aria-label={label}
-      className={cn("flex flex-col gap-2 rounded-lg border border-border bg-surface p-4 font-body", className)}
+      className={cn(
+        "flex flex-col gap-2 rounded-lg border border-border bg-surface p-4 font-body",
+        className,
+      )}
       {...props}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">

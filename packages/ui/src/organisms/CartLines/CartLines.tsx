@@ -55,7 +55,11 @@ export function CartLines({ groups, onRemove, className, ...props }: CartLinesPr
                   </p>
                   <p className="text-sm text-fg-muted">
                     Quantity {line.quantity} ×{" "}
-                    <Price amountPaise={line.unitPricePaise} display="exact" className="text-sm font-normal" />
+                    <Price
+                      amountPaise={line.unitPricePaise}
+                      display="exact"
+                      className="text-sm font-normal"
+                    />
                   </p>
                   <Price amountPaise={line.unitPricePaise * BigInt(line.quantity)} display="exact" />
                 </div>

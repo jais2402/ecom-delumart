@@ -11,7 +11,7 @@ export * from "./Receipt";
 export * from "./SidebarNav";
 export * from "./SiteFooter";
 export * from "./SiteHeader";
-export * from "./StatGrid";
 export * from "./StatementTable";
+export * from "./StatGrid";
 export * from "./TrackingTimeline";
 export * from "./VirtualCard";

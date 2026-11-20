@@ -14,7 +14,7 @@ export type StatementRow = {
   balanceAfterPaise: bigint;
 };
 
-export type StatementTableProps = Omit<ComponentPropsWithRef<"div">, "children"> & {
+export type StatementTableProps = Omit<ComponentPropsWithRef<"section">, "children"> & {
   rows: readonly StatementRow[];
   caption?: string;
 };
@@ -50,7 +50,9 @@ const columns: readonly DataColumn<StatementRow>[] = [
     key: "balance",
     header: "Balance after",
     align: "right",
-    cell: (row) => <Price amountPaise={row.balanceAfterPaise} display="exact" className="whitespace-nowrap" />,
+    cell: (row) => (
+      <Price amountPaise={row.balanceAfterPaise} display="exact" className="whitespace-nowrap" />
+    ),
   },
 ];
 

@@ -48,7 +48,10 @@ export function FilterPanel({
     <form
       aria-label="Filters"
       onSubmit={(event) => event.preventDefault()}
-      className={cn("flex flex-col gap-4 rounded-lg border border-border bg-surface p-4 font-body", className)}
+      className={cn(
+        "flex flex-col gap-4 rounded-lg border border-border bg-surface p-4 font-body",
+        className,
+      )}
       {...props}
     >
       {categories ? (

@@ -40,9 +40,16 @@ export function SiteHeader({
           DeluluMart
         </a>
         <nav aria-label="Account and cart" className="ml-auto flex items-center gap-1 sm:order-3 sm:ml-0">
-          <a href={cartHref} className={iconLink} aria-label={`Cart, ${cartCount} ${cartCount === 1 ? "item" : "items"}`}>
+          <a
+            href={cartHref}
+            className={iconLink}
+            aria-label={`Cart, ${cartCount} ${cartCount === 1 ? "item" : "items"}`}
+          >
             <Icon icon={ShoppingCart} />
-            <span aria-hidden="true" className="min-w-5 rounded-pill bg-highlight px-1.5 text-center text-xs font-bold text-fg-on-highlight">
+            <span
+              aria-hidden="true"
+              className="min-w-5 rounded-pill bg-highlight px-1.5 text-center text-xs font-bold text-fg-on-highlight"
+            >
               {cartCount}
             </span>
           </a>

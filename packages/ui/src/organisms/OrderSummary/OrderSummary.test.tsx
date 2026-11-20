@@ -16,11 +16,15 @@ describe("OrderSummary", () => {
       <OrderSummary itemsTotalPaise={100n} deliveryFeePaise={0n} totalPaise={100n} />,
     );
     expect(screen.queryByText("Discount")).not.toBeInTheDocument();
-    rerender(<OrderSummary itemsTotalPaise={100n} discountPaise={10n} deliveryFeePaise={0n} totalPaise={90n} />);
+    rerender(
+      <OrderSummary itemsTotalPaise={100n} discountPaise={10n} deliveryFeePaise={0n} totalPaise={90n} />,
+    );
     expect(screen.getByText("Discount")).toBeInTheDocument();
   });
   it("says Free for a zero delivery fee and pairs terms with values", () => {
-    const { container } = render(<OrderSummary itemsTotalPaise={100n} deliveryFeePaise={0n} totalPaise={100n} />);
+    const { container } = render(
+      <OrderSummary itemsTotalPaise={100n} deliveryFeePaise={0n} totalPaise={100n} />,
+    );
     expect(screen.getByText("Free")).toBeInTheDocument();
     expect(container.querySelectorAll("dt")).toHaveLength(container.querySelectorAll("dd").length);
   });

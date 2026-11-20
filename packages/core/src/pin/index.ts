@@ -86,16 +86,64 @@ function isSequential(pin: string): boolean {
   return steps.size === 1 && (steps.has(1) || steps.has(-1));
 }
 
+/** Generic weak-PIN pattern limits (configuration). */
+export type PinRulesConfig = {
+  /** Reject a PIN in which any one digit appears at least this many times. */
+  maxSameDigit: number;
+  /** Reject a PIN containing a run of at least this many digits with a constant non-zero step (mod 10). */
+  minSteppedRun: number;
+};
+export const DEFAULT_PIN_RULES_CONFIG: PinRulesConfig = { maxSameDigit: 5, minSteppedRun: 5 };
+
+/** ABABAB or ABCABC: the PIN is a shorter block repeated. */
+function isRepeatedBlock(pin: string): boolean {
+  for (let size = 1; size < pin.length; size++) {
+    if (pin.length % size === 0 && pin.slice(0, size).repeat(pin.length / size) === pin) return true;
+  }
+  return false;
+}
+
+function maxDigitCount(pin: string): number {
+  const counts = new Map<string, number>();
+  for (const ch of pin) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  return Math.max(...counts.values());
+}
+
+/**
+ * Longest run of digits with a constant non-zero step modulo 10, so ascending and descending runs wrap
+ * around (890123, 098765) and stepped runs count (246802, 13579 in 135790).
+ */
+function longestSteppedRun(pin: string): number {
+  let best = 1;
+  let run = 1;
+  let prevStep: number | null = null;
+  for (let i = 1; i < pin.length; i++) {
+    const step = (pin.charCodeAt(i) - pin.charCodeAt(i - 1) + 10) % 10;
+    if (step !== 0 && step === prevStep) run++;
+    else run = step === 0 ? 1 : 2;
+    prevStep = step;
+    best = Math.max(best, run);
+  }
+  return best;
+}
+
 function weak(reason: PinWeakReason, message: string): PinCheck {
   return { ok: false, error: new DomainError("PIN_WEAK", message, { reason }) };
 }
 
 /** Validate a PIN at set/change time. Returns a PIN_WEAK DomainError (details.reason) when rejected. */
-export function validateNewPin(pin: string, birthdate: string): PinCheck {
+export function validateNewPin(
+  pin: string,
+  birthdate: string,
+  cfg: PinRulesConfig = DEFAULT_PIN_RULES_CONFIG,
+): PinCheck {
   if (!PIN_FORMAT.test(pin)) return weak("FORMAT", "PIN must be exactly six digits");
   if (/^(\d)\1{5}$/.test(pin)) return weak("REPEATED", "PIN cannot be one digit repeated");
   if (isSequential(pin)) return weak("SEQUENTIAL", "PIN cannot be a sequence");
   if (COMMON_PINS.has(pin)) return weak("COMMON", "PIN is too common");
+  if (isRepeatedBlock(pin)) return weak("REPEATED", "PIN cannot be a repeated pattern");
+  if (maxDigitCount(pin) >= cfg.maxSameDigit) return weak("REPEATED", "PIN repeats one digit too often");
+  if (longestSteppedRun(pin) >= cfg.minSteppedRun) return weak("SEQUENTIAL", "PIN cannot be a sequence");
   if (birthdatePinForms(birthdate).has(pin)) return weak("BIRTHDATE", "PIN cannot be your birthdate");
   return { ok: true };
 }
@@ -147,6 +195,47 @@ export function applyPinAttempt(
   return {
     state: { consecutiveFailures: failures, lockedUntil: null },
     result: { ok: false, code: "PIN_INCORRECT", remainingBeforeLock: cfg.maxConsecutiveFailures - failures },
+  };
+}
+
+// ---------- per-payment challenge ----------
+
+/** One PIN challenge belongs to one payment attempt; it is single use. */
+export type ChallengeState = {
+  status: "OPEN" | "PASSED" | "FAILED";
+  wrongAttempts: number;
+};
+export type ChallengeConfig = { maxWrongPerChallenge: number };
+export const DEFAULT_CHALLENGE_CONFIG: ChallengeConfig = { maxWrongPerChallenge: 3 };
+export const INITIAL_CHALLENGE_STATE: ChallengeState = { status: "OPEN", wrongAttempts: 0 };
+
+export type ChallengeResult =
+  | { status: "PASSED" }
+  | { status: "RETRY"; remainingTries: number }
+  | { status: "FAILED" };
+
+/**
+ * Reducer for one PIN entry within a payment attempt (US-48): correct → PASSED; wrong → RETRY with the
+ * tries left, and the third wrong (configurable) → FAILED, which fails the attempt with no debit.
+ * A PASSED or FAILED challenge is final. This is separate from the card-level lockout
+ * (`applyPinAttempt`); callers run both for every PIN entry.
+ */
+export function applyChallengeAttempt(
+  state: ChallengeState,
+  attempt: { correct: boolean },
+  cfg: ChallengeConfig = DEFAULT_CHALLENGE_CONFIG,
+): { state: ChallengeState; result: ChallengeResult } {
+  if (state.status !== "OPEN") return { state, result: { status: state.status } };
+  if (attempt.correct) {
+    return { state: { ...state, status: "PASSED" }, result: { status: "PASSED" } };
+  }
+  const wrongAttempts = state.wrongAttempts + 1;
+  if (wrongAttempts >= cfg.maxWrongPerChallenge) {
+    return { state: { status: "FAILED", wrongAttempts }, result: { status: "FAILED" } };
+  }
+  return {
+    state: { status: "OPEN", wrongAttempts },
+    result: { status: "RETRY", remainingTries: cfg.maxWrongPerChallenge - wrongAttempts },
   };
 }
 

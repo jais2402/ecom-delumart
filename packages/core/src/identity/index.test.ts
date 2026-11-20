@@ -1,7 +1,15 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { DomainError } from "../errors/index";
-import { assertAdult, fingerprint, isAdult, normalizeEmail, normalizePhone } from "./index";
+import {
+  assertAdult,
+  DEFAULT_IDENTITY_CONFIG,
+  fingerprint,
+  isAdult,
+  normalizeEmail,
+  normalizePhone,
+  type PhoneCountryRule,
+} from "./index";
 
 const key = new TextEncoder().encode("test-identity-key");
 
@@ -43,6 +51,22 @@ describe("normalizeEmail (US-49)", () => {
     }
   });
 
+  it("US-49: strips a trailing dot from the domain", () => {
+    expect(normalizeEmail("asha@example.com.")).toBe("asha@example.com");
+    expect(fingerprint(key, normalizeEmail("J.Doe@Gmail.Com."))).toBe(
+      fingerprint(key, normalizeEmail("jdoe@gmail.com")),
+    );
+  });
+
+  it("rejects a domain without a dot or with empty labels", () => {
+    for (const v of ["a@localhost", "a@example", "a@.com", "a@example..com", "a@example.com..", "a@."]) {
+      expect(
+        codeOf(() => normalizeEmail(v)),
+        v,
+      ).toBe("VALIDATION_FAILED");
+    }
+  });
+
   it("is idempotent (property)", () => {
     fc.assert(
       fc.property(fc.emailAddress(), (e) => {
@@ -54,22 +78,52 @@ describe("normalizeEmail (US-49)", () => {
 });
 
 describe("normalizePhone (US-49)", () => {
-  const allow = ["91", "1", "44"];
+  const allow: readonly PhoneCountryRule[] = [
+    { callingCode: "91", nationalLength: 10, leadingDigits: "6789" },
+    { callingCode: "1", nationalLength: 10, leadingDigits: "23456789" },
+    { callingCode: "44", nationalLength: 10, leadingDigits: "7" },
+  ];
 
   it("accepts E.164 numbers in an allowed country", () => {
     expect(normalizePhone("+919876543210", allow)).toBe("+919876543210");
     expect(normalizePhone(" +14155550123 ", allow)).toBe("+14155550123");
+    expect(normalizePhone("+447700900123", allow)).toBe("+447700900123");
   });
 
-  it("throws PHONE_INVALID for non-E.164 input or a country not allowed", () => {
+  it("US-49: strips spaces, hyphens and parentheses before validating", () => {
+    expect(normalizePhone("+91 98765 43210", allow)).toBe("+919876543210");
+    expect(normalizePhone("+91-9876543210", allow)).toBe("+919876543210");
+    expect(normalizePhone("+1 (415) 555-0123", allow)).toBe("+14155550123");
+  });
+
+  it("defaults to India (+91) only: 10 digits starting 6–9", () => {
+    expect(normalizePhone("+91 98765 43210")).toBe("+919876543210");
+    expect(normalizePhone("+916000000001")).toBe("+916000000001");
+    for (const v of ["+911234", "+9100000", "+910000000000", "+915876543210", "+14155550123", "+9198765432101"]) {
+      expect(
+        codeOf(() => normalizePhone(v)),
+        v,
+      ).toBe("PHONE_INVALID");
+    }
+    expect(DEFAULT_IDENTITY_CONFIG.phoneCountries).toEqual([
+      { callingCode: "91", nationalLength: 10, leadingDigits: "6789" },
+    ]);
+  });
+
+  it("throws PHONE_INVALID for non-E.164 input, a wrong length or leading digit, or a country not allowed", () => {
     for (const v of [
       "9876543210",
-      "+91 98765 43210",
-      "+91-9876543210",
       "+0919876543210",
       "+8613800138000",
       "+9198765432101234",
       "+91",
+      "+911234",
+      "+9100000",
+      "+910000000000",
+      "+91 98765 4321",
+      "+91.9876543210",
+      "+91 98765 43210 ext 1",
+      "++919876543210",
     ]) {
       expect(
         codeOf(() => normalizePhone(v, allow)),
@@ -116,6 +170,13 @@ describe("isAdult", () => {
   it("assertAdult throws UNDERAGE for minors", () => {
     expect(codeOf(() => assertAdult("2010-05-05", "2026-11-20"))).toBe("UNDERAGE");
     expect(codeOf(() => assertAdult("2000-05-05", "2026-11-20"))).toBeUndefined();
+  });
+
+  it("adult age comes from config", () => {
+    expect(DEFAULT_IDENTITY_CONFIG.adultAgeYears).toBe(18);
+    expect(isAdult("2005-11-20", "2026-11-20", 21)).toBe(true);
+    expect(isAdult("2005-11-21", "2026-11-20", 21)).toBe(false);
+    expect(codeOf(() => assertAdult("2006-05-05", "2026-11-20", 21))).toBe("UNDERAGE");
   });
 
   it("rejects impossible dates", () => {

@@ -50,7 +50,14 @@ export function buildShapes(hue: number, seed: string): Shape[] {
     const kind = Math.floor(rand() * 3);
     const id = `s${i}`;
     if (kind === 0) {
-      shapes.push({ id, kind: "circle", cx: 15 + rand() * 70, cy: 15 + rand() * 70, r: 8 + rand() * 20, fill });
+      shapes.push({
+        id,
+        kind: "circle",
+        cx: 15 + rand() * 70,
+        cy: 15 + rand() * 70,
+        r: 8 + rand() * 20,
+        fill,
+      });
     } else if (kind === 1) {
       shapes.push({
         id,
@@ -82,6 +89,7 @@ export function ProductArt({ hue, seed, alt, className, ...props }: ProductArtPr
   const shapes = buildShapes(hue, seed);
   const a11y = alt ? { role: "img" as const, "aria-label": alt } : { "aria-hidden": true as const };
   return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: the name comes from aria-label, or the art is aria-hidden when decorative
     <svg
       viewBox="0 0 100 100"
       preserveAspectRatio="xMidYMid slice"

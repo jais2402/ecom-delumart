@@ -74,6 +74,31 @@ describe("assignVariant", () => {
     }
   });
 
+  it("rejects a total weight above the configured maximum (1,000,000,000) and unsafe weights", () => {
+    const at = (weights: number[]) => () =>
+      assignVariant({
+        salt: "s",
+        subjectId: "u",
+        variants: weights.map((weight, i) => ({ key: `v${i}`, weight })),
+      });
+    expect(at([1_000_000_000])).not.toThrow();
+    expect(at([999_999_999, 1])).not.toThrow();
+    expect(at([1_000_000_000, 1])).toThrow(DomainError);
+    expect(at([Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER])).toThrow(DomainError);
+    expect(at([Number.MAX_SAFE_INTEGER + 1])).toThrow(DomainError);
+    expect(at([1.5, 2])).toThrow(DomainError);
+    expect(at([Number.NaN])).toThrow(DomainError);
+  });
+
+  it("a custom maximum total weight comes from config", () => {
+    expect(() =>
+      assignVariant(
+        { salt: "s", subjectId: "u", variants: [{ key: "a", weight: 10_001 }] },
+        { maxTotalWeight: 10_000 },
+      ),
+    ).toThrow(DomainError);
+  });
+
   it("rejects empty or non-positive weights", () => {
     expect(() => assignVariant({ salt: "s", subjectId: "u", variants: [] })).toThrow(DomainError);
     expect(() => assignVariant({ salt: "s", subjectId: "u", variants: [{ key: "a", weight: -1 }] })).toThrow(

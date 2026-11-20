@@ -6,7 +6,15 @@ import { BankChallenge } from "./BankChallenge";
 function setup(props = {}) {
   const onPay = vi.fn();
   const onCancel = vi.fn();
-  render(<BankChallenge amountPaise={5_000_00n} cardAlias="Everyday card" onPay={onPay} onCancel={onCancel} {...props} />);
+  render(
+    <BankChallenge
+      amountPaise={5_000_00n}
+      cardAlias="Everyday card"
+      onPay={onPay}
+      onCancel={onCancel}
+      {...props}
+    />,
+  );
   return { onPay, onCancel };
 }
 

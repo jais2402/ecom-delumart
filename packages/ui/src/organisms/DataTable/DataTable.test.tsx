@@ -16,7 +16,11 @@ describe("DataTable", () => {
   it("renders a captioned table with column headers and rows", () => {
     render(<DataTable caption="Stock" columns={columns} rows={rows} rowKey={(r) => r.id} />);
     const table = screen.getByRole("table", { name: "Stock" });
-    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Name", "Qty"]);
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((h) => h.textContent),
+    ).toEqual(["Name", "Qty"]);
     expect(within(table).getAllByRole("row")).toHaveLength(3);
     expect(within(table).getByRole("cell", { name: "Comet" })).toBeInTheDocument();
   });
@@ -27,7 +31,9 @@ describe("DataTable", () => {
     expect(region).toHaveClass("overflow-x-auto");
   });
   it("shows an empty state instead of the table", () => {
-    render(<DataTable caption="Stock" columns={columns} rows={[]} rowKey={(r) => r.id} emptyTitle="Nothing" />);
+    render(
+      <DataTable caption="Stock" columns={columns} rows={[]} rowKey={(r) => r.id} emptyTitle="Nothing" />,
+    );
     expect(screen.getByRole("heading", { name: "Nothing" })).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });

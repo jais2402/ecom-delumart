@@ -14,13 +14,13 @@ export function shouldUnlockCreator(
 
 export type CollectorLevelDef = { level: number; minItems: number; title: string };
 
-/** US-31 thresholds. Titles are placeholders pending product copy. */
+/** US-31 thresholds and titles. */
 export const COLLECTOR_LEVELS: readonly CollectorLevelDef[] = [
-  { level: 1, minItems: 0, title: "Window Shopper" },
-  { level: 2, minItems: 5, title: "Casual Collector" },
-  { level: 3, minItems: 15, title: "Keen Collector" },
-  { level: 4, minItems: 30, title: "Curator" },
-  { level: 5, minItems: 60, title: "Connoisseur" },
+  { level: 1, minItems: 0, title: "New Arrival" },
+  { level: 2, minItems: 5, title: "Curious Collector" },
+  { level: 3, minItems: 15, title: "Curator" },
+  { level: 4, minItems: 30, title: "Vault Builder" },
+  { level: 5, minItems: 60, title: "Grand Collector" },
   { level: 6, minItems: 100, title: "Delulu Legend" },
 ];
 

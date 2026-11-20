@@ -1,10 +1,11 @@
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { DomainError } from "../errors/index";
 import { MAX_PRICE_PAISE, MIN_PRICE_PAISE, rupees } from "../money/index";
 import {
   allocateProportionally,
   type Coupon,
+  type CouponDiscount,
   DEFAULT_PRICING_CONFIG,
   type LineIn,
   type Posting,
@@ -195,6 +196,87 @@ describe("pricing rules", () => {
     expect(priced.buyerTotal).toBe(MIN_PRICE_PAISE);
   });
 
+  it("a flat merchant coupon re-allocates value capped at the ₹100 floor to lines with room", () => {
+    const priced = price(
+      quote({
+        lines: [line("a", rupees(100n)), line("a", rupees(10_000n))],
+        coupon: {
+          scope: "MERCHANT",
+          companyId: "a",
+          discount: { kind: "FLAT", amountPaise: rupees(1_000n) },
+        },
+        speedBySeller: new Map<string, Speed>([["a", "STANDARD"]]),
+      }),
+    );
+    expect(priced.lines.map((l) => l.sellerDisc)).toEqual([0n, rupees(1_000n)]);
+  });
+
+  it("a flat platform coupon re-allocates value capped at the ₹100 floor to lines with room", () => {
+    const priced = price(
+      quote({
+        lines: [line("a", rupees(100n)), line("b", rupees(150n)), line("c", rupees(10_000n))],
+        coupon: { scope: "PLATFORM", discount: { kind: "FLAT", amountPaise: rupees(1_000n) } },
+        speedBySeller: new Map<string, Speed>([
+          ["a", "STANDARD"],
+          ["b", "STANDARD"],
+          ["c", "STANDARD"],
+        ]),
+      }),
+    );
+    expect(priced.lines.map((l) => l.platformDisc)).toEqual([0n, rupees(50n), rupees(950n)]);
+    expect(priced.mint).toBe(rupees(1_000n));
+  });
+
+  it("a flat coupon larger than all headroom brings every eligible line to ₹100", () => {
+    const priced = price(
+      quote({
+        lines: [line("a", rupees(100n)), line("a", rupees(250n)), line("a", rupees(400n))],
+        coupon: {
+          scope: "MERCHANT",
+          companyId: "a",
+          discount: { kind: "FLAT", amountPaise: rupees(10_000n) },
+        },
+        speedBySeller: new Map<string, Speed>([["a", "STANDARD"]]),
+        isMember: true,
+      }),
+    );
+    expect(priced.lines.map((l) => l.listPaise - l.sellerDisc)).toEqual([
+      MIN_PRICE_PAISE,
+      MIN_PRICE_PAISE,
+      MIN_PRICE_PAISE,
+    ]);
+  });
+
+  it("US-41: rejects a merchant coupon for seed stock (companyId SEED)", () => {
+    expectDomainError(
+      () =>
+        price(
+          quote({
+            lines: [line("SEED", LAKH(1n))],
+            coupon: { scope: "MERCHANT", companyId: "SEED", discount: { kind: "PERCENT", percent: 10 } },
+            speedBySeller: new Map<string, Speed>([["SEED", "STANDARD"]]),
+          }),
+        ),
+      "COUPON_NOT_APPLICABLE",
+    );
+  });
+
+  it("the coupon percent range comes from config", () => {
+    const mk = (percent: number, cfg = DEFAULT_PRICING_CONFIG): Quote =>
+      quote({
+        lines: [line("a", LAKH(1n))],
+        coupon: { scope: "PLATFORM", discount: { kind: "PERCENT", percent } },
+        speedBySeller: new Map<string, Speed>([["a", "STANDARD"]]),
+        cfg,
+      });
+    expect(DEFAULT_PRICING_CONFIG.couponPercentMin).toBe(1);
+    expect(DEFAULT_PRICING_CONFIG.couponPercentMax).toBe(90);
+    const narrow = { ...DEFAULT_PRICING_CONFIG, couponPercentMin: 5, couponPercentMax: 50 };
+    expectDomainError(() => price(mk(4, narrow)), "COUPON_INVALID");
+    expectDomainError(() => price(mk(51, narrow)), "COUPON_INVALID");
+    expect(price(mk(50, narrow)).mint).toBe(rupees(50_000n));
+  });
+
   it("merchant coupon only discounts that company's lines", () => {
     const priced = price(
       quote({
@@ -302,33 +384,46 @@ const lineArb: fc.Arbitrary<LineIn> = fc.record({
   freeStdDelivery: fc.boolean(),
 });
 
-const couponArb: fc.Arbitrary<Coupon | undefined> = fc.option(
-  fc
-    .record({
-      scope: fc.constantFrom("MERCHANT" as const, "PLATFORM" as const),
-      companyId: fc.constantFrom("co-1", "co-2", "co-3"),
-      discount: fc.oneof(
-        fc.integer({ min: 1, max: 90 }).map((percent) => ({ kind: "PERCENT" as const, percent })),
-        fc
-          .bigInt({ min: 1n, max: MAX_PRICE_PAISE })
-          .map((amountPaise) => ({ kind: "FLAT" as const, amountPaise })),
-      ),
-      minSpendPaise: fc.option(fc.bigInt({ min: 0n, max: MAX_PRICE_PAISE }), { nil: undefined }),
-    })
-    .map(({ scope, companyId, discount, minSpendPaise }): Coupon => {
-      const min = minSpendPaise === undefined ? {} : { minSpendPaise };
-      return scope === "MERCHANT" ? { scope, companyId, discount, ...min } : { scope, discount, ...min };
-    }),
-  { nil: undefined },
+const discountArb = fc.oneof(
+  fc.integer({ min: 1, max: 90 }).map((percent): CouponDiscount => ({ kind: "PERCENT", percent })),
+  fc.bigInt({ min: 1n, max: MAX_PRICE_PAISE }).map((amountPaise): CouponDiscount => ({ kind: "FLAT", amountPaise })),
 );
 
+/**
+ * A coupon valid for `lines` by construction: a merchant coupon names a player seller present in the
+ * cart, and any minimum spend is at most the eligible spend.
+ */
+function couponFor(lines: readonly LineIn[]): fc.Arbitrary<Coupon | undefined> {
+  const players = [...new Set(lines.map((l) => l.sellerId).filter((s) => s !== "SEED"))];
+  const scopes = players.length > 0 ? (["MERCHANT", "PLATFORM"] as const) : (["PLATFORM"] as const);
+  return fc.option(
+    fc
+      .record({
+        scope: fc.constantFrom(...scopes),
+        companyId: fc.constantFrom(...(players.length > 0 ? players : ["co-1"])),
+        discount: discountArb,
+        minSpendPct: fc.option(fc.integer({ min: 0, max: 100 }), { nil: undefined }),
+      })
+      .map(({ scope, companyId, discount, minSpendPct }): Coupon => {
+        const eligible = lines.filter((l) => scope === "PLATFORM" || l.sellerId === companyId);
+        const spend = eligible.reduce((a, l) => a + l.listPaise, 0n);
+        const min = minSpendPct === undefined ? {} : { minSpendPaise: (spend * BigInt(minSpendPct)) / 100n };
+        return scope === "MERCHANT" ? { scope, companyId, discount, ...min } : { scope, discount, ...min };
+      }),
+    { nil: undefined },
+  );
+}
+
 const quoteArb: fc.Arbitrary<Quote> = fc
-  .record({
-    lines: fc.array(lineArb, { minLength: 1, maxLength: 6 }),
-    coupon: couponArb,
-    speeds: fc.array(fc.constantFrom(...SPEEDS), { minLength: SELLERS.length, maxLength: SELLERS.length }),
-    isMember: fc.boolean(),
-  })
+  .array(lineArb, { minLength: 1, maxLength: 6 })
+  .chain((lines) =>
+    fc.record({
+      lines: fc.constant(lines),
+      coupon: couponFor(lines),
+      speeds: fc.array(fc.constantFrom(...SPEEDS), { minLength: SELLERS.length, maxLength: SELLERS.length }),
+      isMember: fc.boolean(),
+    }),
+  )
   .map(({ lines, coupon, speeds, isMember }) => ({
     lines,
     ...(coupon ? { coupon } : {}),
@@ -337,17 +432,89 @@ const quoteArb: fc.Arbitrary<Quote> = fc
     cfg: DEFAULT_PRICING_CONFIG,
   }));
 
-/** Price the quote; quotes the design rejects return undefined (the rejection must be a DomainError). */
+/**
+ * The only rejection a by-construction valid quote can still meet: merchant-funded free Standard
+ * delivery that exceeds the seller's proceeds on a cheap order.
+ */
+const EXPECTED_REJECTIONS = new Set(["DELIVERY_UNAVAILABLE"]);
+const stats = { accepted: 0, rejected: 0 };
+
+/** Price the quote; a rejection must be a DomainError with an expected code and is counted. */
 function tryPrice(q: Quote) {
   try {
-    return price(q);
+    const priced = price(q);
+    stats.accepted++;
+    return priced;
   } catch (e) {
     expect(e).toBeInstanceOf(DomainError);
+    expect(EXPECTED_REJECTIONS.has((e as DomainError).code), (e as DomainError).code).toBe(true);
+    stats.rejected++;
     return undefined;
   }
 }
 
 describe("pricing properties", () => {
+  afterAll(() => {
+    // Guard against vacuous properties: nearly every generated quote must actually be priced.
+    const total = stats.accepted + stats.rejected;
+    expect(total).toBeGreaterThan(0);
+    expect(stats.accepted / total).toBeGreaterThanOrEqual(0.95);
+  });
+
+  it("generated quotes are overwhelmingly valid (at least 95% priced)", () => {
+    let accepted = 0;
+    const samples = fc.sample(quoteArb, { numRuns: 500, seed: 42 });
+    for (const q of samples) if (tryPrice(q)) accepted++;
+    expect(accepted / samples.length).toBeGreaterThanOrEqual(0.95);
+  });
+
+  it("a flat coupon discounts min(coupon value, total headroom above ₹100 on eligible lines)", () => {
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.record({
+            sellerId: fc.constantFrom("co-1", "co-2"),
+            listPaise: fc.oneof(
+              fc.bigInt({ min: 100n, max: 2_000n }).map(rupees),
+              fc.bigInt({ min: 100n, max: 1_000_000n }).map(rupees),
+            ),
+          }),
+          { minLength: 1, maxLength: 6 },
+        ),
+        fc.bigInt({ min: 1n, max: rupees(2_000_000n) }),
+        fc.constantFrom("MERCHANT" as const, "PLATFORM" as const),
+        (raw, amountPaise, scope) => {
+          const lines: LineIn[] = raw.map((r, i) => ({ productId: `p${i}`, ...r, freeStdDelivery: false }));
+          const companyId = lines[0]?.sellerId ?? "co-1";
+          const coupon: Coupon =
+            scope === "MERCHANT"
+              ? { scope, companyId, discount: { kind: "FLAT", amountPaise } }
+              : { scope, discount: { kind: "FLAT", amountPaise } };
+          const priced = price(
+            quote({
+              lines,
+              coupon,
+              speedBySeller: new Map<string, Speed>([
+                ["co-1", "STANDARD"],
+                ["co-2", "STANDARD"],
+              ]),
+              isMember: true,
+            }),
+          );
+          const eligible = lines.filter((l) => scope === "PLATFORM" || l.sellerId === companyId);
+          const headroom = eligible.reduce((a, l) => a + (l.listPaise - MIN_PRICE_PAISE), 0n);
+          const expected = amountPaise < headroom ? amountPaise : headroom;
+          const given = priced.lines.reduce((a, l) => a + l.sellerDisc + l.platformDisc, 0n);
+          expect(given).toBe(expected);
+          for (const l of priced.lines) {
+            expect(l.listPaise - l.sellerDisc - l.platformDisc).toBeGreaterThanOrEqual(MIN_PRICE_PAISE);
+          }
+        },
+      ),
+      { numRuns: 500 },
+    );
+  });
+
   it("postings always sum to zero and buyerTotal matches the buyer debit", () => {
     fc.assert(
       fc.property(quoteArb, (q) => {

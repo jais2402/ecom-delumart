@@ -9,7 +9,7 @@ export type DataColumn<Row> = {
   align?: "left" | "right";
 };
 
-export type DataTableProps<Row> = Omit<ComponentPropsWithRef<"div">, "children"> & {
+export type DataTableProps<Row> = Omit<ComponentPropsWithRef<"section">, "children"> & {
   caption: string;
   columns: readonly DataColumn<Row>[];
   rows: readonly Row[];
@@ -31,16 +31,15 @@ export function DataTable<Row>({
 }: DataTableProps<Row>) {
   if (rows.length === 0) {
     return (
-      <div className={className} {...props}>
+      <section aria-label={caption} className={className} {...props}>
         <EmptyState title={emptyTitle} {...(emptyDescription ? { description: emptyDescription } : {})} />
-      </div>
+      </section>
     );
   }
   return (
-    <div
+    <section
       // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be keyboard reachable
       tabIndex={0}
-      role="region"
       aria-label={caption}
       className={cn("max-w-full overflow-x-auto rounded-lg border border-border bg-surface", className)}
       {...props}
@@ -75,6 +74,6 @@ export function DataTable<Row>({
           ))}
         </tbody>
       </table>
-    </div>
+    </section>
   );
 }

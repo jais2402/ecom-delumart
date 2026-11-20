@@ -32,7 +32,10 @@ export function OrderSummary({
   return (
     <section
       aria-label="Order summary"
-      className={cn("flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 font-body", className)}
+      className={cn(
+        "flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 font-body",
+        className,
+      )}
       {...props}
     >
       <Heading level={2} size="sm">

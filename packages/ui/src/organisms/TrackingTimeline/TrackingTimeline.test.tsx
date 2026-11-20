@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { TrackingTimeline, type TrackingStage } from "./TrackingTimeline";
+import { type TrackingStage, TrackingTimeline } from "./TrackingTimeline";
 
 const stages: TrackingStage[] = [
   { key: "placed", title: "Order placed", state: "done", time: "9:00 am" },
