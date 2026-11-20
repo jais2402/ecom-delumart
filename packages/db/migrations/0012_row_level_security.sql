@@ -89,8 +89,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 $$;
 
 REVOKE ALL ON FUNCTION core.identity_is_tombstoned(bytea, bytea), core.is_published_version(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION core.identity_is_tombstoned(bytea, bytea) TO app_web, app_jobs;
-GRANT EXECUTE ON FUNCTION core.is_published_version(uuid) TO app_web, app_jobs, npc_worker;
+GRANT EXECUTE ON FUNCTION core.identity_is_tombstoned(bytea, bytea) TO app_web, app_pay, app_jobs;
+GRANT EXECUTE ON FUNCTION core.is_published_version(uuid) TO app_web, app_pay, app_jobs, npc_worker;
 
 -- ---------------------------------------------------------------- app_jobs: all rows
 -- Background jobs act on behalf of no single user. Grants (0011) decide which
@@ -125,6 +125,8 @@ CREATE POLICY web_read ON core.config_version     FOR SELECT TO app_web USING (t
 CREATE POLICY web_read ON core.system_switch      FOR SELECT TO app_web USING (true);
 CREATE POLICY web_read ON core.fictional_locality FOR SELECT TO app_web USING (true);
 CREATE POLICY web_read ON core.fictional_landmark FOR SELECT TO app_web USING (true);
+CREATE POLICY pay_read ON core.config_version     FOR SELECT TO app_pay USING (true);
+CREATE POLICY pay_read ON core.system_switch      FOR SELECT TO app_pay USING (true);
 
 -- ---------------------------------------------------------------- identity
 -- Own row only; public handle lookups will go through a dedicated view.
@@ -135,6 +137,11 @@ CREATE POLICY web_own_update ON core.user_profile FOR UPDATE TO app_web
 -- a user creates only their own profile, and only as an ordinary active player
 CREATE POLICY web_own_insert ON core.user_profile FOR INSERT TO app_web
   WITH CHECK (id = core.app_user_id() AND role = 'PLAYER' AND NOT is_test_account AND status = 'ACTIVE');
+-- provisioning (app_pay): own profile only; role, test flag and status are not insertable (0011)
+CREATE POLICY pay_own_read ON core.user_profile FOR SELECT TO app_pay USING (id = core.app_user_id());
+CREATE POLICY pay_own_insert ON core.user_profile FOR INSERT TO app_pay WITH CHECK (id = core.app_user_id());
+CREATE POLICY pay_own_update ON core.user_profile FOR UPDATE TO app_pay
+  USING (id = core.app_user_id()) WITH CHECK (id = core.app_user_id());
 
 -- company names are storefront data; only the owner creates or renames one
 CREATE POLICY web_read ON core.company FOR SELECT TO app_web USING (true);
@@ -142,55 +149,89 @@ CREATE POLICY web_owner_insert ON core.company FOR INSERT TO app_web
   WITH CHECK (owner_user_id = core.app_user_id());
 CREATE POLICY web_owner_update ON core.company FOR UPDATE TO app_web
   USING (owner_user_id = core.app_user_id()) WITH CHECK (owner_user_id = core.app_user_id());
+-- pay locks the selling companies (LLD §4 #4) as app_pay with SELECT ... FOR UPDATE,
+-- which applies this policy's USING clause: only companies that have a published
+-- product. WITH CHECK (false) makes every real UPDATE by app_pay fail, so the UPDATE
+-- privilege (0011) is usable for locking only. app_web can lock only its own company.
+CREATE POLICY pay_read ON core.company FOR SELECT TO app_pay USING (true);
+CREATE POLICY pay_lock_seller ON core.company FOR UPDATE TO app_pay
+  USING (EXISTS (SELECT 1 FROM core.product p WHERE p.company_id = company.id AND p.status = 'PUBLISHED'))
+  WITH CHECK (false);
 
 -- ---------------------------------------------------------------- owner-scoped (user_id column)
+-- app_web: own rows, read-only except its own secrets and addresses (grants in 0011).
+-- app_pay: own rows for the money commands; its grants decide which commands apply.
 DO $$
 DECLARE
   t record;
 BEGIN
   FOR t IN
     SELECT * FROM (VALUES
-      ('core.bank_account',       'user_id'),
-      ('core.virtual_card',       'user_id'),
-      ('core.checkout_session',   'user_id'),
-      ('core.payment_attempt',    'user_id'),
-      ('core.idempotency_record', 'user_id'),
-      ('core.order_group',        'buyer_user_id'),
-      ('core.ownership',          'user_id'),
-      ('core.membership',         'user_id'),
-      ('core.coupon_redemption',  'user_id'),
-      ('ledger.grant_record',     'user_id'),
-      ('private.user_secret',     'user_id'),
-      ('private.address',         'user_id')
-    ) AS v(tbl, col)
+      ('core.bank_account',       'user_id',       false, true),
+      ('core.virtual_card',       'user_id',       false, true),
+      ('core.checkout_session',   'user_id',       false, true),
+      ('core.payment_attempt',    'user_id',       false, true),
+      ('core.idempotency_record', 'user_id',       false, true),
+      ('core.order_group',        'buyer_user_id', false, true),
+      ('core.ownership',          'user_id',       false, true),
+      ('core.membership',         'user_id',       false, true),
+      ('core.coupon_redemption',  'user_id',       false, true),
+      ('ledger.grant_record',     'user_id',       false, true),
+      ('private.user_secret',     'user_id',       true,  false),
+      ('private.address',         'user_id',       true,  false)
+    ) AS v(tbl, col, web_writes, pay)
   LOOP
-    EXECUTE format(
-      'CREATE POLICY web_owner ON %s TO app_web USING (%I = core.app_user_id()) WITH CHECK (%I = core.app_user_id())',
-      t.tbl, t.col, t.col);
+    IF t.web_writes THEN
+      EXECUTE format(
+        'CREATE POLICY web_owner ON %s TO app_web USING (%I = core.app_user_id()) WITH CHECK (%I = core.app_user_id())',
+        t.tbl, t.col, t.col);
+    ELSE
+      EXECUTE format('CREATE POLICY web_owner ON %s FOR SELECT TO app_web USING (%I = core.app_user_id())',
+        t.tbl, t.col);
+    END IF;
+    IF t.pay THEN
+      EXECUTE format(
+        'CREATE POLICY pay_owner ON %s TO app_pay USING (%I = core.app_user_id()) WITH CHECK (%I = core.app_user_id())',
+        t.tbl, t.col, t.col);
+    END IF;
   END LOOP;
 END $$;
+CREATE POLICY pay_owner_read ON private.address FOR SELECT TO app_pay USING (user_id = core.app_user_id());
+
+-- A bank account is opened on the user's own ledger account, and a card on the user's
+-- own bank account (restrictive: ANDed with pay_owner).
+CREATE POLICY pay_own_ledger_account ON core.bank_account AS RESTRICTIVE FOR INSERT TO app_pay
+  WITH CHECK (EXISTS (SELECT 1 FROM ledger.ledger_account a
+                       WHERE a.id = ledger_account_id AND a.type = 'USER' AND a.user_id = core.app_user_id()));
+CREATE POLICY pay_own_bank_account ON core.virtual_card AS RESTRICTIVE FOR INSERT TO app_pay
+  WITH CHECK (EXISTS (SELECT 1 FROM core.bank_account b
+                       WHERE b.id = bank_account_id AND b.user_id = core.app_user_id()));
 
 -- challenges belong to the user through their payment attempt (itself owner-scoped)
-CREATE POLICY web_owner ON core.payment_challenge TO app_web
+CREATE POLICY web_owner ON core.payment_challenge FOR SELECT TO app_web
+  USING (EXISTS (SELECT 1 FROM core.payment_attempt a WHERE a.id = attempt_id));
+CREATE POLICY pay_owner ON core.payment_challenge TO app_pay
   USING (EXISTS (SELECT 1 FROM core.payment_attempt a WHERE a.id = attempt_id))
   WITH CHECK (EXISTS (SELECT 1 FROM core.payment_attempt a WHERE a.id = attempt_id));
 
 -- ---------------------------------------------------------------- orders: buyer and seller sides
 CREATE POLICY seller_order_parties ON core.seller_order FOR SELECT TO app_web
   USING (buyer_user_id = core.app_user_id() OR company_id = core.app_company_id());
--- seller orders are created inside the buyer's pay transaction
-CREATE POLICY seller_order_buyer_insert ON core.seller_order FOR INSERT TO app_web
-  WITH CHECK (buyer_user_id = core.app_user_id());
+-- seller orders, lines and shipments are created inside the buyer's pay transaction (app_pay)
+CREATE POLICY pay_buyer ON core.seller_order TO app_pay
+  USING (buyer_user_id = core.app_user_id()) WITH CHECK (buyer_user_id = core.app_user_id());
 
 -- lines and shipments follow their seller order (visible to buyer or seller company)
 CREATE POLICY order_line_parties ON core.order_line FOR SELECT TO app_web
   USING (EXISTS (SELECT 1 FROM core.seller_order so WHERE so.id = seller_order_id));
-CREATE POLICY order_line_buyer_insert ON core.order_line FOR INSERT TO app_web
+CREATE POLICY pay_buyer ON core.order_line TO app_pay
+  USING (EXISTS (SELECT 1 FROM core.seller_order so WHERE so.id = seller_order_id))
   WITH CHECK (EXISTS (SELECT 1 FROM core.seller_order so
                        WHERE so.id = seller_order_id AND so.buyer_user_id = core.app_user_id()));
 CREATE POLICY shipment_parties ON core.shipment FOR SELECT TO app_web
   USING (EXISTS (SELECT 1 FROM core.seller_order so WHERE so.id = seller_order_id));
-CREATE POLICY shipment_buyer_insert ON core.shipment FOR INSERT TO app_web
+CREATE POLICY pay_buyer ON core.shipment TO app_pay
+  USING (EXISTS (SELECT 1 FROM core.seller_order so WHERE so.id = seller_order_id))
   WITH CHECK (EXISTS (SELECT 1 FROM core.seller_order so
                        WHERE so.id = seller_order_id AND so.buyer_user_id = core.app_user_id()));
 
@@ -202,11 +243,16 @@ CREATE POLICY web_read ON core.product FOR SELECT TO app_web
       OR EXISTS (SELECT 1 FROM core.ownership o WHERE o.product_id = product.id));
 CREATE POLICY web_company_insert ON core.product FOR INSERT TO app_web
   WITH CHECK (seller_type = 'USER' AND company_id = core.app_company_id() AND status = 'DRAFT');
--- the company moves its own listings (submit); the pay transaction issues stock of
--- published products (column grants in 0011 limit this to status, available_units)
+-- the company moves its own listings (submit); the column grant limits this to status
 CREATE POLICY web_update ON core.product FOR UPDATE TO app_web
-  USING (company_id = core.app_company_id() OR status = 'PUBLISHED')
-  WITH CHECK (company_id = core.app_company_id() OR status = 'PUBLISHED');
+  USING (company_id = core.app_company_id())
+  WITH CHECK (company_id = core.app_company_id());
+-- app_pay: reads published products (and ones the buyer owns); issues stock of, and so
+-- locks, published products only (column grant: available_units)
+CREATE POLICY pay_read ON core.product FOR SELECT TO app_pay
+  USING (status = 'PUBLISHED' OR EXISTS (SELECT 1 FROM core.ownership o WHERE o.product_id = product.id));
+CREATE POLICY pay_issue ON core.product FOR UPDATE TO app_pay
+  USING (status = 'PUBLISHED') WITH CHECK (status = 'PUBLISHED');
 
 CREATE POLICY web_read ON core.product_version FOR SELECT TO app_web
   USING (core.is_published_version(id)
@@ -215,55 +261,81 @@ CREATE POLICY web_company_insert ON core.product_version FOR INSERT TO app_web
   WITH CHECK (EXISTS (SELECT 1 FROM core.product p WHERE p.id = product_id AND p.company_id = core.app_company_id()));
 CREATE POLICY npc_published ON core.product_version FOR SELECT TO npc_worker
   USING (core.is_published_version(id));
+CREATE POLICY pay_published ON core.product_version FOR SELECT TO app_pay
+  USING (core.is_published_version(id));
 
--- units follow their (visible) product; the pay transaction issues them
+-- units follow their (visible) product
 CREATE POLICY web_visible_product ON core.inventory_unit FOR SELECT TO app_web
   USING (EXISTS (SELECT 1 FROM core.product p WHERE p.id = product_id));
-CREATE POLICY web_issue ON core.inventory_unit FOR UPDATE TO app_web
-  USING (EXISTS (SELECT 1 FROM core.product p WHERE p.id = product_id))
-  WITH CHECK (EXISTS (SELECT 1 FROM core.product p WHERE p.id = product_id));
--- warehouses: the company's own, or ones holding units of visible products (pay
--- decrements used); column grant limits app_web to `used`
+-- the pay transaction (app_pay) issues AVAILABLE units of published products, and can
+-- only move them to ISSUED with an order line (never back, never to other states)
+CREATE POLICY pay_read ON core.inventory_unit FOR SELECT TO app_pay
+  USING (EXISTS (SELECT 1 FROM core.product p WHERE p.id = product_id));
+CREATE POLICY pay_issue ON core.inventory_unit FOR UPDATE TO app_pay
+  USING (state = 'AVAILABLE' AND EXISTS (SELECT 1 FROM core.product p WHERE p.id = product_id AND p.status = 'PUBLISHED'))
+  WITH CHECK (state = 'ISSUED' AND order_line_id IS NOT NULL);
+-- warehouses: the company's own, or ones holding units of visible products
 CREATE POLICY web_read ON core.warehouse FOR SELECT TO app_web
   USING (company_id = core.app_company_id()
       OR EXISTS (SELECT 1 FROM core.inventory_unit u WHERE u.warehouse_id = warehouse.id));
-CREATE POLICY web_update ON core.warehouse FOR UPDATE TO app_web
-  USING (company_id = core.app_company_id()
-      OR EXISTS (SELECT 1 FROM core.inventory_unit u WHERE u.warehouse_id = warehouse.id))
+-- app_pay locks and decrements `used` (column grant) of warehouses holding AVAILABLE
+-- units of published products
+CREATE POLICY pay_read ON core.warehouse FOR SELECT TO app_pay
+  USING (EXISTS (SELECT 1 FROM core.inventory_unit u WHERE u.warehouse_id = warehouse.id));
+CREATE POLICY pay_issue ON core.warehouse FOR UPDATE TO app_pay
+  USING (EXISTS (SELECT 1 FROM core.inventory_unit u JOIN core.product p ON p.id = u.product_id
+                  WHERE u.warehouse_id = warehouse.id AND p.status = 'PUBLISHED'))
   WITH CHECK (true);
 
 -- ---------------------------------------------------------------- promotions
 -- Coupons are redeemed by code inside pay (cap counter); merchants create their own.
 CREATE POLICY web_read ON core.coupon FOR SELECT TO app_web USING (status = 'ACTIVE' OR company_id = core.app_company_id());
-CREATE POLICY web_redeem ON core.coupon FOR UPDATE TO app_web USING (status = 'ACTIVE') WITH CHECK (status = 'ACTIVE');
 CREATE POLICY web_company_insert ON core.coupon FOR INSERT TO app_web
   WITH CHECK (scope = 'MERCHANT' AND company_id = core.app_company_id());
+-- the cap counter moves only in pay (app_pay) and must equal the redemptions (0016)
+CREATE POLICY pay_read ON core.coupon FOR SELECT TO app_pay USING (status = 'ACTIVE');
+CREATE POLICY pay_redeem ON core.coupon FOR UPDATE TO app_pay USING (status = 'ACTIVE') WITH CHECK (status = 'ACTIVE');
 CREATE POLICY web_active ON core.promo_campaign FOR SELECT TO app_web USING (status = 'ACTIVE');
-CREATE POLICY web_spend ON core.promo_campaign FOR UPDATE TO app_web
-  USING (status = 'ACTIVE') WITH CHECK (status = 'ACTIVE');
 
 -- ---------------------------------------------------------------- ledger
 -- A user's own USER account; MINT and SINK rows (no personal data) are readable.
+-- app_web reads only; app_pay creates the user's own account at provisioning.
 CREATE POLICY web_read ON ledger.ledger_account FOR SELECT TO app_web
   USING (user_id = core.app_user_id() OR type <> 'USER');
-CREATE POLICY web_own_insert ON ledger.ledger_account FOR INSERT TO app_web
+-- pay must credit sellers, so app_pay may also see the USER account id of the owner of
+-- a company that has a published product (an id only; it cannot read that account's
+-- postings or wallet, and 0016 forbids debiting any account but the actor's own).
+CREATE POLICY pay_read ON ledger.ledger_account FOR SELECT TO app_pay
+  USING (user_id = core.app_user_id() OR type <> 'USER'
+      OR EXISTS (SELECT 1 FROM core.company c JOIN core.product p ON p.company_id = c.id
+                  WHERE c.owner_user_id = ledger_account.user_id AND p.status = 'PUBLISHED'));
+CREATE POLICY pay_own_insert ON ledger.ledger_account FOR INSERT TO app_pay
   WITH CHECK (type = 'USER' AND user_id = core.app_user_id());
 
 -- Postings: the user's transactions post to other accounts (seller, MINT, SINK), so
--- inserts are open (the integrity triggers in 0003 govern them); reads are own-account.
+-- app_pay inserts are open here and governed by the integrity triggers (0003, 0014,
+-- 0016); reads are own-account.
 CREATE POLICY web_own_read ON ledger.posting FOR SELECT TO app_web
   USING (account_id IN (SELECT a.id FROM ledger.ledger_account a
                          WHERE a.type = 'USER' AND a.user_id = core.app_user_id()));
-CREATE POLICY web_insert ON ledger.posting FOR INSERT TO app_web WITH CHECK (true);
+CREATE POLICY pay_own_read ON ledger.posting FOR SELECT TO app_pay
+  USING (account_id IN (SELECT a.id FROM ledger.ledger_account a
+                         WHERE a.type = 'USER' AND a.user_id = core.app_user_id()));
+CREATE POLICY pay_insert ON ledger.posting FOR INSERT TO app_pay WITH CHECK (true);
 
 -- Journals: readable when they touch the user's account (posting policy applies inside).
+-- app_pay's journal-type insert policy is in 0014.
 CREATE POLICY web_own_read ON ledger.journal FOR SELECT TO app_web
   USING (EXISTS (SELECT 1 FROM ledger.posting p WHERE p.journal_id = journal.id));
-CREATE POLICY web_insert ON ledger.journal FOR INSERT TO app_web WITH CHECK (true);
+CREATE POLICY pay_own_read ON ledger.journal FOR SELECT TO app_pay
+  USING (EXISTS (SELECT 1 FROM ledger.posting p WHERE p.journal_id = journal.id));
 
 -- Wallets: own only. Other parties' wallets are brought in line through
 -- ledger.sync_wallets(), which can only make a wallet equal its postings.
-CREATE POLICY web_owner ON ledger.wallet TO app_web
+CREATE POLICY web_owner ON ledger.wallet FOR SELECT TO app_web
+  USING (account_id IN (SELECT a.id FROM ledger.ledger_account a
+                         WHERE a.type = 'USER' AND a.user_id = core.app_user_id()));
+CREATE POLICY pay_owner ON ledger.wallet TO app_pay
   USING (account_id IN (SELECT a.id FROM ledger.ledger_account a
                          WHERE a.type = 'USER' AND a.user_id = core.app_user_id()))
   WITH CHECK (account_id IN (SELECT a.id FROM ledger.ledger_account a
@@ -271,6 +343,7 @@ CREATE POLICY web_owner ON ledger.wallet TO app_web
 
 -- ---------------------------------------------------------------- audit and analytics: append-only for the web
 CREATE POLICY web_append ON audit.outbox      FOR INSERT TO app_web WITH CHECK (true);
+CREATE POLICY pay_append ON audit.outbox      FOR INSERT TO app_pay WITH CHECK (true);
 CREATE POLICY web_append ON audit.audit_log   FOR INSERT TO app_web WITH CHECK (true);
 CREATE POLICY web_append ON analytics.event   FOR INSERT TO app_web WITH CHECK (true);
 

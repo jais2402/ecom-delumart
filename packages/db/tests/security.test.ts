@@ -5,6 +5,7 @@ import { withTransaction } from "../src/transaction";
 import {
   createProfile,
   createTestDatabase,
+  plant,
   provisionAccount,
   provisionInput,
   stateOf,
@@ -80,16 +81,20 @@ describe("roles, grants and row-level security", () => {
     const b = await provisionAccount(pool, provisionInput({ userId: uuidv7() }));
     const company = uuidv7();
     const group = uuidv7();
-    await pool.query(
-      `INSERT INTO core.order_group (id, buyer_user_id, session_id, payment_attempt_id, journal_id, buyer_source, total_paise, config_version)
-       VALUES ($1, $2, $3, $4, $5, 'PLAYER', 10000, 1)`,
-      [group, b.userId, uuidv7(), uuidv7(), uuidv7()],
-    );
-    await pool.query(
-      `INSERT INTO core.seller_order (id, order_group_id, buyer_user_id, company_id, seller_type, list_paise, fee_paise, net_paise)
-       VALUES ($1, $2, $3, $4, 'USER', 10000, 500, 9500)`,
-      [uuidv7(), group, b.userId, company],
-    );
+    // visibility fixture only: an order without its journal, session or attempt is impossible
+    // under the money rules (0016), so it is planted with triggers and foreign keys off
+    await plant(pool, async (c) => {
+      await c.query(
+        `INSERT INTO core.order_group (id, buyer_user_id, session_id, payment_attempt_id, journal_id, buyer_source, total_paise, config_version)
+         VALUES ($1, $2, $3, $4, $5, 'PLAYER', 10000, 1)`,
+        [group, b.userId, uuidv7(), uuidv7(), uuidv7()],
+      );
+      await c.query(
+        `INSERT INTO core.seller_order (id, order_group_id, buyer_user_id, company_id, seller_type, list_paise, fee_paise, net_paise)
+         VALUES ($1, $2, $3, $4, 'USER', 10000, 500, 9500)`,
+        [uuidv7(), group, b.userId, company],
+      );
+    });
     const seen = await withTransaction(
       pool,
       async (c) => {
@@ -245,17 +250,21 @@ describe("roles, grants and row-level security", () => {
     expect(grants.rows).toEqual([]);
   });
 
-  it("ledger grants: insert-only for app roles, wallet updatable, nothing for research_ro", async () => {
+  it("ledger grants: read-only for app_web, insert-only for app_pay and app_jobs, wallet updatable, nothing for research_ro", async () => {
     const { rows } = await pool.query<{ r: string; t: string; p: string; has: boolean }>(
       `SELECT r, t, p, has_table_privilege(r, t, p) AS has
-         FROM unnest(ARRAY['app_web','app_jobs','research_ro']) r,
+         FROM unnest(ARRAY['app_web','app_pay','app_jobs','research_ro']) r,
               unnest(ARRAY['ledger.journal','ledger.posting','ledger.grant_record','ledger.wallet']) t,
               unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) p`,
     );
     const held = rows.filter((x) => x.has).map((x) => `${x.r} ${x.p} ${x.t}`);
     expect(held.sort()).toEqual(
       [
-        ...["app_web", "app_jobs"].flatMap((r) => [
+        "app_web SELECT ledger.journal",
+        "app_web SELECT ledger.posting",
+        "app_web SELECT ledger.grant_record",
+        "app_web SELECT ledger.wallet",
+        ...["app_pay", "app_jobs"].flatMap((r) => [
           `${r} SELECT ledger.journal`,
           `${r} INSERT ledger.journal`,
           `${r} SELECT ledger.posting`,

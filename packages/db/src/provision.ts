@@ -81,7 +81,9 @@ async function loadExisting(client: PoolClient, userId: string): Promise<Provisi
  * unexpired identity tombstone; the lookup happens here, inside the transaction,
  * through core.identity_is_tombstoned() (callers cannot read or override it). Concurrent and repeated calls serialise on the
  * profile row lock and return the existing records; the grant is never repeated
- * (US-01, US-14). The one_starter unique index is the last line of defence.
+ * (US-01, US-14). The one_starter unique index is the last line of defence. Runs as the
+ * money-command role app_pay; the database itself requires the STARTER grant to be the fixed
+ * amount, for the acting user, in the transaction that opens the account (migration 0016).
  */
 export async function provisionAccount(pool: Pool, input: ProvisionInput): Promise<ProvisionResult> {
   return withTransaction(
@@ -181,6 +183,7 @@ export async function provisionAccount(pool: Pool, input: ProvisionInput): Promi
         grantRecordId,
       };
     },
-    { userId: input.userId },
+    // a money command: runs as app_pay (the STARTER grant, ledger account, bank account, card)
+    { userId: input.userId, role: "app_pay" },
   );
 }

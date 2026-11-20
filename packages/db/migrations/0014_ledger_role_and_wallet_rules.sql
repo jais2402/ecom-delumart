@@ -1,11 +1,12 @@
 -- Closes three ledger gaps.
 --
--- A1. Journal types by role. app_web may create only the journals a user's own
---     actions produce; COMPENSATION, REVERSAL and ACCOUNT_RETIREMENT are admin
---     actions and run only in the job runner (app_jobs, whose jobs_all policy is
---     unchanged). Enforced by the row-level-security WITH CHECK on insert.
-DROP POLICY web_insert ON ledger.journal;
-CREATE POLICY web_insert ON ledger.journal FOR INSERT TO app_web
+-- A1. Journal types by role. The money-command role (app_pay) may create only the
+--     journals a user's own actions produce; COMPENSATION, REVERSAL and
+--     ACCOUNT_RETIREMENT are admin actions and run only in the job runner (app_jobs,
+--     whose jobs_all policy is unchanged). Enforced by the row-level-security WITH CHECK
+--     on insert, and again by a role check in 0016. app_web inserts no journal at all
+--     (no INSERT privilege, 0011).
+CREATE POLICY pay_insert ON ledger.journal FOR INSERT TO app_pay
   WITH CHECK (event_type IN ('STARTER_GRANT','RELIEF_GRANT','PURCHASE','COMPANY_REGISTRATION',
                              'WAREHOUSE_PURCHASE','MEMBERSHIP'));
 

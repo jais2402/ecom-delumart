@@ -21,6 +21,9 @@ BEGIN
     SELECT * FROM (VALUES
       ('migrator',      false, false, true),
       ('app_web',       true,  true,  true),
+      -- money commands (provisioning, checkout, payment attempts, pay); a separate
+      -- credential and pool from app_web, which is never a member of it (0011)
+      ('app_pay',       true,  true,  true),
       ('app_jobs',      true,  true,  true),
       ('npc_worker',    true,  true,  true),
       ('research_ro',   true,  true,  true),
@@ -59,10 +62,27 @@ BEGIN
   END LOOP;
 END $$;
 
+-- app_web must never be able to SET ROLE app_pay (or inherit its privileges): drop
+-- any membership of app_pay held by another application role, however it got there.
+DO $$
+DECLARE
+  m record;
+BEGIN
+  FOR m IN
+    SELECT r.rolname AS member
+      FROM pg_auth_members am
+      JOIN pg_roles g ON g.oid = am.roleid AND g.rolname = 'app_pay'
+      JOIN pg_roles r ON r.oid = am.member
+     WHERE r.rolname IN ('app_web', 'app_jobs', 'npc_worker', 'research_ro', 'anon', 'authenticated')
+  LOOP
+    EXECUTE format('REVOKE app_pay FROM %I', m.member);
+  END LOOP;
+END $$;
+
 -- No role but the owner creates objects or temporary tables in this database.
 DO $$
 BEGIN
-  EXECUTE format('REVOKE CREATE, TEMPORARY ON DATABASE %I FROM PUBLIC, app_web, app_jobs, npc_worker, research_ro',
+  EXECUTE format('REVOKE CREATE, TEMPORARY ON DATABASE %I FROM PUBLIC, app_web, app_pay, app_jobs, npc_worker, research_ro',
                  current_database());
 END $$;
 
@@ -75,7 +95,7 @@ CREATE SCHEMA IF NOT EXISTS audit;
 CREATE SCHEMA IF NOT EXISTS research;
 
 -- Nobody but the owner creates objects in public.
-REVOKE CREATE ON SCHEMA public FROM PUBLIC, app_web, app_jobs, npc_worker, research_ro;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC, app_web, app_pay, app_jobs, npc_worker, research_ro;
 
 -- Needed for the membership exclusion constraint (uuid WITH =).
 CREATE EXTENSION IF NOT EXISTS btree_gist;

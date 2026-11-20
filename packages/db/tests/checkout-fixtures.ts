@@ -8,7 +8,7 @@ import {
   type SellerQuote,
 } from "../src/checkout";
 import type { ProvisionResult } from "../src/provision";
-import { provisionAccount, provisionInput, uuidv7 } from "./helpers";
+import { inTx, provisionAccount, provisionInput, uuidv7 } from "./helpers";
 
 export const RUPEE = 100n;
 export const LAKH = 100_000n * RUPEE;
@@ -49,10 +49,39 @@ export interface ProductFixture {
   pricePaise: bigint;
 }
 
-/** A PUBLISHED product with a current version; stocked modes get `units` AVAILABLE units. */
+/**
+ * A PUBLISHED product with a current version; stocked modes get `units` AVAILABLE units.
+ * Written in one transaction: product.available_units and warehouse.used must equal the
+ * AVAILABLE units at commit (migration 0016).
+ */
 export async function product(
   pool: pg.Pool,
-  opts: { seller?: Seller; mode: Mode; pricePaise: bigint; units?: number; freeStd?: boolean },
+  opts: {
+    seller?: Seller;
+    mode: Mode;
+    pricePaise: bigint;
+    units?: number;
+    freeStd?: boolean;
+    express?: boolean;
+    zap?: boolean;
+    warehouseId?: string;
+  },
+): Promise<ProductFixture> {
+  return inTx(pool, (c) => productIn(c, opts));
+}
+
+async function productIn(
+  pool: pg.PoolClient,
+  opts: {
+    seller?: Seller;
+    mode: Mode;
+    pricePaise: bigint;
+    units?: number;
+    freeStd?: boolean;
+    express?: boolean;
+    zap?: boolean;
+    warehouseId?: string;
+  },
 ): Promise<ProductFixture> {
   const id = uuidv7();
   const versionId = uuidv7();
@@ -60,8 +89,8 @@ export async function product(
   const seed = opts.mode === "UNLIMITED_SEED";
   await pool.query(
     `INSERT INTO core.product (id, company_id, seller_type, status, category, inventory_mode, exclusive_supply,
-                               available_units, free_standard_delivery, published_at)
-     VALUES ($1, $2, $3, 'PUBLISHED', 'gadgets', $4, $5, $6, $7, now())`,
+                               available_units, free_standard_delivery, offers_express, zap_flag, published_at)
+     VALUES ($1, $2, $3, 'PUBLISHED', 'gadgets', $4, $5, $6, $7, $8, $9, now())`,
     [
       id,
       seed ? null : (opts.seller?.companyId ?? null),
@@ -70,6 +99,8 @@ export async function product(
       opts.mode === "EXCLUSIVE" ? units : null,
       units,
       opts.freeStd ?? false,
+      opts.express ?? false,
+      opts.zap ?? false,
     ],
   );
   await pool.query(
@@ -84,11 +115,11 @@ export async function product(
       await pool.query(
         `INSERT INTO core.inventory_unit (id, product_id, warehouse_id, serial, state)
          VALUES ($1, $2, $3, $4, 'AVAILABLE')`,
-        [uuidv7(), id, opts.seller.warehouseId, serial],
+        [uuidv7(), id, opts.warehouseId ?? opts.seller.warehouseId, serial],
       );
     }
     await pool.query("UPDATE core.warehouse SET used = used + $2 WHERE id = $1", [
-      opts.seller.warehouseId,
+      opts.warehouseId ?? opts.seller.warehouseId,
       units,
     ]);
   }

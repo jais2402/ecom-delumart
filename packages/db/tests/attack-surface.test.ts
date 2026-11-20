@@ -7,6 +7,7 @@ import {
   commitState,
   countRows,
   createTestDatabase,
+  plant,
   provisionAccount,
   provisionInput,
   sqlState,
@@ -40,16 +41,20 @@ describe("attack surface: app_web acting as user A", () => {
       [b.userId],
     );
     const group = uuidv7();
-    await pool.query(
-      `INSERT INTO core.order_group (id, buyer_user_id, session_id, payment_attempt_id, journal_id, buyer_source, total_paise, config_version)
-       VALUES ($1, $2, $3, $4, $5, 'PLAYER', 10000, 1)`,
-      [group, b.userId, uuidv7(), uuidv7(), uuidv7()],
-    );
-    await pool.query(
-      `INSERT INTO core.seller_order (id, order_group_id, buyer_user_id, company_id, seller_type, list_paise, fee_paise, net_paise)
-       VALUES ($1, $2, $3, NULL, 'SEED', 10000, 0, 10000)`,
-      [uuidv7(), group, b.userId],
-    );
+    // visibility fixture: an order without journal, session or attempt cannot be created under
+    // the money rules (0016), so it is planted with triggers and foreign keys off
+    await plant(pool, async (c) => {
+      await c.query(
+        `INSERT INTO core.order_group (id, buyer_user_id, session_id, payment_attempt_id, journal_id, buyer_source, total_paise, config_version)
+         VALUES ($1, $2, $3, $4, $5, 'PLAYER', 10000, 1)`,
+        [group, b.userId, uuidv7(), uuidv7(), uuidv7()],
+      );
+      await c.query(
+        `INSERT INTO core.seller_order (id, order_group_id, buyer_user_id, company_id, seller_type, list_paise, fee_paise, net_paise)
+         VALUES ($1, $2, $3, NULL, 'SEED', 10000, 0, 10000)`,
+        [uuidv7(), group, b.userId],
+      );
+    });
     tombstone = randomBytes(32);
     await pool.query(
       "INSERT INTO core.identity_tombstone (fingerprint, kind, expires_at) VALUES ($1, 'EMAIL', now() + interval '30 days')",
@@ -121,23 +126,23 @@ describe("attack surface: app_web acting as user A", () => {
     expect(state).toBe("42501");
   });
 
-  it("cannot update a wallet without postings", async () => {
-    const state = await commitState(pool, asA(), (c) =>
+  it("cannot update a wallet (no privilege); nor can app_pay without postings", async () => {
+    const raise = (c: pg.PoolClient) =>
       c.query("UPDATE ledger.wallet SET available_paise = available_paise + 100000 WHERE account_id = $1", [
         a.ledgerAccountId,
-      ]),
-    );
-    expect(state).toBe("23514");
+      ]);
+    expect(await commitState(pool, asA(), raise)).toBe("42501");
+    expect(await commitState(pool, { role: "app_pay", userId: a.userId }, raise)).toBe("23514");
   });
 
-  it("cannot add postings to an old journal", async () => {
-    const state = await commitState(pool, asA(), (c) =>
+  it("cannot add postings to an old journal (no privilege); nor can app_pay", async () => {
+    const post = (c: pg.PoolClient) =>
       c.query(
         "INSERT INTO ledger.posting (journal_id, account_id, amount, memo) VALUES ($1, $2, -100000, 'x'), ($1, $3, 100000, 'x')",
         [a.starterJournalId, MINT_ACCOUNT_ID, a.ledgerAccountId],
-      ),
-    );
-    expect(state).toBe("23514");
+      );
+    expect(await commitState(pool, asA(), post)).toBe("42501");
+    expect(await commitState(pool, { role: "app_pay", userId: a.userId }, post)).toBe("23514");
   });
 
   it("cannot delete a tombstone", async () => {

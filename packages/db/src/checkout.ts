@@ -1,8 +1,12 @@
 /**
- * Checkout and pay (LLD §5.2, §5.3, lock order §4). Every command runs as the app_web
- * role inside one transaction with app.user_id set, so row-level security applies.
- * Every amount comes from `price()` in @delulu/core; nothing here computes money
- * beyond summing what `price()` returned.
+ * Checkout and pay (LLD §5.2, §5.3, lock order §4). Every command runs as the
+ * money-command role app_pay (never app_web, which holds no write privilege on money,
+ * orders or stock) inside one transaction with app.user_id set, so row-level security
+ * applies. Every amount comes from `price()` in @delulu/core; nothing here computes
+ * money beyond summing what `price()` returned. pay() trusts nothing in the stored quote
+ * but the buyer's choices (products, speed per seller, coupon, address): prices,
+ * versions, coupon terms, delivery eligibility and fees are rebuilt from locked rows.
+ * The database re-checks the result at commit (migration 0016).
  */
 import { createHash, randomBytes } from "node:crypto";
 import {
@@ -311,20 +315,16 @@ function busyOr(error: unknown): unknown {
   return error;
 }
 
-/** Runs fn as app_web with app.user_id set, under the LLD §4 timeouts. */
-async function asWeb<T>(pool: Pool, userId: string, fn: (c: PoolClient) => Promise<T>): Promise<T> {
+/** Runs fn as app_pay with app.user_id set, under the LLD §4 timeouts. */
+async function asPay<T>(pool: Pool, userId: string, fn: (c: PoolClient) => Promise<T>): Promise<T> {
   requireUuid(userId, "userId");
   try {
-    return await withTransaction(
-      pool,
-      async (c) => {
-        await c.query("SET LOCAL ROLE app_web");
-        await c.query("SET LOCAL lock_timeout = '2s'");
-        await c.query("SET LOCAL statement_timeout = '5s'");
-        return fn(c);
-      },
-      { userId, lockTimeout: "2s", statementTimeout: "5s" },
-    );
+    return await withTransaction(pool, fn, {
+      role: "app_pay",
+      userId,
+      lockTimeout: "2s",
+      statementTimeout: "5s",
+    });
   } catch (error) {
     throw busyOr(error);
   }
@@ -372,6 +372,23 @@ async function idemComplete(
       WHERE user_id = $1 AND command = $2 AND key = $3`,
     [userId, command, key, status, JSON.stringify(response)],
   );
+}
+
+/**
+ * Delivery speed eligibility (LLD §5.2): Express only if every product offers it; Zap
+ * only for seed items flagged for it or for units held in a Zap hub warehouse.
+ */
+function speedOffered(
+  speed: Speed,
+  sellerId: string,
+  products: readonly { id: string; offers_express: boolean; zap_flag: boolean }[],
+  inHub: ReadonlySet<string>,
+): boolean {
+  if (speed === "STANDARD") return true;
+  if (speed === "EXPRESS") return products.every((p) => p.offers_express);
+  return sellerId === SEED_SELLER
+    ? products.every((p) => p.zap_flag)
+    : products.every((p) => inHub.has(p.id));
 }
 
 function isStocked(mode: string): boolean {
@@ -486,7 +503,7 @@ export async function createCheckoutSession(
     addressId: input.addressId ?? null,
   });
 
-  return asWeb(pool, input.userId, async (c) => {
+  return asPay(pool, input.userId, async (c) => {
     const idem = await idemBegin(c, input.userId, "checkout.create", input.idempotencyKey, hash);
     if (idem.completed) {
       const r = idem.response as { sessionId: string; expiresAt: string; quote: StoredQuote };
@@ -579,6 +596,12 @@ export async function createCheckoutSession(
       };
     });
 
+    const hub = await c.query<{ product_id: string }>(
+      `SELECT DISTINCT u.product_id FROM core.inventory_unit u JOIN core.warehouse w ON w.id = u.warehouse_id
+        WHERE u.product_id = ANY($1::uuid[]) AND u.state = 'AVAILABLE' AND w.zap_hub`,
+      [productIds],
+    );
+    const inHub = new Set(hub.rows.map((r) => r.product_id));
     const speedBySeller: Record<string, Speed> = {};
     for (const sellerId of new Set(lines.map((l) => l.sellerId))) {
       const speed = input.speedBySeller[sellerId];
@@ -588,11 +611,7 @@ export async function createCheckoutSession(
         const p = byId.get(id);
         return p && (p.company_id ?? SEED_SELLER) === sellerId ? [p] : [];
       });
-      const ok =
-        speed === "STANDARD" ||
-        (speed === "EXPRESS" && own.every((p) => p.offers_express)) ||
-        (speed === "ZAP" && sellerId === SEED_SELLER && own.every((p) => p.zap_flag));
-      if (!ok)
+      if (!speedOffered(speed, sellerId, own, inHub))
         throw new DomainError("DELIVERY_UNAVAILABLE", "that delivery speed is not offered", { sellerId });
       speedBySeller[sellerId] = speed;
     }
@@ -682,10 +701,10 @@ export async function createPaymentAttempt(
   else if (input.cardId !== undefined) {
     throw new DomainError("VALIDATION_FAILED", "a card is only given for CARD payments");
   }
-  return asWeb(pool, input.userId, async (c) => {
+  return asPay(pool, input.userId, async (c) => {
     const { rows } = await c.query<{ state: string; expired: boolean }>(
-      "SELECT state, expires_at <= now() AS expired FROM core.checkout_session WHERE id = $1",
-      [input.sessionId],
+      "SELECT state, expires_at <= now() AS expired FROM core.checkout_session WHERE id = $1 AND user_id = $2",
+      [input.sessionId, input.userId],
     );
     const session = rows[0];
     if (!session) throw new DomainError("NOT_FOUND", "checkout session not found");
@@ -696,8 +715,8 @@ export async function createPaymentAttempt(
         throw new DomainError("METHOD_UNAVAILABLE", "card payments are switched off");
       }
       const card = await c.query<CardRow>(
-        "SELECT status, merchant_scope FROM core.virtual_card WHERE id = $1",
-        [input.cardId],
+        "SELECT status, merchant_scope FROM core.virtual_card WHERE id = $1 AND user_id = $2",
+        [input.cardId, input.userId],
       );
       const problem = cardProblem(card.rows[0]);
       if (problem) throw new DomainError(...problem);
@@ -722,16 +741,17 @@ export async function markAttemptAuthenticated(
   input: { userId: string; attemptId: string },
 ): Promise<void> {
   requireUuid(input.attemptId, "attemptId");
-  await asWeb(pool, input.userId, async (c) => {
+  await asPay(pool, input.userId, async (c) => {
     const { rows } = await c.query<{ state: string; method: string }>(
-      "SELECT state, method FROM core.payment_attempt WHERE id = $1 FOR UPDATE",
-      [input.attemptId],
+      "SELECT state, method FROM core.payment_attempt WHERE id = $1 AND user_id = $2 FOR UPDATE",
+      [input.attemptId, input.userId],
     );
     const attempt = rows[0];
     if (!attempt) throw new DomainError("NOT_FOUND", "payment attempt not found");
     if (attempt.state !== "PENDING" || attempt.method !== "CARD") {
       throw new DomainError("CONFLICT", "only a pending card attempt can be authenticated");
     }
+    // the database stamps the time itself and refuses a second authentication (0016)
     await c.query("UPDATE core.payment_attempt SET authenticated_at = now() WHERE id = $1", [
       input.attemptId,
     ]);
@@ -782,7 +802,7 @@ export async function pay(pool: Pool, input: PayInput): Promise<PayReceipt> {
   requireUuid(input.attemptId, "attemptId");
   const hash = requestHash(PAY, { sessionId: input.sessionId, attemptId: input.attemptId });
   try {
-    return await asWeb(pool, input.userId, (c) => payTransaction(c, input, hash));
+    return await asPay(pool, input.userId, (c) => payTransaction(c, input, hash));
   } catch (error) {
     if (error instanceof PayFailure && !error.replayed) await recordFailure(pool, input, hash, error);
     throw error;
@@ -791,7 +811,7 @@ export async function pay(pool: Pool, input: PayInput): Promise<PayReceipt> {
 
 async function recordFailure(pool: Pool, input: PayInput, hash: Buffer, failure: PayFailure): Promise<void> {
   try {
-    await asWeb(pool, input.userId, async (c) => {
+    await asPay(pool, input.userId, async (c) => {
       const idem = await idemBegin(c, input.userId, PAY, input.idempotencyKey, hash);
       if (!idem.completed) {
         await idemComplete(c, input.userId, PAY, input.idempotencyKey, FAILURE_STATUS, {
@@ -814,7 +834,7 @@ async function recordFailure(pool: Pool, input: PayInput, hash: Buffer, failure:
 interface SessionRow {
   state: string;
   expired: boolean;
-  quote: StoredQuote;
+  quote: unknown;
   total_paise: string;
   config_version: number;
 }
@@ -835,7 +855,9 @@ interface LockedProduct {
   current_version_id: string | null;
   inventory_mode: string;
   available_units: number;
+  offers_express: boolean;
   free_standard_delivery: boolean;
+  zap_flag: boolean;
 }
 
 interface VersionRow {
@@ -851,6 +873,65 @@ interface UnitRow {
   id: string;
   warehouse_id: string;
   serial: number | null;
+  zap_hub: boolean;
+}
+
+/**
+ * The only things pay takes from the stored quote: the buyer's choices. Everything the
+ * database knows (sellers, prices, versions, coupon terms, delivery eligibility, fees) is
+ * re-read from locked rows. A stored version id is used only to refuse a changed product.
+ */
+interface QuoteChoices {
+  productIds: string[];
+  quotedVersion: Map<string, string>;
+  speedBySeller: Map<string, Speed>;
+  couponId: string | null;
+  addressId: string | null;
+}
+
+function choicesOf(raw: unknown): QuoteChoices | null {
+  const q = asRecord(raw);
+  if (!q || !Array.isArray(q.lines) || q.lines.length === 0) return null;
+  const productIds: string[] = [];
+  const quotedVersion = new Map<string, string>();
+  for (const item of q.lines) {
+    const line = asRecord(item);
+    const id = line?.productId;
+    if (typeof id !== "string" || !UUID.test(id) || productIds.includes(id)) return null;
+    productIds.push(id);
+    if (typeof line?.productVersionId === "string") quotedVersion.set(id, line.productVersionId);
+  }
+  const speeds = asRecord(q.speedBySeller);
+  if (!speeds) return null;
+  const speedBySeller = new Map<string, Speed>();
+  for (const [seller, speed] of Object.entries(speeds)) {
+    if (!SPEEDS.includes(speed as Speed)) return null;
+    speedBySeller.set(seller, speed as Speed);
+  }
+  let couponId: string | null = null;
+  if (q.coupon !== null && q.coupon !== undefined) {
+    const id = asRecord(q.coupon)?.id;
+    if (typeof id !== "string" || !UUID.test(id)) return null;
+    couponId = id;
+  }
+  let addressId: string | null = null;
+  if (q.addressId !== null && q.addressId !== undefined) {
+    if (typeof q.addressId !== "string" || !UUID.test(q.addressId)) return null;
+    addressId = q.addressId;
+  }
+  return { productIds, quotedVersion, speedBySeller, couponId, addressId };
+}
+
+/** Coupon terms from the locked coupon row (never from the stored quote). */
+function couponFromRow(row: CouponRow): StoredCoupon {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    code: row.code_normalised,
+    kind: row.kind,
+    value: row.value,
+    minSpendPaise: row.min_spend_paise,
+  };
 }
 
 async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Promise<PayReceipt> {
@@ -870,11 +951,11 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
   }
 
   // 3. locks in canonical order (LLD §4), validating each as it is taken
-  // #1 checkout session
+  // #1 checkout session (the buyer's own; RLS and the explicit user check agree)
   const sessionRes = await c.query<SessionRow>(
     `SELECT state, expires_at <= now() AS expired, quote, total_paise::text, config_version
-       FROM core.checkout_session WHERE id = $1 AND type = 'PRODUCT_PURCHASE' FOR UPDATE`,
-    [input.sessionId],
+       FROM core.checkout_session WHERE id = $1 AND user_id = $2 AND type = 'PRODUCT_PURCHASE' FOR UPDATE`,
+    [input.sessionId, userId],
   );
   const session = sessionRes.rows[0];
   if (!session) fail("NOT_FOUND", "checkout session not found");
@@ -883,8 +964,8 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
 
   const attemptRes = await c.query<AttemptRow>(
     `SELECT session_id, method, card_id, state, authenticated_at IS NOT NULL AS authenticated, reference
-       FROM core.payment_attempt WHERE id = $1`,
-    [input.attemptId],
+       FROM core.payment_attempt WHERE id = $1 AND user_id = $2`,
+    [input.attemptId, userId],
   );
   const attempt = attemptRes.rows[0];
   if (!attempt) fail("NOT_FOUND", "payment attempt not found");
@@ -900,33 +981,46 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
     fail("METHOD_UNAVAILABLE", "card payments are switched off");
   }
 
-  const q = session.quote;
+  const choices = choicesOf(session.quote);
+  if (!choices) fail("VALIDATION_FAILED", "the checkout session's choices cannot be read");
   const { cfg } = await loadConfig(c, session.config_version);
-  const productIds = q.lines.map((l) => l.productId).sort();
-  const companyIds = [...new Set(q.lines.flatMap((l) => (l.companyId ? [l.companyId] : [])))].sort();
-  const stockedIds = q.lines.filter((l) => isStocked(l.inventoryMode)).map((l) => l.productId);
+  if (choices.productIds.length > cfg.maxLines) fail("VALIDATION_FAILED", "too many lines");
+  const productIds = [...choices.productIds].sort();
 
-  // #2 coupon
+  // Sellers and inventory modes as currently recorded (re-checked once the rows are locked
+  // at #6): the companies to lock at #4 and the stocked products whose warehouses #5 locks.
+  const preRes = await c.query<{ id: string; company_id: string | null; inventory_mode: string }>(
+    "SELECT id, company_id, inventory_mode FROM core.product WHERE id = ANY($1::uuid[])",
+    [productIds],
+  );
+  const pre = new Map(preRes.rows.map((p) => [p.id, p]));
+  const companyIds = [...new Set(preRes.rows.flatMap((p) => (p.company_id ? [p.company_id] : [])))].sort();
+  const stockedIds = preRes.rows.filter((p) => isStocked(p.inventory_mode)).map((p) => p.id);
+
+  // #2 coupon: its terms come from this locked row only
   let coupon: CouponRow | undefined;
-  if (q.coupon) {
+  if (choices.couponId) {
     const r = await c.query<CouponRow>(`SELECT ${COUPON_COLUMNS} FROM core.coupon WHERE id = $1 FOR UPDATE`, [
-      q.coupon.id,
+      choices.couponId,
     ]);
     coupon = r.rows[0];
   }
 
-  // #3 membership (read: app_web cannot lock it, and pay never changes it)
+  // #3 membership (read: pay never changes it)
   const member = await isMember(c, userId);
 
-  // #4 selling companies (definer helper: locks rows app_web cannot lock, returns ids only)
-  const sellers = await c.query<{
-    company_id: string;
-    owner_user_id: string;
-    ledger_account_id: string | null;
-  }>("SELECT company_id, owner_user_id, ledger_account_id FROM core.lock_selling_companies($1::uuid[])", [
-    companyIds,
-  ]);
-  const sellerById = new Map(sellers.rows.map((s) => [s.company_id, s]));
+  // #4 selling companies, ascending id. app_pay may lock only companies with a published
+  // product (RLS pay_lock_seller); its UPDATE privilege cannot change them.
+  const companies = await c.query<{ id: string; owner_user_id: string }>(
+    "SELECT id, owner_user_id FROM core.company WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE",
+    [companyIds],
+  );
+  const ownerByCompany = new Map(companies.rows.map((co) => [co.id, co.owner_user_id]));
+  const sellerAccounts = await c.query<{ id: string; user_id: string }>(
+    "SELECT id, user_id FROM ledger.ledger_account WHERE type = 'USER' AND user_id = ANY($1::uuid[])",
+    [[...new Set(ownerByCompany.values())]],
+  );
+  const accountByOwner = new Map(sellerAccounts.rows.map((a) => [a.user_id, a.id]));
 
   // #5 warehouses holding available units of the stocked products
   if (stockedIds.length > 0) {
@@ -939,9 +1033,10 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
     );
   }
 
-  // #6 products
+  // #6 products, then their current versions
   const productRes = await c.query<LockedProduct>(
-    `SELECT id, company_id, status, current_version_id, inventory_mode, available_units, free_standard_delivery
+    `SELECT id, company_id, status, current_version_id, inventory_mode, available_units, offers_express,
+            free_standard_delivery, zap_flag
        FROM core.product WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
     [productIds],
   );
@@ -949,31 +1044,35 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
   const versionRes = await c.query<VersionRow>(
     `SELECT id, product_id, price_paise::text, name, revision, template_id
        FROM core.product_version WHERE id = ANY($1::uuid[])`,
-    [q.lines.map((l) => l.productVersionId)],
+    [productRes.rows.flatMap((p) => (p.current_version_id ? [p.current_version_id] : []))],
   );
   const versions = new Map(versionRes.rows.map((v) => [v.id, v]));
+  const sellerOf = (p: LockedProduct): string => p.company_id ?? SEED_SELLER;
 
-  // #7 inventory units: lowest AVAILABLE serial per stocked product, ascending product id
+  // #7 inventory units: lowest AVAILABLE serial per stocked product, ascending product id;
+  // Zap from a user company ships only from a Zap hub warehouse
   const units = new Map<string, UnitRow>();
   for (const id of productIds) {
     const p = products.get(id);
     if (p?.status !== "PUBLISHED" || !isStocked(p.inventory_mode)) continue;
+    const hubOnly = p.company_id !== null && choices.speedBySeller.get(sellerOf(p)) === "ZAP";
     const u = await c.query<UnitRow>(
-      `SELECT id, warehouse_id, serial FROM core.inventory_unit
-        WHERE product_id = $1 AND state = 'AVAILABLE'
-        ORDER BY serial NULLS LAST, id LIMIT 1 FOR UPDATE`,
-      [id],
+      `SELECT u.id, u.warehouse_id, u.serial, w.zap_hub FROM core.inventory_unit u
+         JOIN core.warehouse w ON w.id = u.warehouse_id
+        WHERE u.product_id = $1 AND u.state = 'AVAILABLE' AND (NOT $2::boolean OR w.zap_hub)
+        ORDER BY u.serial NULLS LAST, u.id LIMIT 1 FOR UPDATE OF u`,
+      [id, hubOnly],
     );
     const unit = u.rows[0];
     if (unit) units.set(id, unit);
   }
 
-  // #8 card
+  // #8 card: the buyer's own (RLS and the explicit user check agree)
   let card: CardRow | undefined;
   if (attempt.method === "CARD") {
     const r = await c.query<CardRow>(
-      "SELECT status, merchant_scope FROM core.virtual_card WHERE id = $1 FOR UPDATE",
-      [attempt.card_id],
+      "SELECT status, merchant_scope FROM core.virtual_card WHERE id = $1 AND user_id = $2 FOR UPDATE",
+      [attempt.card_id, userId],
     );
     card = r.rows[0];
   }
@@ -985,8 +1084,7 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
   );
   const buyerAccountId = buyerAccount.rows[0]?.id;
   if (!buyerAccountId) fail("FORBIDDEN", "buyer has no ledger account");
-  const sellerAccountIds = sellers.rows.flatMap((s) => (s.ledger_account_id ? [s.ledger_account_id] : []));
-  const walletAccounts = [...new Set([buyerAccountId, ...sellerAccountIds])].sort();
+  const walletAccounts = [...new Set([buyerAccountId, ...accountByOwner.values()])].sort();
   await c.query("SELECT ledger.sync_wallets($1::uuid[])", [walletAccounts]);
   const buyerWallet = await c.query<{ available_paise: string }>(
     "SELECT available_paise::text FROM ledger.wallet WHERE account_id = $1 FOR UPDATE",
@@ -999,7 +1097,7 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
   const ent = await c.query("SELECT 1 FROM core.creator_entitlement WHERE user_id = $1", [userId]);
   const hasEntitlement = (ent.rowCount ?? 0) > 0;
 
-  // 4. re-validate everything against the locked state
+  // 4. re-validate everything against the locked state and rebuild the quote from it
   if (attempt.method === "CARD") {
     const problem = cardProblem(card);
     if (problem) fail(...problem);
@@ -1011,51 +1109,84 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
   );
   const ownedIds = new Set(owned.rows.map((r) => r.product_id));
 
-  const pricedLines: { productId: string; sellerId: string; listPaise: bigint; freeStdDelivery: boolean }[] =
-    [];
-  for (const line of q.lines) {
-    if (ownedIds.has(line.productId))
-      fail("ALREADY_OWNED", "you already own this product", { productId: line.productId });
-    const p = products.get(line.productId);
-    if (p?.status !== "PUBLISHED") {
-      fail("PRODUCT_UNAVAILABLE", "a product is no longer available", { productId: line.productId });
+  interface Line {
+    product: LockedProduct;
+    version: VersionRow;
+    sellerId: string;
+  }
+  const lines: Line[] = [];
+  for (const productId of choices.productIds) {
+    if (ownedIds.has(productId)) fail("ALREADY_OWNED", "you already own this product", { productId });
+    const p = products.get(productId);
+    if (p?.status !== "PUBLISHED")
+      fail("PRODUCT_UNAVAILABLE", "a product is no longer available", { productId });
+    const v = p.current_version_id ? versions.get(p.current_version_id) : undefined;
+    const quoted = choices.quotedVersion.get(productId);
+    if (!v || v.product_id !== productId || (quoted !== undefined && quoted !== v.id)) {
+      fail("CART_CHANGED", "a product changed since the quote", { productId });
     }
-    const v = versions.get(line.productVersionId);
-    if (p.current_version_id !== line.productVersionId || !v || v.price_paise !== line.listPaise) {
-      fail("CART_CHANGED", "a product changed since the quote", { productId: line.productId });
+    if ((pre.get(productId)?.company_id ?? null) !== p.company_id) {
+      fail("CART_CHANGED", "a product changed since the quote", { productId });
     }
-    if (p.free_standard_delivery !== line.freeStdDelivery || (p.company_id ?? null) !== line.companyId) {
-      fail("CART_CHANGED", "a product changed since the quote", { productId: line.productId });
-    }
-    if (line.companyId) {
-      const seller = sellerById.get(line.companyId);
-      if (!seller?.ledger_account_id) {
-        fail("PRODUCT_UNAVAILABLE", "the seller is not available", { productId: line.productId });
+    if (p.company_id) {
+      const owner = ownerByCompany.get(p.company_id);
+      if (!owner || !accountByOwner.has(owner)) {
+        fail("PRODUCT_UNAVAILABLE", "the seller is not available", { productId });
       }
-      if (seller.owner_user_id === userId) {
-        fail("SELF_PURCHASE", "you cannot buy from your own company", { productId: line.productId });
-      }
+      if (owner === userId) fail("SELF_PURCHASE", "you cannot buy from your own company", { productId });
     }
     if (isStocked(p.inventory_mode) && (p.available_units <= 0 || !units.has(p.id))) {
-      fail("SOLD_OUT", "a product sold out", { productId: line.productId });
+      const speed = choices.speedBySeller.get(sellerOf(p));
+      if (p.available_units > 0 && p.company_id && speed === "ZAP") {
+        fail("DELIVERY_UNAVAILABLE", "no unit in a Zap hub", { productId });
+      }
+      fail("SOLD_OUT", "a product sold out", { productId });
     }
-    pricedLines.push({
-      productId: line.productId,
-      sellerId: line.sellerId,
-      listPaise: BigInt(v.price_paise),
-      freeStdDelivery: p.free_standard_delivery,
-    });
+    lines.push({ product: p, version: v, sellerId: sellerOf(p) });
   }
 
-  if (q.coupon) {
-    const owners = new Map(sellers.rows.map((s) => [s.company_id, s.owner_user_id]));
-    const problem = await couponProblem(c, coupon, userId, owners);
-    if (problem) fail(...problem);
+  // delivery: the buyer chose a speed per seller; eligibility comes from the product rows
+  const hubUnits = new Set([...units].flatMap(([id, u]) => (u.zap_hub ? [id] : [])));
+  const speedBySeller: Record<string, Speed> = {};
+  for (const sellerId of new Set(lines.map((l) => l.sellerId))) {
+    const speed = choices.speedBySeller.get(sellerId);
+    if (!speed) fail("CART_CHANGED", "the sellers changed since the quote", { sellerId });
+    const own = lines.filter((l) => l.sellerId === sellerId).map((l) => l.product);
+    if (!speedOffered(speed, sellerId, own, hubUnits)) {
+      fail("DELIVERY_UNAVAILABLE", "that delivery speed is not offered", { sellerId });
+    }
+    speedBySeller[sellerId] = speed;
+  }
+
+  let couponTerms: StoredCoupon | null = null;
+  if (choices.couponId) {
+    const problem = await couponProblem(c, coupon, userId, ownerByCompany);
+    if (problem || !coupon) fail(...(problem ?? ["COUPON_INVALID", "coupon is not valid"]));
+    couponTerms = couponFromRow(coupon);
+  }
+
+  if (choices.addressId) {
+    const a = await c.query("SELECT 1 FROM private.address WHERE id = $1 AND user_id = $2", [
+      choices.addressId,
+      userId,
+    ]);
+    if ((a.rowCount ?? 0) === 0) choices.addressId = null; // removed since the quote; shipment keeps no address
   }
 
   let priced: Priced;
   try {
-    priced = priceLines(pricedLines, q.coupon, q.speedBySeller, member, cfg);
+    priced = priceLines(
+      lines.map((l) => ({
+        productId: l.product.id,
+        sellerId: l.sellerId,
+        listPaise: BigInt(l.version.price_paise),
+        freeStdDelivery: l.product.free_standard_delivery,
+      })),
+      couponTerms,
+      speedBySeller,
+      member,
+      cfg,
+    );
   } catch (error) {
     if (error instanceof DomainError) fail(error.code, error.message, { ...error.details });
     throw error;
@@ -1089,12 +1220,13 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
       account = SINK_ACCOUNT_ID;
       memo = "Fees, delivery and seed sales";
     } else if (posting.account === "MINT") {
-      account = MINT_ACCOUNT_ID; // platform discount; rejected at commit until platform coupons exist (0014)
+      account = MINT_ACCOUNT_ID; // platform discount; rejected at commit until platform coupons exist (0016)
       memo = "Platform discount";
     } else {
-      const seller = sellerById.get(posting.account);
-      if (!seller?.ledger_account_id) throw new Error("pay: seller account missing after validation");
-      account = seller.ledger_account_id;
+      const owner = ownerByCompany.get(posting.account);
+      const sellerAccount = owner ? accountByOwner.get(owner) : undefined;
+      if (!sellerAccount) throw new Error("pay: seller account missing after validation");
+      account = sellerAccount;
       sellerOrder = sellerOrderIds.get(posting.account) ?? null;
       memo = "Sale proceeds";
     }
@@ -1153,12 +1285,12 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
     );
   }
 
-  for (const line of q.lines) {
-    const out = priced.lines.find((l) => l.productId === line.productId);
-    const v = versions.get(line.productVersionId);
-    const p = products.get(line.productId);
-    if (!out || !v || !p) throw new Error("pay: priced line missing after validation");
-    const unit = units.get(line.productId) ?? null;
+  for (const line of lines) {
+    const p = line.product;
+    const v = line.version;
+    const out = priced.lines.find((l) => l.productId === p.id);
+    if (!out) throw new Error("pay: priced line missing after validation");
+    const unit = units.get(p.id) ?? null;
     const lineId = uuidv7();
     const snapshot = {
       productVersionId: v.id,
@@ -1166,8 +1298,8 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
       name: v.name,
       templateId: v.template_id,
       listPaise: v.price_paise,
-      sellerType: line.companyId ? "USER" : "SEED",
-      companyId: line.companyId,
+      sellerType: p.company_id ? "USER" : "SEED",
+      companyId: p.company_id,
       inventoryMode: p.inventory_mode,
     };
     await c.query(
@@ -1177,7 +1309,7 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
       [
         lineId,
         sellerOrderIds.get(line.sellerId),
-        line.productId,
+        p.id,
         v.id,
         JSON.stringify(snapshot),
         out.listPaise.toString(),
@@ -1190,7 +1322,7 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
     );
     await c.query(
       "INSERT INTO core.ownership (id, user_id, product_id, order_line_id) VALUES ($1, $2, $3, $4)",
-      [uuidv7(), userId, line.productId, lineId],
+      [uuidv7(), userId, p.id, lineId],
     );
     if (unit) {
       await c.query("UPDATE core.inventory_unit SET state = 'ISSUED', order_line_id = $2 WHERE id = $1", [
@@ -1203,9 +1335,9 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
     }
   }
 
-  if (q.coupon && coupon) {
+  if (couponTerms && coupon) {
     const discount = priced.perSeller
-      .filter((s) => s.sellerId === q.coupon?.companyId)
+      .filter((s) => s.sellerId === couponTerms?.companyId)
       .reduce((sum, s) => sum + s.sellerDisc, 0n);
     await c.query("UPDATE core.coupon SET redeemed = redeemed + 1 WHERE id = $1", [coupon.id]);
     await c.query(
@@ -1214,11 +1346,6 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
     );
   }
 
-  let addressId = q.addressId;
-  if (addressId) {
-    const a = await c.query("SELECT 1 FROM private.address WHERE id = $1", [addressId]);
-    if ((a.rowCount ?? 0) === 0) addressId = null; // removed since the quote; shipment keeps no address
-  }
   const nowRes = await c.query<{ ms: string }>(
     "SELECT (extract(epoch FROM now()) * 1000)::bigint::text AS ms",
   );
@@ -1233,7 +1360,7 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
         uuidv7(),
         sellerOrderIds.get(s.sellerId),
         s.speed,
-        addressId,
+        choices.addressId,
         iso(t.placedAt),
         iso(t.packedAt),
         iso(t.shippedAt),

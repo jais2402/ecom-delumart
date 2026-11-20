@@ -28,7 +28,6 @@ export async function createTestDatabase(
   const url = new URL(ADMIN_URL);
   url.pathname = `/${name}`;
   const pool = new pg.Pool({ connectionString: url.toString(), max: options.poolSize ?? 15 });
-  if (options.migrate !== false) await migrate(pool);
   const drop = async (): Promise<void> => {
     await pool.end();
     const c = new pg.Client({ connectionString: ADMIN_URL });
@@ -51,6 +50,14 @@ export async function createTestDatabase(
       await c.end();
     }
   };
+  if (options.migrate !== false) {
+    try {
+      await migrate(pool);
+    } catch (error) {
+      await drop(); // a failed migration must not leave a delulu_test_* database behind
+      throw error;
+    }
+  }
   return { name, url: url.toString(), pool, drop };
 }
 
@@ -151,6 +158,45 @@ export async function commitError(
       return (error as Error).message;
     }
   });
+}
+
+/**
+ * Writes fixture rows as the owner with triggers and foreign keys switched off
+ * (session_replication_role = replica, superuser only), and commits them. Used only for
+ * rows that are deliberately impossible to create through the application or under the
+ * structural money rules (an order group without its journal, a pre-authenticated
+ * attempt, ...): tests that ask who can SEE such rows, or what pay() does when faced
+ * with them. Never used for the behaviour under test.
+ */
+export async function plant(pool: pg.Pool, fn: (c: pg.PoolClient) => Promise<unknown>): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL session_replication_role = replica");
+    await fn(client);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** Runs fn as the owner in one committed transaction (all deferred checks apply). */
+export async function inTx<T>(pool: pg.Pool, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /** Number of rows a counting query returns as `n`. */

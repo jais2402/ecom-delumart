@@ -1,7 +1,23 @@
 import { randomBytes } from "node:crypto";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MINT_ACCOUNT_ID, type ProvisionResult, SINK_ACCOUNT_ID } from "../src/provision";
+import {
+  MINT_ACCOUNT_ID,
+  type ProvisionResult,
+  SINK_ACCOUNT_ID,
+  STARTER_GRANT_PAISE,
+} from "../src/provision";
+import {
+  checkout,
+  journalPostings,
+  payFor,
+  product,
+  RUPEE,
+  seller,
+  standard,
+  user,
+  wallet,
+} from "./checkout-fixtures";
 import {
   type Actor,
   commitError,
@@ -39,6 +55,7 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
   let a: ProvisionResult;
   let b: ProvisionResult;
   const web = (): Actor => ({ role: "app_web", userId: a.userId });
+  const payRole = (): Actor => ({ role: "app_pay", userId: a.userId });
   const jobs: Actor = { role: "app_jobs" };
 
   beforeAll(async () => {
@@ -51,22 +68,24 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
     await db.drop();
   });
 
-  describe("A1: app_web may insert only user-driven journal types", () => {
+  describe("A1: app_pay may insert only user-driven journal types; app_web none at all", () => {
     for (const type of ["COMPENSATION", "REVERSAL", "ACCOUNT_RETIREMENT"]) {
-      it(`app_web cannot insert a ${type} journal (admin actions run in the job runner)`, async () => {
-        expect(
-          await stateOf(
-            pool,
-            "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, $2, 1)",
-            [uuidv7(), type],
-            web(),
-          ),
-        ).toBe("42501");
-      });
+      for (const role of ["app_web", "app_pay"]) {
+        it(`${role} cannot insert a ${type} journal (admin actions run in the job runner)`, async () => {
+          expect(
+            await stateOf(
+              pool,
+              "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, $2, 1)",
+              [uuidv7(), type],
+              { role, userId: a.userId },
+            ),
+          ).toBe("42501");
+        });
+      }
     }
 
-    it("app_web cannot mint to itself with a COMPENSATION journal, even balanced and synced", async () => {
-      const state = await commitState(pool, web(), (c) =>
+    it("app_pay cannot mint to itself with a COMPENSATION journal, even balanced and synced", async () => {
+      const state = await commitState(pool, payRole(), (c) =>
         journal(
           c,
           "COMPENSATION",
@@ -88,15 +107,10 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
       "WAREHOUSE_PURCHASE",
       "MEMBERSHIP",
     ]) {
-      it(`app_web may insert a ${type} journal row`, async () => {
-        expect(
-          await stateOf(
-            pool,
-            "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, $2, 1)",
-            [uuidv7(), type],
-            web(),
-          ),
-        ).toBe("no error");
+      it(`app_pay may insert a ${type} journal row; app_web may not`, async () => {
+        const insert = "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, $2, 1)";
+        expect(await stateOf(pool, insert, [uuidv7(), type], payRole())).toBe("no error");
+        expect(await stateOf(pool, insert, [uuidv7(), type], web())).toBe("42501");
       });
     }
 
@@ -130,9 +144,9 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
   });
 
   describe("A2: every USER account that received postings has a matching wallet at commit", () => {
-    it("app_web: a PURCHASE debiting the buyer without a wallet update is rejected at commit", async () => {
-      const message = await commitError(pool, web(), (c) =>
-        journal(c, "PURCHASE", [
+    it("app_pay: a journal debiting the buyer without a wallet update is rejected at commit", async () => {
+      const message = await commitError(pool, payRole(), (c) =>
+        journal(c, "MEMBERSHIP", [
           [a.ledgerAccountId, -700],
           [SINK_ACCOUNT_ID, 700],
         ]),
@@ -140,18 +154,15 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
       expect(message).toMatch(/received postings .* wallet/);
     });
 
-    it("app_web: crediting another user's account without syncing their wallet is rejected at commit", async () => {
-      const message = await commitError(pool, web(), async (c) => {
-        await journal(c, "PURCHASE", [
-          [a.ledgerAccountId, -900],
+    it("crediting another user's account without syncing their wallet is rejected at commit", async () => {
+      // (since 0016 only a complete PURCHASE credits another user from a user's journal, so
+      // the credit here comes from the job runner's COMPENSATION)
+      const message = await commitError(pool, jobs, (c) =>
+        journal(c, "COMPENSATION", [
+          [MINT_ACCOUNT_ID, -800],
           [b.ledgerAccountId, 800],
-          [SINK_ACCOUNT_ID, 100],
-        ]);
-        await c.query(
-          "UPDATE ledger.wallet SET available_paise = available_paise - 900 WHERE account_id = $1",
-          [a.ledgerAccountId],
-        );
-      });
+        ]),
+      );
       expect(message).toMatch(/received postings .* wallet/);
     });
 
@@ -185,26 +196,25 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
       expect(message).toMatch(/received postings .* wallet/);
     });
 
-    it("postings matched by ledger.sync_wallets for buyer and seller commit", async () => {
-      const state = await commitState(pool, web(), (c) =>
-        journal(
-          c,
-          "PURCHASE",
-          [
-            [a.ledgerAccountId, -900],
-            [b.ledgerAccountId, 800],
-            [SINK_ACCOUNT_ID, 100],
-          ],
-          [a.ledgerAccountId, b.ledgerAccountId],
-        ),
+    it("postings matched by ledger.sync_wallets for buyer and seller commit (a real purchase)", async () => {
+      const buyer = await user(pool);
+      const s = await seller(pool);
+      const p = await product(pool, { seller: s, mode: "STANDARD_STOCKED", pricePaise: 900n * RUPEE });
+      const receipt = await payFor(pool, buyer, await checkout(pool, buyer, [p], standard(s)));
+      const postings = await journalPostings(pool, receipt.orderGroupId);
+      expect(await wallet(pool, buyer.ledgerAccountId)).toBe(
+        STARTER_GRANT_PAISE + (postings.get(buyer.ledgerAccountId) ?? 0n),
       );
-      expect(state).toBe("no error");
+      expect(await wallet(pool, s.owner.ledgerAccountId)).toBe(
+        STARTER_GRANT_PAISE + (postings.get(s.owner.ledgerAccountId) ?? 0n),
+      );
+      expect(postings.get(s.owner.ledgerAccountId)).toBe(855n * RUPEE);
     });
   });
 
   describe("A3: MINT is never debited in a PURCHASE journal (no platform coupons yet)", () => {
     it("a PURCHASE journal debiting MINT is rejected at commit, even when balanced and synced", async () => {
-      const message = await commitError(pool, web(), (c) =>
+      const message = await commitError(pool, payRole(), (c) =>
         journal(
           c,
           "PURCHASE",

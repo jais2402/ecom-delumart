@@ -172,18 +172,19 @@ describe("ledger invariants", () => {
         expect(await stateOf(pool, sql, params(), { role: "app_web" })).toBe("42501");
       });
     }
-    it("privilege catalogue: app_web and app_jobs hold no UPDATE/DELETE/TRUNCATE on journal, posting, audit_log", async () => {
+    it("privilege catalogue: app_web, app_pay and app_jobs hold no UPDATE/DELETE/TRUNCATE on journal, posting, audit_log", async () => {
       const { rows } = await pool.query<{ role: string; tbl: string; priv: string; has: boolean }>(
         `SELECT r AS role, t AS tbl, p AS priv, has_table_privilege(r, t, p) AS has
-           FROM unnest(ARRAY['app_web','app_jobs']) r,
+           FROM unnest(ARRAY['app_web','app_pay','app_jobs']) r,
                 unnest(ARRAY['ledger.journal','ledger.posting','ledger.grant_record','audit.audit_log']) t,
                 unnest(ARRAY['UPDATE','DELETE','TRUNCATE']) p`,
       );
       expect(rows.filter((r) => r.has)).toEqual([]);
-      expect(rows.length).toBe(24);
+      expect(rows.length).toBe(36);
     });
-    // COMPENSATION is an admin action and runs as app_jobs (app_web may not insert it);
-    // app_web's own insert path is a PURCHASE journal. Both stay insert-only, not read-only.
+    // COMPENSATION is an admin action and runs as app_jobs; the money-command role app_pay
+    // posts the user's own journals (here a MEMBERSHIP fee, user -> SINK; a PURCHASE needs a
+    // whole order group, 0016). Both stay insert-only, not read-only. app_web inserts none.
     it("app_jobs can still INSERT a balanced COMPENSATION journal (insert-only, not read-only)", async () => {
       const state = await inRolledBackTx(pool, async (c) => {
         await c.query("SET LOCAL ROLE app_jobs");
@@ -197,16 +198,27 @@ describe("ledger invariants", () => {
       });
       expect(state).toMatch(/^[0-9a-f-]{36}$/);
     });
-    it("app_web can still INSERT a balanced PURCHASE journal (insert-only, not read-only)", async () => {
+    it("app_web cannot INSERT any journal (money writes are app_pay's)", async () => {
+      expect(
+        await stateOf(
+          pool,
+          "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'MEMBERSHIP', 1)",
+          [uuidv7()],
+          { role: "app_web", userId },
+        ),
+      ).toBe("42501");
+    });
+    it("app_pay can still INSERT a balanced journal of its own user (insert-only, not read-only)", async () => {
       const state = await inRolledBackTx(pool, async (c) => {
-        await c.query("SET LOCAL ROLE app_web");
+        await c.query("SELECT set_config('app.user_id', $1, true)", [userId]);
+        await c.query("SET LOCAL ROLE app_pay");
         const id = await insertJournal(
           c,
           [
             [userAccount, -7n],
             [SINK_ACCOUNT_ID, 7n],
           ],
-          "PURCHASE",
+          "MEMBERSHIP",
         );
         await c.query("SELECT ledger.sync_wallets($1)", [[userAccount]]);
         await c.query("SET CONSTRAINTS ALL IMMEDIATE");

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MINT_ACCOUNT_ID, type ProvisionResult, SINK_ACCOUNT_ID } from "../src/provision";
+import { checkout, payFor, product, RUPEE, seller, standard, user, wallet } from "./checkout-fixtures";
 import {
   ADMIN_URL,
   asActor,
@@ -10,6 +11,7 @@ import {
   countRows,
   createProfile,
   createTestDatabase,
+  plant,
   provisionAccount,
   provisionInput,
   sqlState,
@@ -19,7 +21,7 @@ import {
 } from "./helpers";
 
 const STARTER = 100_000_000_000n;
-const APP_ROLES = ["app_web", "app_jobs", "npc_worker", "research_ro"];
+const APP_ROLES = ["app_web", "app_pay", "app_jobs", "npc_worker", "research_ro"];
 const RLS_SCHEMAS = ["core", "ledger", "private", "analytics", "audit", "sandbox", "research"];
 
 /** Ids of a fully populated buyer B, seen from user A's session. */
@@ -54,62 +56,67 @@ async function seed(pool: pg.Pool): Promise<Fixture> {
       [u],
     );
   }
+  // B's purchase history is planted (triggers and foreign keys off): these tests ask who can
+  // SEE such rows, and the rows (an order without a journal, a platform coupon redemption)
+  // are impossible to create under the money rules of migration 0016.
   const sessionB = uuidv7();
-  await pool.query(
-    `INSERT INTO core.checkout_session (id, user_id, type, quote, total_paise, config_version, expires_at)
-     VALUES ($1, $2, 'PRODUCT_PURCHASE', '{}', 10000, 1, now() + interval '5 minutes')`,
-    [sessionB, b.userId],
-  );
   const attemptB = uuidv7();
-  await pool.query(
-    "INSERT INTO core.payment_attempt (id, session_id, user_id, method, reference) VALUES ($1, $2, $3, 'CARD', $4)",
-    [attemptB, sessionB, b.userId, `ref-${attemptB}`],
-  );
-  await pool.query(
-    "INSERT INTO core.payment_challenge (attempt_id, kind, expires_at) VALUES ($1, 'PIN', now() + interval '5 minutes')",
-    [attemptB],
-  );
   const groupB = uuidv7();
-  await pool.query(
-    `INSERT INTO core.order_group (id, buyer_user_id, session_id, payment_attempt_id, journal_id, buyer_source, total_paise, config_version)
-     VALUES ($1, $2, $3, $4, $5, 'PLAYER', 10000, 1)`,
-    [groupB, b.userId, sessionB, attemptB, uuidv7()],
-  );
   const sellerOrderB = uuidv7();
-  await pool.query(
-    `INSERT INTO core.seller_order (id, order_group_id, buyer_user_id, company_id, seller_type, list_paise, fee_paise, net_paise)
-     VALUES ($1, $2, $3, $4, 'USER', 10000, 500, 9500)`,
-    [sellerOrderB, groupB, b.userId, company],
-  );
-  const lineB = uuidv7();
-  await pool.query(
-    `INSERT INTO core.order_line (id, seller_order_id, product_id, product_version_id, snapshot, list_paise,
-       seller_discount_paise, platform_discount_paise, fee_paise)
-     VALUES ($1, $2, $3, $4, '{}', 10000, 0, 0, 500)`,
-    [lineB, sellerOrderB, uuidv7(), uuidv7()],
-  );
-  await pool.query(
-    `INSERT INTO core.shipment (id, seller_order_id, speed, placed_at, packed_at, shipped_at, out_at, delivered_at)
-     VALUES ($1, $2, 'STANDARD', now(), now(), now(), now(), now())`,
-    [uuidv7(), sellerOrderB],
-  );
-  await pool.query(
-    "INSERT INTO core.ownership (id, user_id, product_id, order_line_id) VALUES ($1, $2, $3, $4)",
-    [uuidv7(), b.userId, uuidv7(), lineB],
-  );
-  await pool.query(
-    "INSERT INTO core.membership (id, user_id, starts_at, ends_at, journal_id) VALUES ($1, $2, now(), now() + interval '30 days', $3)",
-    [uuidv7(), b.userId, uuidv7()],
-  );
-  const coupon = uuidv7();
-  await pool.query(
-    "INSERT INTO core.coupon (id, scope, code_normalised, kind, value) VALUES ($1, 'PLATFORM', $2, 'FLAT', 100)",
-    [coupon, `C${coupon.slice(0, 8)}`],
-  );
-  await pool.query(
-    "INSERT INTO core.coupon_redemption (coupon_id, user_id, order_group_id, discount_paise) VALUES ($1, $2, $3, 100)",
-    [coupon, b.userId, groupB],
-  );
+  await plant(pool, async (c) => {
+    await c.query(
+      `INSERT INTO core.checkout_session (id, user_id, type, quote, total_paise, config_version, expires_at)
+       VALUES ($1, $2, 'PRODUCT_PURCHASE', '{}', 10000, 1, now() + interval '5 minutes')`,
+      [sessionB, b.userId],
+    );
+    await c.query(
+      "INSERT INTO core.payment_attempt (id, session_id, user_id, method, reference) VALUES ($1, $2, $3, 'CARD', $4)",
+      [attemptB, sessionB, b.userId, `ref-${attemptB}`],
+    );
+    await c.query(
+      "INSERT INTO core.payment_challenge (attempt_id, kind, expires_at) VALUES ($1, 'PIN', now() + interval '5 minutes')",
+      [attemptB],
+    );
+    await c.query(
+      `INSERT INTO core.order_group (id, buyer_user_id, session_id, payment_attempt_id, journal_id, buyer_source, total_paise, config_version)
+       VALUES ($1, $2, $3, $4, $5, 'PLAYER', 10000, 1)`,
+      [groupB, b.userId, sessionB, attemptB, uuidv7()],
+    );
+    await c.query(
+      `INSERT INTO core.seller_order (id, order_group_id, buyer_user_id, company_id, seller_type, list_paise, fee_paise, net_paise)
+       VALUES ($1, $2, $3, $4, 'USER', 10000, 500, 9500)`,
+      [sellerOrderB, groupB, b.userId, company],
+    );
+    const lineB = uuidv7();
+    await c.query(
+      `INSERT INTO core.order_line (id, seller_order_id, product_id, product_version_id, snapshot, list_paise,
+         seller_discount_paise, platform_discount_paise, fee_paise)
+       VALUES ($1, $2, $3, $4, '{}', 10000, 0, 0, 500)`,
+      [lineB, sellerOrderB, uuidv7(), uuidv7()],
+    );
+    await c.query(
+      `INSERT INTO core.shipment (id, seller_order_id, speed, placed_at, packed_at, shipped_at, out_at, delivered_at)
+       VALUES ($1, $2, 'STANDARD', now(), now(), now(), now(), now())`,
+      [uuidv7(), sellerOrderB],
+    );
+    await c.query(
+      "INSERT INTO core.ownership (id, user_id, product_id, order_line_id) VALUES ($1, $2, $3, $4)",
+      [uuidv7(), b.userId, uuidv7(), lineB],
+    );
+    await c.query(
+      "INSERT INTO core.membership (id, user_id, starts_at, ends_at, journal_id) VALUES ($1, $2, now(), now() + interval '30 days', $3)",
+      [uuidv7(), b.userId, uuidv7()],
+    );
+    const coupon = uuidv7();
+    await c.query(
+      "INSERT INTO core.coupon (id, scope, code_normalised, kind, value) VALUES ($1, 'PLATFORM', $2, 'FLAT', 100)",
+      [coupon, `C${coupon.slice(0, 8)}`],
+    );
+    await c.query(
+      "INSERT INTO core.coupon_redemption (coupon_id, user_id, order_group_id, discount_paise) VALUES ($1, $2, $3, 100)",
+      [coupon, b.userId, groupB],
+    );
+  });
   const product = async (status: string): Promise<string> => {
     const id = uuidv7();
     const version = uuidv7();
@@ -136,6 +143,7 @@ describe("security hardening (review findings)", () => {
   let pool: pg.Pool;
   let f: Fixture;
   const web = () => ({ role: "app_web", userId: f.a.userId });
+  const payRole = () => ({ role: "app_pay", userId: f.a.userId });
 
   beforeAll(async () => {
     db = await createTestDatabase();
@@ -147,7 +155,7 @@ describe("security hardening (review findings)", () => {
   });
 
   describe("finding 1: configuration and the starter grant", () => {
-    for (const role of ["app_web", "app_jobs"]) {
+    for (const role of ["app_web", "app_pay", "app_jobs"]) {
       it(`${role} cannot insert, update or delete configuration or system switches`, async () => {
         const statements = [
           'INSERT INTO core.config_version (values, effective_from) VALUES (\'{"starter_grant_paise":"999999999999999"}\', now())',
@@ -358,14 +366,14 @@ describe("security hardening (review findings)", () => {
   });
 
   describe("finding 3: wallets always equal their postings at commit", () => {
-    it("app_web cannot raise its own wallet without postings", async () => {
-      const state = await commitState(pool, web(), (c) =>
+    it("app_web cannot raise its own wallet at all; app_pay not without postings", async () => {
+      const raise = (c: pg.PoolClient) =>
         c.query(
           "UPDATE ledger.wallet SET available_paise = available_paise + 1000000 WHERE account_id = $1",
           [f.a.ledgerAccountId],
-        ),
-      );
-      expect(state).toBe("23514");
+        );
+      expect(await commitState(pool, web(), raise)).toBe("42501");
+      expect(await commitState(pool, payRole(), raise)).toBe("23514");
     });
 
     it("not even the owner can change a wallet without postings", async () => {
@@ -378,10 +386,10 @@ describe("security hardening (review findings)", () => {
     });
 
     it("a wallet change matched by a balanced journal commits", async () => {
-      const state = await commitState(pool, web(), async (c) => {
+      const state = await commitState(pool, payRole(), async (c) => {
         const j = uuidv7();
         await c.query(
-          "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'PURCHASE', 1)",
+          "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'MEMBERSHIP', 1)",
           [j],
         );
         await c.query(
@@ -396,26 +404,22 @@ describe("security hardening (review findings)", () => {
       expect(state).toBe("no error");
     });
 
-    it("a buyer's pay transaction can credit a seller wallet through ledger.sync_wallets, without reading it", async () => {
-      const state = await commitState(pool, web(), async (c) => {
-        const j = uuidv7();
-        await c.query(
-          "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'PURCHASE', 1)",
-          [j],
-        );
-        await c.query(
-          "INSERT INTO ledger.posting (journal_id, account_id, amount, memo) VALUES ($1, $2, -900, 'buy'), ($1, $3, 800, 'buy'), ($1, $4, 100, 'fee')",
-          [j, f.a.ledgerAccountId, f.b.ledgerAccountId, SINK_ACCOUNT_ID],
-        );
-        await c.query("SELECT ledger.sync_wallets($1)", [[f.a.ledgerAccountId, f.b.ledgerAccountId]]);
-        // still invisible to A
-        expect(
-          await countRows(c, "SELECT count(*) AS n FROM ledger.wallet WHERE account_id = $1", [
-            f.b.ledgerAccountId,
+    it("a buyer's pay transaction credits a seller wallet through ledger.sync_wallets, without reading it", async () => {
+      const buyer = await user(pool);
+      const s = await seller(pool);
+      const p = await product(pool, { seller: s, mode: "STANDARD_STOCKED", pricePaise: 900n * RUPEE });
+      const before = await wallet(pool, s.owner.ledgerAccountId);
+      await payFor(pool, buyer, await checkout(pool, buyer, [p], standard(s)));
+      expect(await wallet(pool, s.owner.ledgerAccountId)).toBe(before + 855n * RUPEE);
+      // still invisible to the buyer, in either role
+      for (const role of ["app_web", "app_pay"]) {
+        const seen = await asActor(pool, { role, userId: buyer.userId }, (c) =>
+          countRows(c, "SELECT count(*) AS n FROM ledger.wallet WHERE account_id = $1", [
+            s.owner.ledgerAccountId,
           ]),
-        ).toBe(0);
-      });
-      expect(state).toBe("no error");
+        );
+        expect(seen, role).toBe(0);
+      }
     });
 
     it("wallets exist only for USER accounts", async () => {
@@ -449,7 +453,15 @@ describe("security hardening (review findings)", () => {
     };
 
     it("postings cannot be added to a journal created in an earlier transaction", async () => {
-      const state = await asActor(pool, web(), (c) =>
+      expect(
+        await stateOf(
+          pool,
+          "INSERT INTO ledger.posting (journal_id, account_id, amount, memo) VALUES ($1, $2, -5, 'x'), ($1, $3, 5, 'x')",
+          [f.a.starterJournalId, MINT_ACCOUNT_ID, f.a.ledgerAccountId],
+          web(),
+        ),
+      ).toBe("42501");
+      const state = await asActor(pool, payRole(), (c) =>
         sqlState(
           c.query(
             "INSERT INTO ledger.posting (journal_id, account_id, amount, memo) VALUES ($1, $2, -5, 'x'), ($1, $3, 5, 'x')",
@@ -484,7 +496,7 @@ describe("security hardening (review findings)", () => {
     });
 
     it("a journal needs at least two postings at commit", async () => {
-      expect(await commitError(pool, web(), (c) => journal(c, "PURCHASE", []))).toMatch(
+      expect(await commitError(pool, payRole(), (c) => journal(c, "PURCHASE", []))).toMatch(
         /at least two postings/,
       );
     });
@@ -582,14 +594,15 @@ describe("security hardening (review findings)", () => {
         "reject",
       ],
       [
-        "PURCHASE user to user and SINK",
+        // since 0016 a PURCHASE must be a whole, correctly priced order (tests/money-attacks)
+        "PURCHASE user to user and SINK without an order group",
         "PURCHASE",
         (x) => [
           [x.a.ledgerAccountId, -5],
           [x.b.ledgerAccountId, 4],
           [SINK_ACCOUNT_ID, 1],
         ],
-        "accept",
+        "reject",
       ],
       [
         "MEMBERSHIP minting",
@@ -598,7 +611,25 @@ describe("security hardening (review findings)", () => {
           [MINT_ACCOUNT_ID, -5],
           [x.a.ledgerAccountId, 5],
         ],
+        "reject",
+      ],
+      [
+        "MEMBERSHIP paid from the user's own wallet to SINK",
+        "MEMBERSHIP",
+        (x) => [
+          [x.a.ledgerAccountId, -5],
+          [SINK_ACCOUNT_ID, 5],
+        ],
         "accept",
+      ],
+      [
+        "MEMBERSHIP paid from another user's wallet",
+        "MEMBERSHIP",
+        (x) => [
+          [x.b.ledgerAccountId, -5],
+          [SINK_ACCOUNT_ID, 5],
+        ],
+        "reject",
       ],
       [
         "REVERSAL debiting SINK",
@@ -619,11 +650,12 @@ describe("security hardening (review findings)", () => {
         "accept",
       ],
     ];
-    // Admin journal types are inserted only by the job runner (0014); the rest by the web role.
+    // Admin journal types are inserted only by the job runner (0014, 0016); the rest by the
+    // money-command role.
     const ADMIN_TYPES = ["COMPENSATION", "REVERSAL", "ACCOUNT_RETIREMENT"];
     for (const [label, type, postings, expected] of cases) {
       it(`event-type account rules: ${label} is ${expected}ed`, async () => {
-        const actor = ADMIN_TYPES.includes(type) ? { role: "app_jobs" } : web();
+        const actor = ADMIN_TYPES.includes(type) ? { role: "app_jobs" } : payRole();
         const state = await commitState(pool, actor, (c) => journal(c, type, postings(f)));
         expect(state === "no error" ? "accept" : `reject:${state}`).toBe(
           expected === "accept" ? "accept" : "reject:23514",
@@ -685,10 +717,10 @@ describe("security hardening (review findings)", () => {
       ]);
     });
 
-    it("app_web and app_jobs have DELETE on no core or ledger table except expired tombstones for jobs", async () => {
+    it("app_web, app_pay and app_jobs have DELETE on no core or ledger table except expired tombstones for jobs", async () => {
       const { rows } = await pool.query<{ r: string; t: string }>(
         `SELECT r, c.oid::regclass::text AS t
-           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace, unnest(ARRAY['app_web','app_jobs']) r
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace, unnest(ARRAY['app_web','app_pay','app_jobs']) r
           WHERE n.nspname IN ('core','ledger') AND c.relkind IN ('r','p')
             AND (has_table_privilege(r, c.oid, 'DELETE') OR has_table_privilege(r, c.oid, 'TRUNCATE'))
           ORDER BY 1, 2`,
@@ -820,10 +852,11 @@ describe("security hardening (review findings)", () => {
     });
 
     it("posting.seller_order_id and journal.order_group_id must reference real rows (checked at commit)", async () => {
-      const posting = await commitState(pool, {}, async (c) => {
+      // (a MEMBERSHIP fee of the acting user: a PURCHASE would first fail for want of its order)
+      const posting = await commitState(pool, { userId: f.a.userId }, async (c) => {
         const j = uuidv7();
         await c.query(
-          "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'PURCHASE', 1)",
+          "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'MEMBERSHIP', 1)",
           [j],
         );
         await c.query(
@@ -850,11 +883,11 @@ describe("security hardening (review findings)", () => {
   describe("finding 10: role attributes and database-level privileges", () => {
     it("app roles and PUBLIC have no TEMP or CREATE on the database and no CREATE on schema public", async () => {
       const { rows } = await pool.query<{ r: string; p: string }>(
-        `SELECT r, p FROM unnest(ARRAY['app_web','app_jobs','npc_worker','research_ro','anon','authenticated']) r,
+        `SELECT r, p FROM unnest(ARRAY['app_web','app_pay','app_jobs','npc_worker','research_ro','anon','authenticated']) r,
                 unnest(ARRAY['TEMP','CREATE']) p
           WHERE has_database_privilege(r, current_database(), p)
          UNION ALL
-         SELECT r, 'CREATE ON public' FROM unnest(ARRAY['app_web','app_jobs','npc_worker','research_ro']) r
+         SELECT r, 'CREATE ON public' FROM unnest(ARRAY['app_web','app_pay','app_jobs','npc_worker','research_ro']) r
           WHERE has_schema_privilege(r, 'public', 'CREATE')`,
       );
       expect(rows).toEqual([]);
@@ -878,10 +911,10 @@ describe("security hardening (review findings)", () => {
         scratch = await createTestDatabase();
         const { rows } = await admin.query(
           `SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolbypassrls, rolcanlogin FROM pg_roles
-            WHERE rolname IN ('app_web','app_jobs','npc_worker','research_ro','migrator') ORDER BY rolname`,
+            WHERE rolname IN ('app_web','app_pay','app_jobs','npc_worker','research_ro','migrator') ORDER BY rolname`,
         );
         expect(rows).toEqual(
-          ["app_jobs", "app_web", "migrator", "npc_worker", "research_ro"].map((rolname) => ({
+          ["app_jobs", "app_pay", "app_web", "migrator", "npc_worker", "research_ro"].map((rolname) => ({
             rolname,
             rolsuper: false,
             rolcreatedb: false,
