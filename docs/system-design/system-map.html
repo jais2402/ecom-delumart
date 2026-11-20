@@ -1,0 +1,290 @@
+<title>DeluluMart System Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+/* Layout: one column, three figures in reading order (whole system, one payment, defence layers). Diagrams scroll sideways on phones. */
+:root {
+  --bg: #FAF8F2; --fg: #171717; --muted: #5d586b; --line: #cdc6da; --panel: #ffffff;
+  --accent: #5B21B6; --accent-soft: #ede6fb; --lime: #D9F75C; --on-lime: #171717;
+  --display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --body: "Inter", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14121b; --fg: #ECE9F5; --muted: #a8a2b8; --line: #3b3550; --panel: #1e1a2a;
+    --accent: #b49bff; --accent-soft: #2b2348; --lime: #D9F75C; --on-lime: #171717; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14121b; --fg: #ECE9F5; --muted: #a8a2b8; --line: #3b3550; --panel: #1e1a2a;
+  --accent: #b49bff; --accent-soft: #2b2348; --lime: #D9F75C; --on-lime: #171717; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 16px; line-height: 1.55; }
+.page { max-width: 1040px; margin: 0 auto; padding-block: 32px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 44px; }
+h1 { font-family: var(--display); font-weight: 700; font-size: 2rem; line-height: 1.15; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--display); font-weight: 700; font-size: 1.3rem; margin: 0; text-wrap: balance; }
+p { margin: 0; max-width: 68ch; }
+.lede { color: var(--muted); }
+header, section { display: flex; flex-direction: column; gap: 12px; }
+.key { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 0.875rem; color: var(--muted); }
+.key span { display: inline-flex; align-items: center; gap: 8px; }
+.sw { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid var(--line); background: var(--panel); flex: none; }
+.sw.hot { border-color: var(--accent); background: var(--accent-soft); }
+figure { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+svg { display: block; width: 100%; min-width: 880px; height: auto; color: var(--fg); font-family: var(--body); }
+figcaption { font-size: 0.9rem; color: var(--muted); max-width: 72ch; }
+.hint { display: none; font-size: 0.8rem; color: var(--muted); }
+@media (max-width: 900px) { .hint { display: block; } }
+
+/* SVG parts */
+.box { fill: var(--bg); stroke: var(--line); stroke-width: 1.5; }
+.frame { fill: var(--panel); stroke: var(--fg); stroke-width: 1.5; }
+.chip { fill: var(--bg); stroke: var(--line); stroke-width: 1.25; }
+.hot { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.75; }
+.strip { fill: var(--bg); stroke: var(--line); stroke-width: 1; stroke-dasharray: 4 3; }
+.ln { fill: none; stroke: var(--fg); stroke-width: 1.5; }
+.ln-hot { fill: none; stroke: var(--accent); stroke-width: 2; }
+.ln-dash { fill: none; stroke: var(--muted); stroke-width: 1.25; stroke-dasharray: 5 4; }
+.div { stroke: var(--line); stroke-width: 1; }
+.ah { fill: var(--fg); } .ah-hot { fill: var(--accent); } .ah-mut { fill: var(--muted); }
+.t { fill: var(--fg); font-size: 12.5px; font-weight: 600; }
+.s { fill: var(--muted); font-size: 10.5px; }
+.cap { fill: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; }
+.lbl { fill: var(--muted); font-size: 11px; }
+.lbl-hot { fill: var(--accent); font-size: 11.5px; font-weight: 600; }
+.num { fill: var(--lime); } .numt { fill: var(--on-lime); font-size: 12px; font-weight: 700; font-family: var(--display); }
+
+/* Defence layers */
+.layers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; counter-reset: layer; }
+.layers li { counter-increment: layer; display: grid; grid-template-columns: 2rem minmax(0, 11rem) minmax(0, 1fr); gap: 4px 14px;
+  align-items: baseline; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.layers li::before { content: counter(layer); font-family: var(--display); font-weight: 700; color: var(--accent); }
+.layers b { font-weight: 600; }
+.layers span { color: var(--muted); font-size: 0.925rem; min-width: 0; }
+.layers li.core { border-color: var(--accent); background: var(--accent-soft); }
+.layers li.core span { color: var(--fg); }
+@media (max-width: 560px) { .layers li { grid-template-columns: 2rem minmax(0, 1fr); } .layers span { grid-column: 2; } }
+</style>
+
+<div class="page">
+  <header>
+    <h1>DeluluMart system map</h1>
+    <p class="lede">How the whole product fits together, what happens when someone pays, and what stands between an attacker and the data. Everything that looks like a bank, courier or payment network is simulated inside the app.</p>
+    <div class="key">
+      <span><i class="sw hot"></i>The money path: the part that must never be wrong</span>
+      <span><i class="sw"></i>Everything else</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. The whole system</h2>
+    <figure>
+      <div class="scroll" tabindex="0">
+        <svg viewBox="0 0 990 640" role="img" aria-label="People use five sets of screens, which all go through a CDN and one web app with a permission check, into a single PostgreSQL database. A job runner woken every minute handles background work. Sign-in, SMS, email, bot check and backups are the only outside services.">
+          <defs>
+            <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0 L10 5 L0 10 z"/></marker>
+            <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah-hot" d="M0 0 L10 5 L0 10 z"/></marker>
+            <marker id="am" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah-mut" d="M0 0 L10 5 L0 10 z"/></marker>
+          </defs>
+
+          <!-- people -->
+          <text class="cap" x="50" y="16">PEOPLE</text>
+          <rect class="box" x="50" y="24" width="544" height="46" rx="23"/>
+          <text class="t" x="322" y="45" text-anchor="middle">Players</text>
+          <text class="s" x="322" y="60" text-anchor="middle">visitors can browse without an account</text>
+          <rect class="box" x="614" y="24" width="168" height="46" rx="23"/>
+          <text class="t" x="698" y="45" text-anchor="middle">Merchants</text>
+          <text class="s" x="698" y="60" text-anchor="middle">owners and workers</text>
+          <rect class="box" x="802" y="24" width="168" height="46" rx="23"/>
+          <text class="t" x="886" y="45" text-anchor="middle">Super Admin</text>
+          <text class="s" x="886" y="60" text-anchor="middle">you, the only operator</text>
+
+          <line class="ln" x1="134" y1="70" x2="134" y2="103" marker-end="url(#a)"/>
+          <line class="ln" x1="322" y1="70" x2="322" y2="103" marker-end="url(#a)"/>
+          <line class="ln" x1="510" y1="70" x2="510" y2="103" marker-end="url(#a)"/>
+          <line class="ln" x1="698" y1="70" x2="698" y2="103" marker-end="url(#a)"/>
+          <line class="ln" x1="886" y1="70" x2="886" y2="103" marker-end="url(#a)"/>
+
+          <!-- screens -->
+          <rect class="box" x="50" y="106" width="168" height="50" rx="6"/>
+          <text class="t" x="134" y="127" text-anchor="middle">Storefront</text>
+          <text class="s" x="134" y="143" text-anchor="middle">browse, search, cart</text>
+          <rect class="box" x="238" y="106" width="168" height="50" rx="6"/>
+          <text class="t" x="322" y="127" text-anchor="middle">Account hub</text>
+          <text class="s" x="322" y="143" text-anchor="middle">orders, wallet, cards</text>
+          <rect class="hot" x="426" y="106" width="168" height="50" rx="6"/>
+          <text class="t" x="510" y="127" text-anchor="middle">Payment pages</text>
+          <text class="s" x="510" y="143" text-anchor="middle">card PIN, bank code</text>
+          <rect class="box" x="614" y="106" width="168" height="50" rx="6"/>
+          <text class="t" x="698" y="127" text-anchor="middle">Merchant portal</text>
+          <text class="s" x="698" y="143" text-anchor="middle">products, coupons, sales</text>
+          <rect class="box" x="802" y="106" width="168" height="50" rx="6"/>
+          <text class="t" x="886" y="127" text-anchor="middle">Back office</text>
+          <text class="s" x="886" y="143" text-anchor="middle">dashboards, moderation</text>
+
+          <line class="ln" x1="134" y1="156" x2="134" y2="174" /><line class="ln" x1="322" y1="156" x2="322" y2="174" />
+          <line class="ln" x1="510" y1="156" x2="510" y2="174" /><line class="ln" x1="698" y1="156" x2="698" y2="174" />
+          <line class="ln" x1="886" y1="156" x2="886" y2="174" />
+
+          <!-- edge -->
+          <rect class="strip" x="50" y="176" width="920" height="26" rx="4"/>
+          <text class="lbl" x="510" y="193" text-anchor="middle">CDN + FIREWALL  ·  public pages come from cache  ·  private pages are never cached</text>
+
+          <line class="ln" x1="134" y1="202" x2="134" y2="221" marker-end="url(#a)"/><line class="ln" x1="322" y1="202" x2="322" y2="221" marker-end="url(#a)"/>
+          <line class="ln" x1="510" y1="202" x2="510" y2="221" marker-end="url(#a)"/><line class="ln" x1="698" y1="202" x2="698" y2="221" marker-end="url(#a)"/>
+          <line class="ln" x1="886" y1="202" x2="886" y2="221" marker-end="url(#a)"/>
+
+          <!-- web app -->
+          <rect class="frame" x="50" y="224" width="920" height="124" rx="8"/>
+          <text class="cap" x="66" y="244">WEB APP  ·  ONE CODEBASE  ·  RUNS EVERY ACTION, INCLUDING PAYMENT</text>
+          <rect class="strip" x="66" y="254" width="888" height="24" rx="4"/>
+          <text class="lbl" x="510" y="270" text-anchor="middle">Permission check on every request: who are you, and is this yours?</text>
+          <rect class="chip" x="66" y="290" width="152" height="44" rx="5"/>
+          <text class="t" x="142" y="308" text-anchor="middle">Shopping</text><text class="s" x="142" y="324" text-anchor="middle">catalog, cart, coupons</text>
+          <rect class="hot" x="254" y="290" width="152" height="44" rx="5"/>
+          <text class="t" x="330" y="308" text-anchor="middle">Money</text><text class="s" x="330" y="324" text-anchor="middle">ledger, bank, pay</text>
+          <rect class="chip" x="442" y="290" width="152" height="44" rx="5"/>
+          <text class="t" x="518" y="308" text-anchor="middle">Orders</text><text class="s" x="518" y="324" text-anchor="middle">orders, stock, delivery</text>
+          <rect class="chip" x="630" y="290" width="152" height="44" rx="5"/>
+          <text class="t" x="706" y="308" text-anchor="middle">Selling</text><text class="s" x="706" y="324" text-anchor="middle">stores, listings, team</text>
+          <rect class="chip" x="802" y="290" width="152" height="44" rx="5"/>
+          <text class="t" x="878" y="308" text-anchor="middle">Platform</text><text class="s" x="878" y="324" text-anchor="middle">identity, moderation, stats</text>
+
+          <!-- app -> db -->
+          <line class="ln-hot" x1="330" y1="348" x2="330" y2="397" marker-end="url(#ah)"/>
+          <text class="lbl-hot" x="342" y="377">one all-or-nothing transaction per payment</text>
+
+          <!-- database -->
+          <rect class="frame" x="50" y="400" width="700" height="130" rx="8"/>
+          <text class="cap" x="66" y="420">DATABASE  ·  POSTGRESQL  ·  THE SINGLE SOURCE OF TRUTH</text>
+          <rect class="chip" x="68" y="432" width="88" height="82" rx="5"/>
+          <text class="t" x="112" y="456" text-anchor="middle">core</text><text class="s" x="112" y="476" text-anchor="middle">orders, stock,</text><text class="s" x="112" y="490" text-anchor="middle">products</text>
+          <rect class="hot" x="164" y="432" width="88" height="82" rx="5"/>
+          <text class="t" x="208" y="456" text-anchor="middle">ledger</text><text class="s" x="208" y="476" text-anchor="middle">all money,</text><text class="s" x="208" y="490" text-anchor="middle">sums to zero</text>
+          <rect class="chip" x="260" y="432" width="88" height="82" rx="5"/>
+          <text class="t" x="304" y="456" text-anchor="middle">private</text><text class="s" x="304" y="476" text-anchor="middle">personal data,</text><text class="s" x="304" y="490" text-anchor="middle">encrypted</text>
+          <rect class="chip" x="356" y="432" width="88" height="82" rx="5"/>
+          <text class="t" x="400" y="456" text-anchor="middle">analytics</text><text class="s" x="400" y="476" text-anchor="middle">events,</text><text class="s" x="400" y="490" text-anchor="middle">daily totals</text>
+          <rect class="chip" x="452" y="432" width="88" height="82" rx="5"/>
+          <text class="t" x="496" y="456" text-anchor="middle">audit</text><text class="s" x="496" y="476" text-anchor="middle">permanent log,</text><text class="s" x="496" y="490" text-anchor="middle">job queue</text>
+          <rect class="chip" x="548" y="432" width="88" height="82" rx="5"/>
+          <text class="t" x="592" y="456" text-anchor="middle">research</text><text class="s" x="592" y="476" text-anchor="middle">de-identified</text><text class="s" x="592" y="490" text-anchor="middle">copy</text>
+          <rect class="chip" x="644" y="432" width="88" height="82" rx="5"/>
+          <text class="t" x="688" y="456" text-anchor="middle">sandbox</text><text class="s" x="688" y="476" text-anchor="middle">NPC buyers,</text><text class="s" x="688" y="490" text-anchor="middle">walled off</text>
+
+          <!-- job runner -->
+          <rect class="frame" x="802" y="400" width="168" height="130" rx="8"/>
+          <text class="cap" x="818" y="420">JOB RUNNER</text>
+          <text class="s" x="818" y="442">notifications</text>
+          <text class="s" x="818" y="458">dashboard totals</text>
+          <text class="s" x="818" y="474">delivery updates</text>
+          <text class="s" x="818" y="490">moderation checks</text>
+          <text class="s" x="818" y="506">daily money check</text>
+          <line class="ln" x1="750" y1="446" x2="799" y2="446" marker-end="url(#a)"/>
+          <text class="lbl" x="776" y="439" text-anchor="middle">wakes</text>
+          <text class="lbl" x="776" y="460" text-anchor="middle">per min</text>
+          <line class="ln" x1="802" y1="492" x2="753" y2="492" marker-end="url(#a)"/>
+          <text class="lbl" x="776" y="485" text-anchor="middle">results</text>
+
+          <!-- outside services -->
+          <text class="cap" x="50" y="562">OUTSIDE SERVICES  ·  THE ONLY PARTS NOT BUILT IN-HOUSE</text>
+          <rect class="box" x="50" y="572" width="732" height="46" rx="6"/>
+          <line class="div" x1="233" y1="580" x2="233" y2="610"/><line class="div" x1="416" y1="580" x2="416" y2="610"/><line class="div" x1="599" y1="580" x2="599" y2="610"/>
+          <text class="t" x="141" y="592" text-anchor="middle">Sign-in</text><text class="s" x="141" y="607" text-anchor="middle">email link, Google</text>
+          <text class="t" x="324" y="592" text-anchor="middle">SMS code</text><text class="s" x="324" y="607" text-anchor="middle">one phone, one account</text>
+          <text class="t" x="507" y="592" text-anchor="middle">Email</text><text class="s" x="507" y="607" text-anchor="middle">sign-in links, alerts</text>
+          <text class="t" x="690" y="592" text-anchor="middle">Bot check</text><text class="s" x="690" y="607" text-anchor="middle">sign-up, reports</text>
+          <rect class="box" x="802" y="572" width="168" height="46" rx="6"/>
+          <text class="t" x="886" y="592" text-anchor="middle">Backups + log copy</text><text class="s" x="886" y="607" text-anchor="middle">separate vendor</text>
+
+          <line class="ln" x1="886" y1="530" x2="886" y2="569" marker-end="url(#a)"/>
+          <text class="lbl" x="878" y="554" text-anchor="end">hourly, encrypted</text>
+
+          <polyline class="ln-dash" points="50,286 28,286 28,595 47,595" marker-end="url(#am)"/>
+          <text class="lbl" x="20" y="440" text-anchor="middle" transform="rotate(-90 20 440)">calls when needed</text>
+        </svg>
+      </div>
+      <span class="hint">Scroll sideways to see the whole diagram.</span>
+      <figcaption>Every screen goes through the same web app and the same permission check, and everything is stored in one database. There is no separate payment, courier or bank system. The job runner only does follow-up work, so a purchase never waits for it.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. What happens when someone pays</h2>
+    <figure>
+      <div class="scroll" tabindex="0">
+        <svg viewBox="0 0 990 214" role="img" aria-label="Five steps: cart, quote locked for five minutes, bank step where no money moves, pay as one all-or-nothing transaction, then receipt and follow-up work.">
+          <defs>
+            <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0 0 L10 5 L0 10 z"/></marker>
+            <marker id="bm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah-mut" d="M0 0 L10 5 L0 10 z"/></marker>
+          </defs>
+
+          <rect class="box" x="8" y="34" width="166" height="96" rx="6"/>
+          <circle class="num" cx="30" cy="56" r="11"/><text class="numt" x="30" y="60" text-anchor="middle">1</text>
+          <text class="t" x="48" y="60">Cart</text>
+          <text class="s" x="20" y="84">Items from any sellers.</text>
+          <text class="s" x="20" y="99">Nothing is reserved and</text>
+          <text class="s" x="20" y="114">no price is promised.</text>
+
+          <rect class="box" x="210" y="34" width="166" height="96" rx="6"/>
+          <circle class="num" cx="232" cy="56" r="11"/><text class="numt" x="232" y="60" text-anchor="middle">2</text>
+          <text class="t" x="250" y="60">Quote</text>
+          <text class="s" x="222" y="84">Server works out prices,</text>
+          <text class="s" x="222" y="99">coupon and delivery fee.</text>
+          <text class="s" x="222" y="114">Fixed for 5 minutes.</text>
+
+          <rect class="box" x="412" y="34" width="166" height="96" rx="6"/>
+          <circle class="num" cx="434" cy="56" r="11"/><text class="numt" x="434" y="60" text-anchor="middle">3</text>
+          <text class="t" x="452" y="60">Bank step</text>
+          <text class="s" x="424" y="84">Card PIN or in-app code.</text>
+          <text class="s" x="424" y="99">No money moves yet,</text>
+          <text class="s" x="424" y="114">nothing is held.</text>
+
+          <rect class="hot" x="614" y="34" width="166" height="96" rx="6"/>
+          <circle class="num" cx="636" cy="56" r="11"/><text class="numt" x="636" y="60" text-anchor="middle">4</text>
+          <text class="t" x="654" y="60">Pay</text>
+          <text class="s" x="626" y="84">One transaction: money,</text>
+          <text class="s" x="626" y="99">order, ownership, stock</text>
+          <text class="s" x="626" y="114">and delivery, together.</text>
+
+          <rect class="box" x="816" y="34" width="166" height="96" rx="6"/>
+          <circle class="num" cx="838" cy="56" r="11"/><text class="numt" x="838" y="60" text-anchor="middle">5</text>
+          <text class="t" x="856" y="60">After</text>
+          <text class="s" x="828" y="84">Receipt and tracking now.</text>
+          <text class="s" x="828" y="99">Notifications and stats</text>
+          <text class="s" x="828" y="114">follow in the background.</text>
+
+          <line class="ln" x1="174" y1="82" x2="207" y2="82" marker-end="url(#b)"/>
+          <line class="ln" x1="376" y1="82" x2="409" y2="82" marker-end="url(#b)"/>
+          <line class="ln" x1="578" y1="82" x2="611" y2="82" marker-end="url(#b)"/>
+          <line class="ln" x1="780" y1="82" x2="813" y2="82" marker-end="url(#b)"/>
+
+          <text class="lbl-hot" x="697" y="152" text-anchor="middle">If any check fails here, nothing is charged.</text>
+          <path class="ln-dash" d="M 730 34 C 730 18, 664 18, 664 31" marker-end="url(#bm)"/>
+          <text class="lbl" x="697" y="12" text-anchor="middle">connection lost? retry with the same key, get the same result</text>
+          <text class="lbl" x="495" y="190" text-anchor="middle">Balance, price, stock and ownership are re-checked in the database at step 4, never trusted from a cached page.</text>
+        </svg>
+      </div>
+      <span class="hint">Scroll sideways to see the whole diagram.</span>
+      <figcaption>Step 4 is the only moment money moves. It either completes in full or leaves no trace, and repeating the request can never charge twice.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. What an attacker has to get through</h2>
+    <p class="lede">Seven layers, outermost first. Each one assumes the one before it has already failed.</p>
+    <ol class="layers">
+      <li><b>Edge</b><span>Encrypted connections, firewall rules, bot challenge, rate limits.</span></li>
+      <li><b>Sign-in</b><span>No passwords to steal. Email link or Google, a verified phone, and a fresh sign-in before anything sensitive.</span></li>
+      <li><b>Application</b><span>One permission check on every request. Input is validated and output is escaped.</span></li>
+      <li><b>Business rules</b><span>Retry-safe payments, card PIN with lockout, and a 24-hour delay on irreversible admin actions.</span></li>
+      <li class="core"><b>Database</b><span>Its own rules, independent of the app: a user can read only their own rows, money records cannot be edited, and every money entry must balance to zero.</span></li>
+      <li><b>Data</b><span>Birthdate and address are encrypted with a key kept outside the database. PINs and codes are stored only as hashes. No real payment data exists.</span></li>
+      <li><b>Detection</b><span>A permanent log copied off-site, a daily money check that halts purchases on any mismatch, and an email on every admin sign-in.</span></li>
+    </ol>
+  </section>
+</div>
