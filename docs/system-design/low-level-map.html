@@ -1,0 +1,311 @@
+<title>DeluluMart Low-Level Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one column of build-level views in the order you would build them: data, the pay transaction, money postings, sequences, states. */
+:root {
+  --bg: #FAF8F2; --fg: #171717; --muted: #5d586b; --line: #cdc6da; --panel: #ffffff;
+  --accent: #5B21B6; --accent-soft: #ede6fb; --lime: #D9F75C; --on-lime: #171717;
+  --neg: #a3261b; --pos: #1d6b3a;
+  --display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --body: "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14121b; --fg: #ECE9F5; --muted: #a8a2b8; --line: #3b3550; --panel: #1e1a2a;
+    --accent: #b49bff; --accent-soft: #2b2348; --lime: #D9F75C; --on-lime: #171717;
+    --neg: #ff9a8f; --pos: #7fdca0; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14121b; --fg: #ECE9F5; --muted: #a8a2b8; --line: #3b3550; --panel: #1e1a2a;
+  --accent: #b49bff; --accent-soft: #2b2348; --lime: #D9F75C; --on-lime: #171717;
+  --neg: #ff9a8f; --pos: #7fdca0; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 16px; line-height: 1.55; }
+.page { max-width: 1040px; margin: 0 auto; padding-block: 32px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 44px; }
+h1 { font-family: var(--display); font-weight: 700; font-size: 2rem; line-height: 1.15; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--display); font-weight: 700; font-size: 1.3rem; margin: 0; text-wrap: balance; }
+h3 { font-family: var(--display); font-weight: 500; font-size: 1.02rem; margin: 0; }
+p { margin: 0; max-width: 70ch; }
+.lede, .note { color: var(--muted); }
+.note { font-size: 0.9rem; }
+header, section { display: flex; flex-direction: column; gap: 14px; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 14px; }
+.scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+pre.mermaid { margin: 0; min-width: 720px; background: transparent; color: var(--fg); font-family: var(--mono); font-size: 0.8rem; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.two > div { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+/* steps and locks */
+.steps, .locks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.steps { counter-reset: st; }
+.steps li { counter-increment: st; display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: 2px 12px; padding: 10px 14px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.steps li::before { content: counter(st); grid-row: span 2; font-family: var(--display); font-weight: 700; color: var(--accent); }
+.steps b { font-weight: 600; } .steps span { color: var(--muted); font-size: 0.92rem; }
+.steps li.core { border-color: var(--accent); background: var(--accent-soft); } .steps li.core span { color: var(--fg); }
+.locks { counter-reset: lk; }
+.locks li { counter-increment: lk; display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: 0 12px; align-items: baseline;
+  padding: 7px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 0.92rem; }
+.locks li::before { content: counter(lk); font-family: var(--display); font-weight: 700; color: var(--accent); }
+.locks i { font-style: normal; color: var(--muted); }
+
+/* tables */
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 0.75rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+td.n { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.neg { color: var(--neg); } td.pos { color: var(--pos); }
+tr.sum td { font-weight: 600; background: var(--accent-soft); }
+
+/* chain */
+.chain { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.9rem; }
+.chain span { padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); }
+.chain span.end { border-color: var(--accent); background: var(--accent-soft); }
+.chain i { font-style: normal; color: var(--muted); }
+</style>
+
+<div class="page">
+  <header>
+    <h1>DeluluMart low-level map</h1>
+    <p class="lede">The build-level view: how the data is shaped, exactly what the payment transaction does, where each rupee is posted, and the states things move through. The full reference, with every table, algorithm and endpoint, is <code>docs/system-design/low-level-design.md</code>.</p>
+  </header>
+
+  <section>
+    <h2>1. Data model: the tables that matter</h2>
+    <p class="note">Only the core tables are shown. Money lives in three of them: <code>JOURNAL</code>, <code>POSTING</code> and <code>WALLET</code>.</p>
+    <div class="scroll" tabindex="0">
+<pre class="mermaid">
+erDiagram
+  USER_PROFILE ||--|| BANK_ACCOUNT : has
+  BANK_ACCOUNT ||--|| LEDGER_ACCOUNT : "backed by"
+  LEDGER_ACCOUNT ||--|| WALLET : "cached balance"
+  BANK_ACCOUNT ||--o{ VIRTUAL_CARD : issues
+  JOURNAL ||--|{ POSTING : "sums to zero"
+  LEDGER_ACCOUNT ||--o{ POSTING : "debited or credited"
+  USER_PROFILE ||--o{ CHECKOUT_SESSION : opens
+  CHECKOUT_SESSION ||--o{ PAYMENT_ATTEMPT : tries
+  PAYMENT_ATTEMPT ||--o| ORDER_GROUP : "one success"
+  ORDER_GROUP ||--|| JOURNAL : "recorded as"
+  ORDER_GROUP ||--|{ SELLER_ORDER : "one per seller"
+  SELLER_ORDER ||--|{ ORDER_LINE : contains
+  SELLER_ORDER ||--|| SHIPMENT : "delivered by"
+  ORDER_LINE ||--|| OWNERSHIP : grants
+  USER_PROFILE ||--o{ OWNERSHIP : "owns once per product"
+  USER_PROFILE ||--o| COMPANY : "owns one"
+  COMPANY ||--o{ PRODUCT : sells
+  COMPANY ||--|{ WAREHOUSE : "has 1 to 5"
+  COMPANY ||--o{ COUPON : offers
+  PRODUCT ||--|{ PRODUCT_VERSION : "immutable versions"
+  PRODUCT ||--o{ INVENTORY_UNIT : "stock units"
+  WAREHOUSE ||--o{ INVENTORY_UNIT : stores
+  ORDER_LINE ||--o| INVENTORY_UNIT : "issues one"
+  USER_PROFILE ||--o{ ADDRESS : "saves, encrypted"
+  SHIPMENT }o--o| ADDRESS : "points to"
+</pre>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Rule</th><th>How the database enforces it</th></tr></thead>
+        <tbody>
+          <tr><td>Money cannot be created or lost by accident</td><td>A trigger rejects any journal whose postings do not sum to zero</td></tr>
+          <tr><td>No one can go below zero</td><td><code>CHECK (available_paise &gt;= 0)</code> on the wallet</td></tr>
+          <tr><td>History cannot be rewritten</td><td>No update or delete permission on journals, postings, audit log; a trigger blocks it as well</td></tr>
+          <tr><td>One starting grant per person</td><td>Unique index on the grant table; unique fingerprints for phone and email</td></tr>
+          <tr><td>One charge per checkout</td><td>Unique index: one successful attempt per session</td></tr>
+          <tr><td>One copy of a product per player</td><td>Unique on (user, product)</td></tr>
+          <tr><td>Stock cannot be oversold</td><td>Unit rows are locked and issued one at a time; available count cannot go negative</td></tr>
+          <tr><td>You only see your own rows</td><td>Row-level security on every table</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Inside the pay transaction</h2>
+    <p class="note">Everything below happens in one database transaction. If any step fails, nothing is saved.</p>
+    <div class="two">
+      <div>
+        <h3>Steps</h3>
+        <ol class="steps">
+          <li><b>Check the retry key</b><span>Same key and same request returns the stored result. Same key with a different request is refused.</span></li>
+          <li><b>Check the kill switch</b><span>If purchases are switched off, or the switch cannot be read, stop.</span></li>
+          <li class="core"><b>Lock rows in the fixed order</b><span>The list on the right. Waiting is capped at 2 seconds, then the client retries.</span></li>
+          <li><b>Re-check everything</b><span>Session open, payment authenticated, card active, price and version unchanged, not already owned, coupon valid, balance enough.</span></li>
+          <li><b>Recompute the total</b><span>One pricing function. If it differs from the quote, stop with "cart changed".</span></li>
+          <li class="core"><b>Write</b><span>Journal and postings, orders, ownership, stock issue, coupon use, shipments, wallet balances, creator unlock if below ₹1 crore.</span></li>
+          <li><b>Queue follow-up and commit</b><span>One outbox row, the stored result for the retry key, then commit.</span></li>
+        </ol>
+      </div>
+      <div>
+        <h3>Lock order</h3>
+        <ol class="locks">
+          <li><span><code>checkout_session</code> <i>one outcome per checkout</i></span></li>
+          <li><span><code>coupon</code>, <code>promo_campaign</code> <i>cap and budget</i></span></li>
+          <li><span><code>membership</code> <i>benefit still valid</i></span></li>
+          <li><span><code>company</code> <i>limits and counters</i></span></li>
+          <li><span><code>warehouse</code> <i>capacity</i></span></li>
+          <li><span><code>product</code> <i>stock total, current version</i></span></li>
+          <li><span><code>inventory_unit</code> <i>the exact unit sold</i></span></li>
+          <li><span><code>virtual_card</code> <i>status, PIN counters</i></span></li>
+          <li><span><code>wallet</code> <i>buyer and every seller</i></span></li>
+          <li><span><code>entitlement</code> <i>creator and brand unlock</i></span></li>
+        </ol>
+        <p class="note">Every transaction takes locks in this order, lowest id first within a step. That is what prevents deadlocks and makes "last unit" and "freeze versus pay" races resolve cleanly.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Where the money is posted</h2>
+    <p class="note">Worked example: a ₹2 crore item with a 10% merchant coupon and ₹1,000 Standard delivery. Amounts in rupees; the database stores paise.</p>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Account</th><th>What it is</th><th style="text-align:right">Posting</th></tr></thead>
+        <tbody>
+          <tr><td>Buyer</td><td>Discounted price ₹1,80,00,000 + delivery ₹1,000</td><td class="n neg">−1,80,01,000</td></tr>
+          <tr><td>Seller</td><td>Discounted price less 5% fee (₹9,00,000)</td><td class="n pos">+1,71,00,000</td></tr>
+          <tr><td>SINK</td><td>Fee ₹9,00,000 + delivery ₹1,000, removed from circulation</td><td class="n pos">+9,01,000</td></tr>
+          <tr class="sum"><td>Total</td><td>Every journal must balance</td><td class="n">0</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Amount</th><th>Formula</th></tr></thead>
+        <tbody>
+          <tr><td>Seller discount</td><td>Percent: <code>floor(price × pct / 100)</code>. Flat: split across the seller's lines by price. Price after discount never below ₹100.</td></tr>
+          <tr><td>Platform discount</td><td>Applied after the seller discount. Paid by MINT inside the same journal, within the campaign budget.</td></tr>
+          <tr><td>Fee</td><td><code>floor((price − seller discount) × 5 / 100)</code>. Zero on platform seed items.</td></tr>
+          <tr><td>Delivery fee</td><td>Per seller order, by speed. Plus members: Standard and Express free, Zap half. Goes to SINK.</td></tr>
+          <tr><td>Seed items</td><td>The whole price goes to SINK; there is no seller.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. Card checkout, call by call</h2>
+    <div class="scroll" tabindex="0">
+<pre class="mermaid">
+sequenceDiagram
+  participant U as Player
+  participant W as Web app
+  participant D as Database
+  participant J as Job runner
+  U->>W: POST checkout-sessions (cart, address, speed, coupon)
+  W->>D: validate, price, store quote for 5 min
+  W-->>U: session and totals
+  U->>W: POST attempts (method CARD)
+  W->>D: create attempt PENDING and PIN challenge
+  U->>W: POST challenge/verify (PIN)
+  W->>D: lock card, check PIN, mark authenticated
+  Note over W,D: no money has moved yet
+  U->>W: POST pay (Idempotency-Key)
+  W->>D: pay transaction, all or nothing
+  D-->>W: committed
+  W-->>U: receipt, new balance, tracking
+  D->>J: outbox row, picked up within a minute
+  J->>D: notifications, stats, progression, cache purge
+</pre>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. Sign-up to first balance</h2>
+    <div class="scroll" tabindex="0">
+<pre class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant W as Web app
+  participant A as Sign-in service
+  participant D as Database
+  U->>A: email link or Google
+  A-->>W: verified session
+  U->>W: phone number with country code
+  W->>A: send SMS code (rate limited)
+  U->>W: code
+  W->>D: store phone fingerprint (must be unique)
+  U->>W: date of birth
+  W->>W: adult check
+  W->>D: one transaction: profile, bank account, wallet, starting grant, card
+  Note over D: grant skipped if this phone or email was deleted recently
+  W-->>U: balance of 100 crore, prompt to set card PIN
+</pre>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. States</h2>
+    <div class="two">
+      <div>
+        <h3>Payment attempt</h3>
+        <div class="scroll" tabindex="0">
+<pre class="mermaid" style="min-width:300px">
+stateDiagram-v2
+  [*] --> PENDING: method chosen
+  PENDING --> SUCCEEDED: pay commits
+  PENDING --> FAILED: check fails, wrong PIN x3, expired
+  SUCCEEDED --> [*]
+  FAILED --> [*]
+</pre>
+        </div>
+        <p class="note">The player sees: Created, Authenticating, Authorised, Captured, or Failed with a reason.</p>
+      </div>
+      <div>
+        <h3>Product listing</h3>
+        <div class="scroll" tabindex="0">
+<pre class="mermaid" style="min-width:300px">
+stateDiagram-v2
+  [*] --> DRAFT
+  DRAFT --> OWNER_REVIEW: worker submits
+  OWNER_REVIEW --> DRAFT: changes requested
+  OWNER_REVIEW --> SCREENING: owner approves
+  DRAFT --> SCREENING: owner submits
+  SCREENING --> PUBLISHED: passes
+  SCREENING --> NEEDS_REVIEW: uncertain
+  SCREENING --> REJECTED: violates
+  NEEDS_REVIEW --> PUBLISHED: admin approves
+  NEEDS_REVIEW --> REJECTED: admin rejects
+  PUBLISHED --> HIDDEN: moderation or 3 reports
+  HIDDEN --> PUBLISHED: appeal upheld
+  PUBLISHED --> ARCHIVED: owner archives
+</pre>
+        </div>
+      </div>
+    </div>
+    <h3>Simple chains</h3>
+    <div class="chain"><b>Shipment</b><span>Placed</span><i>→</i><span>Packed</span><i>→</i><span>Shipped</span><i>→</i><span>Out for delivery</span><i>→</i><span class="end">Delivered</span></div>
+    <p class="note">Stage times are fixed at purchase (Standard 24 h, Express 2 h, Zap 10 min). The current stage is worked out from the clock, so no job has to run.</p>
+    <div class="chain"><b>Checkout session</b><span>Open</span><i>→</i><span class="end">Succeeded</span><i>or</i><span>Canceled</span><i>or</i><span>Expired after 5 min</span></div>
+    <div class="chain"><b>Stock unit</b><span>Available</span><i>→</i><span class="end">Issued</span><i>→</i><span>Revoked (never resold)</span><i>·</i><span>Available</span><i>→</i><span>Retired unsold</span></div>
+    <div class="chain"><b>Card</b><span>Active</span><i>⇄</i><span>Frozen</span><i>→</i><span>Replaced (new card issued)</span></div>
+    <div class="chain"><b>Admin sensitive action</b><span>Queued 24 h</span><i>→</i><span class="end">Executed</span><i>or</i><span>Cancelled</span></div>
+  </section>
+
+  <section>
+    <h2>7. What is in the full document</h2>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Section of <span class="mono">low-level-design.md</span></th><th>Contents</th></tr></thead>
+        <tbody>
+          <tr><td>1–2 Conventions, roles</td><td>Ids, money as paise, database roles and permissions, row-level security</td></tr>
+          <tr><td>3 Schema</td><td>SQL for about 35 key tables with constraints and triggers</td></tr>
+          <tr><td>4–5 Lock order, algorithms</td><td>Pricing, pay transaction, retry keys, card number, PIN, encryption, delivery stages, progression, reconciliation</td></tr>
+          <tr><td>6–7 States, sequences</td><td>All state machines and call sequences</td></tr>
+          <tr><td>8 API</td><td>Every endpoint, error codes, a worked request and response</td></tr>
+          <tr><td>9–10 Jobs, caching</td><td>Background task list, cache tags and lifetimes</td></tr>
+          <tr><td>11 Security details</td><td>Cookies, headers, rate limits, which deployment holds which secret</td></tr>
+          <tr><td>12–13 Interfaces, tests</td><td>Module function shapes, what must be tested</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
