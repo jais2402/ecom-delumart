@@ -474,7 +474,9 @@ The console's moderation queue and kill switches are needed from phase 1; the re
 | Research dataset | De-identified, separate role, retained beyond 90 days | Proposed; privacy/analytics |
 | Super Admin | Owner role above Console roles; command-centre dashboards; staff, security, data and cost controls | User requirement; scope proposed; product/engineering |
 | Analytics engine | Metric catalogue, pre-computed aggregates, single query interface, alerts | User requirement; design proposed; analytics/engineering |
+| Staff | None in this release; Super Admin is the only back-office user; roles deferred | User requirement; product |
 | Single-owner safeguard | 24-hour delayed, cancellable execution in place of a second approver | Proposed; security |
+| Solo moderation | Daily review; auto-pause of publication after 48 hours unreviewed; auto-hide at three independent reports | Proposed; safety |
 | Usage-by-place analytics | Approximate connection-derived country/region/city; aggregates only; minimum 10 accounts per named place; staff only | User requirement; method and privacy rules proposed; analytics/privacy |
 | Phone number | Required, with country code, verified by SMS code; one account per phone and per email | User requirement; verification and reassignment rules proposed; engineering/privacy |
 | SMS provider | Needed for phone verification; small real cost per sign-up and, for Indian numbers, sender registration | Open; engineering. Until chosen, numbers are unverified claims |
@@ -569,7 +571,7 @@ Partly planned. The event pipeline, daily rollups and metric definitions were sp
 
 ### R16.2 Role
 
-The Super Admin is the platform owner: the highest staff role, above the area roles in R7. There should be at least two Super Admin accounts when a second trusted person exists; one is acceptable for a solo builder under the safeguards in R16.6.
+The Super Admin is the platform owner. **In this release the Super Admin is the only back-office user: there are no staff accounts** (R16.8). The area roles in R7 are kept in the design for later but are not built now.
 
 A Super Admin can do everything any Console role can, plus the owner-only functions in R16.3. A Super Admin still **cannot**: edit a balance, read or set a card PIN, see a decrypted birthdate or address without the audited view, alter or delete the audit log, or bypass ledger rules. Those limits apply to every human and are enforced by the system, not by policy.
 
@@ -578,9 +580,9 @@ A Super Admin can do everything any Console role can, plus the owner-only functi
 | Area | Functions |
 |---|---|
 | Command centre | The main dashboard (R16.4): health of the product, economy, platform and security on one page |
-| Staff and access | Invite and remove staff, assign roles, force sign-out, review who has which permission, see last activity per staff member |
+| Staff and access | Not in this release (no staff). Reserved for when staff are added. |
 | Platform controls | Kill switches, maintenance and browse-only mode, feature flags, announcement banner |
-| Configuration approvals | Approve or reject economy-affecting changes and platform coupon budgets raised by other roles |
+| Sensitive changes | Economy-affecting changes and platform coupon budgets go through the 24-hour delay (R16.6) |
 | Experiments and research | Approve experiments, stop any experiment, approve research dataset exports (R15) |
 | Security centre | Audit log search, sign-in history for staff, failed-PIN and rate-limit activity, suspicious-account queue, active staff sessions, secret-rotation and backup status |
 | Data operations | Backup and restore-drill status, reconciliation history, deletion queue, data-retention job status |
@@ -626,10 +628,27 @@ Deferred: custom chart builder, scheduled email reports, forecasting, per-mercha
 
 - Separate identity from any player account, on the admin site, with a passkey; no email-link-only sign-in.
 - Every Super Admin sign-in and every owner-only action is audit-logged and triggers an email alert to all Super Admins.
-- **Two-person rule, or a delay when there is only one person.** Actions that mint currency, change economy rules, export research data or grant the Super Admin role need a second Super Admin's approval. Where only one Super Admin exists, the action is instead queued for 24 hours, announced by email, cancellable during that time, and then applied. A stolen session therefore cannot cause immediate irreversible damage.
+- **24-hour delay on irreversible actions.** With no second person to approve, actions that mint currency, change economy rules or export research data are queued for 24 hours, announced by email, cancellable during that time, and then applied. A stolen session therefore cannot cause immediate irreversible damage. When a second Super Admin exists later, their approval can replace the wait.
 - Short sessions and re-sign-in before any owner-only action.
-- The last Super Admin cannot be removed or demoted.
+- The Super Admin account cannot be removed or demoted from inside the product.
 - An offline recovery procedure for a lost passkey, documented and tested before launch.
+
+### R16.8 No staff in this release
+
+There are no staff accounts, staff roles or staff management. One person, the Super Admin, runs the whole back office. This changes how earlier sections read:
+
+| Earlier rule | How it applies now |
+|---|---|
+| Console role separation (R7), researcher and experiment-owner roles (R15.6) | Not built. Every Console area is available to the Super Admin only. A role field is kept in the data model so roles can be added later without rework. |
+| "Second staff approver" for minting, economy changes, platform coupons, research exports (R6.4, R7, R15) | Replaced by the 24-hour delayed, cancellable execution (R16.6). |
+| Support staff viewing an address or phone number with an audited permission (R3.1, R5.2) | Only the Super Admin can, through the same audited view. |
+| Moderation staffing targets (§7.7: urgent within four staffed hours, routine within one working day) | One person cannot promise these. Target becomes: queue reviewed once a day. When the Super Admin is unavailable, new public publication pauses automatically after 48 hours without a review, and reports against live content auto-hide it pending review once three separate accounts report it. |
+| Appeals (§7.7) | Reviewed by the same person who made the decision. This is a known fairness limit until a second reviewer exists; the appeal view shows the original evidence and requires a written reason. |
+| STAFF buyer source (§7.6) | Used only for the Super Admin's own test accounts, which are flagged and excluded from all player metrics. |
+| Test payment scenarios (R4.6) | Available to the Super Admin's test accounts and in staging. |
+| US-44 (role without permission is refused), US-55 (separation of duties) | Read as: any non-Super-Admin account is refused on every Console route. Role-to-role separation tests return when staff are added. |
+
+What does not change: the Super Admin's own hard limits (no balance edits, no PIN access, no audit-log changes), the audit log, and the separate admin identity and passkey.
 
 ### R16.7 Acceptance criteria
 
@@ -637,7 +656,7 @@ Deferred: custom chart builder, scheduled email reports, forecasting, per-mercha
 - **US-57 · One definition per number:** the same metric, period and filters show the same value on the home dashboard, its focused dashboard and its CSV export. NPC and staff activity are excluded unless explicitly selected. A request for a metric or breakdown not in the catalogue is refused.
 - **US-58 · Reconciled dashboards:** fictional sales, fees and mint/sink totals on the Economy and Shopping dashboards equal the ledger for the same period and as-of time.
 - **US-59 · Dashboard privacy:** no dashboard, tooltip or export shows an individual player's data; a group below the minimum count is suppressed; opening an account from a dashboard is audit-logged.
-- **US-60 · Owner safeguards:** with one Super Admin, a minting action is queued, emailed, cancellable for 24 hours and then applied once; with two, it needs the second person. Every Super Admin sign-in sends an alert. The last Super Admin cannot be removed.
+- **US-60 · Owner safeguards:** a minting action is queued, emailed, cancellable for 24 hours and then applied exactly once. Every Super Admin sign-in sends an alert. The Super Admin account cannot be removed from inside the product. No screen or API exists to create a staff account.
 - **US-61 · Alerts and freshness:** an alert fires once when its threshold is crossed and clears when it recovers; every chart shows its as-of time; delayed analytics never block checkout (§7.15).
 
 ---

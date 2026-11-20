@@ -409,7 +409,7 @@ Security controls are spread across this document because each module has its ow
 
 No design removes all risk. These are the known gaps in the current plan.
 
-1. **Solo operation defeats the two-person rules.** Second-approver controls and required code review assume at least two people. Until there is a second trusted person, the compensating controls are: a separate staff identity from your player identity, passkey on a hardware-backed device, the off-site audit log, and your own review of every guarded-zone change (§16.3). This is the weakest point of the plan.
+1. **One person holds every power.** There are no staff, so the Super Admin is the only operator, moderator and code reviewer, and the two-person controls cannot apply. Compensating controls: a separate admin identity from your player identity, passkey sign-in, 24-hour delayed execution of irreversible actions with email notice (§18.3), the off-site audit log, hard limits no account can bypass, and automatic publication pause when moderation is unattended (§18.6). This remains the weakest point of the plan.
 2. **Free-tier database.** No point-in-time recovery, and the database endpoint is reachable from the internet (§9.1.2). A ransomware-style wipe or bad migration could cost up to an hour of data.
 3. **Email and phone are held by the auth service and are not field-encrypted.** They are protected by disk encryption and access control only, unlike birthdate and address. A database-level breach would expose them. The phone uniqueness fingerprint is keyed, but the number itself is readable in the auth tables.
 4. **Code written largely with AI assistance.** Generated code can contain subtle permission or logic errors. The guarded-zone rules, database constraints and automated authorisation tests exist to catch them, but they only work if the tests are written and kept passing.
@@ -952,7 +952,7 @@ client events (deduplicated)        ─┘                         ▲
 ### 18.3 Owner-only commands and safeguards
 
 - Staff management, role grants, forced sign-out, flags, kill switches, approvals, export approvals and alert rules are `superadmin` commands, each re-checking the `owner` permission and writing an audit entry.
-- **Approval or delay.** Sensitive commands create a `pending_action` row (payload hash, requester, required approvals, `not_before`). With two or more Super Admins it executes when a different Super Admin approves. With one, it executes after a 24-hour `not_before`, unless cancelled; creation sends an email to every Super Admin address. A scheduled job executes due actions idempotently. This replaces the two-person assumption flagged as the top residual risk in §8.8 with something a solo builder can actually operate.
+- **Delayed execution.** Sensitive commands create a `pending_action` row (payload hash, requester, `not_before`). It executes after a 24-hour `not_before` unless cancelled; creation sends an email to the Super Admin. A scheduled job executes due actions idempotently. The row also has an approvals field so that a second approver can replace the wait once another Super Admin exists. This replaces the two-person assumption with something a solo builder can actually operate.
 - **Invariants no role can break** are enforced below the application: no update or delete grant on ledger and audit tables (§5.1), no code path that writes a wallet outside the ledger module, PIN verification only in the web process with no read-back (§15.4), field-encrypted data readable only through the audited view command.
 - **Session rules.** Passkey sign-in, short idle timeout, step-up re-authentication for owner-only commands, sign-in alerts, and a database constraint that prevents removing the last Super Admin.
 - **Recovery.** A break-glass procedure for a lost passkey that requires direct database access with the migration role, is logged, and is rehearsed in staging.
@@ -970,3 +970,14 @@ client events (deduplicated)        ─┘                         ▲
 ### 18.5 Verification additions
 
 Tests that: each catalogue metric equals an independent calculation on a fixture dataset; rollup replay and late events do not change totals incorrectly; economy and sales dashboards reconcile to the ledger; suppression hides small groups in API responses; non-owner roles are refused on every `superadmin` command; a pending action executes exactly once, respects cancellation and `not_before`, and requires a different approver when one exists; the last Super Admin cannot be removed.
+
+### 18.6 Single operator in this release
+
+There are no staff accounts (R16.8). What that changes in the build:
+
+- **Authorisation model.** Back-office access is one check: is this the Super Admin identity on the admin hostname. The per-area permission tables, staff invitations and role management screens are not built. The `staff_role` column and the permission-check function signature are kept, with a single role value, so adding roles later is additive.
+- **Smaller attack surface.** With no staff onboarding, there is no invite flow, no role-escalation path and only one privileged account to protect. Creating a second privileged account is possible only through a migration, not through the application.
+- **Approvals.** Every "second approver" rule in §8.5, §15.6, §15.7 and §17 resolves to the delayed-execution mechanism in §18.3.
+- **Moderation safety net.** Because one person cannot guarantee review times, two automatic rules run in the job runner: if the oldest unreviewed submission is more than 48 hours old, the publication switch turns off until the queue is cleared; and a live listing reported by three separate accounts of sufficient age is hidden pending review. Both actions are audit-logged as system actions and are reversible by the Super Admin.
+- **Test accounts.** The Super Admin's shopping tests use separate player accounts flagged `STAFF`, excluded from player metrics and progression by the existing source filters (§5.6).
+- **Tests.** The authorisation matrix reduces to: Super Admin allowed, every other account refused, on every Console route. Role-to-role separation cases are parked until staff exist.
