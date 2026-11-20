@@ -439,6 +439,12 @@ describe("security hardening (review findings)", () => {
           [j, account, amount],
         );
       }
+      // Wallets must reflect postings at commit (0014), so the outcome is decided by the
+      // event-type rules under test, not by a missing wallet update.
+      const users = postings
+        .map(([account]) => account)
+        .filter((a) => a !== MINT_ACCOUNT_ID && a !== SINK_ACCOUNT_ID);
+      if (users.length > 0) await c.query("SELECT ledger.sync_wallets($1)", [users]);
       return j;
     };
 
@@ -613,9 +619,12 @@ describe("security hardening (review findings)", () => {
         "accept",
       ],
     ];
+    // Admin journal types are inserted only by the job runner (0014); the rest by the web role.
+    const ADMIN_TYPES = ["COMPENSATION", "REVERSAL", "ACCOUNT_RETIREMENT"];
     for (const [label, type, postings, expected] of cases) {
       it(`event-type account rules: ${label} is ${expected}ed`, async () => {
-        const state = await commitState(pool, web(), (c) => journal(c, type, postings(f)));
+        const actor = ADMIN_TYPES.includes(type) ? { role: "app_jobs" } : web();
+        const state = await commitState(pool, actor, (c) => journal(c, type, postings(f)));
         expect(state === "no error" ? "accept" : `reject:${state}`).toBe(
           expected === "accept" ? "accept" : "reject:23514",
         );

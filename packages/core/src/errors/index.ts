@@ -21,6 +21,15 @@ export const ERROR_CODES = [
   "PIN_NOT_SET",
   "UNDERAGE",
   "PHONE_INVALID",
+  "PRODUCT_UNAVAILABLE",
+  "CHECKOUT_EXPIRED",
+  "PAYMENT_PENDING",
+  "METHOD_UNAVAILABLE",
+  "CARD_FROZEN",
+  "CARD_REPLACED",
+  "CARD_NOT_OWNED",
+  "MERCHANT_NOT_ALLOWED",
+  "MAINTENANCE",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

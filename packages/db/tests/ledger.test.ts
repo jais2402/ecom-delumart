@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MINT_ACCOUNT_ID } from "../src/provision";
+import { MINT_ACCOUNT_ID, SINK_ACCOUNT_ID } from "../src/provision";
 import {
   createProfile,
   createTestDatabase,
@@ -33,12 +33,16 @@ describe("ledger invariants", () => {
     await db.drop();
   });
 
-  async function insertJournal(c: pg.PoolClient, amounts: [string, bigint][]): Promise<string> {
+  async function insertJournal(
+    c: pg.PoolClient,
+    amounts: [string, bigint][],
+    eventType = "COMPENSATION",
+  ): Promise<string> {
     const id = uuidv7();
-    await c.query(
-      "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'COMPENSATION', 1)",
-      [id],
-    );
+    await c.query("INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, $2, 1)", [
+      id,
+      eventType,
+    ]);
     for (const [account, amount] of amounts) {
       await c.query(
         "INSERT INTO ledger.posting (journal_id, account_id, amount, memo) VALUES ($1, $2, $3, 'test')",
@@ -178,13 +182,33 @@ describe("ledger invariants", () => {
       expect(rows.filter((r) => r.has)).toEqual([]);
       expect(rows.length).toBe(24);
     });
-    it("app_web can still INSERT a balanced journal (insert-only, not read-only)", async () => {
+    // COMPENSATION is an admin action and runs as app_jobs (app_web may not insert it);
+    // app_web's own insert path is a PURCHASE journal. Both stay insert-only, not read-only.
+    it("app_jobs can still INSERT a balanced COMPENSATION journal (insert-only, not read-only)", async () => {
       const state = await inRolledBackTx(pool, async (c) => {
-        await c.query("SET LOCAL ROLE app_web");
+        await c.query("SET LOCAL ROLE app_jobs");
         const id = await insertJournal(c, [
           [MINT_ACCOUNT_ID, -7n],
           [userAccount, 7n],
         ]);
+        await c.query("SELECT ledger.sync_wallets($1)", [[userAccount]]);
+        await c.query("SET CONSTRAINTS ALL IMMEDIATE");
+        return id;
+      });
+      expect(state).toMatch(/^[0-9a-f-]{36}$/);
+    });
+    it("app_web can still INSERT a balanced PURCHASE journal (insert-only, not read-only)", async () => {
+      const state = await inRolledBackTx(pool, async (c) => {
+        await c.query("SET LOCAL ROLE app_web");
+        const id = await insertJournal(
+          c,
+          [
+            [userAccount, -7n],
+            [SINK_ACCOUNT_ID, 7n],
+          ],
+          "PURCHASE",
+        );
+        await c.query("SELECT ledger.sync_wallets($1)", [[userAccount]]);
         await c.query("SET CONSTRAINTS ALL IMMEDIATE");
         return id;
       });

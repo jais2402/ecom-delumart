@@ -34,6 +34,18 @@ export async function createTestDatabase(
     const c = new pg.Client({ connectionString: ADMIN_URL });
     await c.connect();
     try {
+      // Connections that are still closing would be killed by a forced drop, which surfaces
+      // as an unhandled "terminating connection" error. Wait for them to finish instead and
+      // only force as a last resort.
+      for (let attempt = 0; attempt < 40; attempt++) {
+        try {
+          await c.query(`DROP DATABASE IF EXISTS ${name}`);
+          return;
+        } catch (error) {
+          if ((error as { code?: string }).code !== "55006") throw error;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
       await c.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
     } finally {
       await c.end();

@@ -1,3 +1,4 @@
+import { DomainError } from "@delulu/core";
 import type { Pool, PoolClient } from "pg";
 import { withTransaction } from "./transaction";
 import { uuidv7 } from "./uuid";
@@ -89,7 +90,7 @@ export async function provisionAccount(pool: Pool, input: ProvisionInput): Promi
       await client.query(
         `INSERT INTO core.user_profile (id, email_fingerprint, phone_fingerprint, phone_verified_at)
          VALUES ($1, $2, $3, CASE WHEN $3::bytea IS NULL THEN NULL ELSE now() END)
-         ON CONFLICT (id) DO NOTHING`,
+         ON CONFLICT DO NOTHING`,
         [input.userId, input.emailFingerprint, input.phoneFingerprint],
       );
       // Serialises every provisioning attempt for this user. The tombstone rule uses the
@@ -100,7 +101,12 @@ export async function provisionAccount(pool: Pool, input: ProvisionInput): Promi
         [input.userId],
       );
       const profile = locked.rows[0];
-      if (!profile) throw new Error("user profile is not visible to this transaction");
+      // No target on ON CONFLICT: concurrent calls for the same user can collide on the
+      // fingerprint indexes before the primary key, and that must not surface as an error.
+      // If our row is still absent, the fingerprint belongs to a different account.
+      if (!profile) {
+        throw new DomainError("CONFLICT", "This phone number or email already belongs to another account.");
+      }
 
       const existing = await loadExisting(client, input.userId);
       if (existing) return existing;
