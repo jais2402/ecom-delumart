@@ -28,6 +28,8 @@ const RLS_SCHEMAS = ["core", "ledger", "private", "analytics", "audit", "sandbox
 interface Fixture {
   a: ProvisionResult;
   b: ProvisionResult;
+  /** owner of `company` (a bare profile) */
+  seller: string;
   company: string;
   sessionB: string;
   attemptB: string;
@@ -135,7 +137,7 @@ async function seed(pool: pg.Pool): Promise<Fixture> {
   };
   const publishedVersion = await product("PUBLISHED");
   const draftVersion = await product("DRAFT");
-  return { a, b, company, sessionB, attemptB, groupB, sellerOrderB, publishedVersion, draftVersion };
+  return { a, b, seller, company, sessionB, attemptB, groupB, sellerOrderB, publishedVersion, draftVersion };
 }
 
 describe("security hardening (review findings)", () => {
@@ -309,18 +311,25 @@ describe("security hardening (review findings)", () => {
       });
     });
 
-    it("seller side: with app.company_id set, the company sees its seller orders, lines and shipments but not the buyer's group", async () => {
-      const seen = await asActor(
-        pool,
-        { role: "app_web", userId: f.a.userId, companyId: f.company },
-        async (c) => ({
-          sellerOrders: await countRows(c, "SELECT count(*) AS n FROM core.seller_order"),
-          lines: await countRows(c, "SELECT count(*) AS n FROM core.order_line"),
-          shipments: await countRows(c, "SELECT count(*) AS n FROM core.shipment"),
-          groups: await countRows(c, "SELECT count(*) AS n FROM core.order_group"),
-        }),
-      );
-      expect(seen).toEqual({ sellerOrders: 1, lines: 1, shipments: 1, groups: 0 });
+    it("seller side: the company's owner sees its seller orders, lines and shipments but not the buyer's group", async () => {
+      const sellerSide = async (c: pg.PoolClient) => ({
+        sellerOrders: await countRows(c, "SELECT count(*) AS n FROM core.seller_order"),
+        lines: await countRows(c, "SELECT count(*) AS n FROM core.order_line"),
+        shipments: await countRows(c, "SELECT count(*) AS n FROM core.shipment"),
+        groups: await countRows(c, "SELECT count(*) AS n FROM core.order_group"),
+      });
+      expect(await asActor(pool, { role: "app_web", userId: f.seller }, sellerSide)).toEqual({
+        sellerOrders: 1,
+        lines: 1,
+        shipments: 1,
+        groups: 0,
+      });
+      // user A naming the company in app.company_id (a setting A controls) sees none of it
+      const claimed = await asActor(pool, web(), async (c) => {
+        await c.query("SELECT set_config('app.company_id', $1, true)", [f.company]);
+        return sellerSide(c);
+      });
+      expect(claimed).toEqual({ sellerOrders: 0, lines: 0, shipments: 0, groups: 0 });
     });
 
     it("app_web cannot read tombstones, audit or raw analytics, but can append outbox, audit_log and analytics events", async () => {
@@ -347,11 +356,16 @@ describe("security hardening (review findings)", () => {
       const ids = [f.publishedVersion, f.draftVersion];
       const q = "SELECT count(*) AS n FROM core.product_version WHERE id = ANY($1)";
       expect(await asActor(pool, web(), (c) => countRows(c, q, [ids]))).toBe(1);
+      expect(await asActor(pool, { role: "app_web", userId: f.seller }, (c) => countRows(c, q, [ids]))).toBe(
+        2,
+      );
+      // naming the company in a setting is not ownership
       expect(
-        await asActor(pool, { role: "app_web", userId: f.a.userId, companyId: f.company }, (c) =>
-          countRows(c, q, [ids]),
-        ),
-      ).toBe(2);
+        await asActor(pool, web(), async (c) => {
+          await c.query("SELECT set_config('app.company_id', $1, true)", [f.company]);
+          return countRows(c, q, [ids]);
+        }),
+      ).toBe(1);
     });
 
     it("npc_worker sees only published product versions and nothing else in core", async () => {
@@ -386,10 +400,12 @@ describe("security hardening (review findings)", () => {
     });
 
     it("a wallet change matched by a balanced journal commits", async () => {
-      const state = await commitState(pool, payRole(), async (c) => {
+      // (the job runner's REVERSAL: app_pay's own debits are PURCHASEs, which need a whole
+      // order group, and its unbacked fee journals are refused, 0014)
+      const state = await commitState(pool, { role: "app_jobs" }, async (c) => {
         const j = uuidv7();
         await c.query(
-          "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'MEMBERSHIP', 1)",
+          "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'REVERSAL', 1)",
           [j],
         );
         await c.query(
@@ -651,11 +667,18 @@ describe("security hardening (review findings)", () => {
       ],
     ];
     // Admin journal types are inserted only by the job runner (0014, 0016); the rest by the
-    // money-command role.
+    // money-command role. The unbacked fee types (MEMBERSHIP, ...) are refused for app_pay
+    // outright (0014, tests/ledger-gaps); their account rules are checked here as the owner
+    // acting for user A, the path they will take once they are backed.
     const ADMIN_TYPES = ["COMPENSATION", "REVERSAL", "ACCOUNT_RETIREMENT"];
+    const UNBACKED_TYPES = ["COMPANY_REGISTRATION", "WAREHOUSE_PURCHASE", "MEMBERSHIP"];
     for (const [label, type, postings, expected] of cases) {
       it(`event-type account rules: ${label} is ${expected}ed`, async () => {
-        const actor = ADMIN_TYPES.includes(type) ? { role: "app_jobs" } : payRole();
+        const actor = ADMIN_TYPES.includes(type)
+          ? { role: "app_jobs" }
+          : UNBACKED_TYPES.includes(type)
+            ? { userId: f.a.userId }
+            : payRole();
         const state = await commitState(pool, actor, (c) => journal(c, type, postings(f)));
         expect(state === "no error" ? "accept" : `reject:${state}`).toBe(
           expected === "accept" ? "accept" : "reject:23514",

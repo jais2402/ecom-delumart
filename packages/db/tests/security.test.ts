@@ -135,15 +135,26 @@ describe("roles, grants and row-level security", () => {
       groups: 0,
       sellerOrders: 0,
     });
-    const asSeller = await withTransaction(
-      pool,
-      async (c) => {
-        await c.query("SET LOCAL ROLE app_web");
-        return (await c.query("SELECT 1 FROM core.seller_order")).rowCount;
-      },
-      { userId: a.userId, companyId: company },
-    );
-    expect(asSeller).toBe(1);
+    // The seller side is the company's owner, derived by the database from app.user_id; a
+    // user who merely names the company in a setting of their own sees nothing.
+    const owner = await createProfile(pool);
+    await pool.query("INSERT INTO core.company (id, owner_user_id, name) VALUES ($1, $2, 'Shop')", [
+      company,
+      owner,
+    ]);
+    const sellerOrdersSeen = (userId: string, claimedCompany?: string) =>
+      withTransaction(
+        pool,
+        async (c) => {
+          if (claimedCompany)
+            await c.query("SELECT set_config('app.company_id', $1, true)", [claimedCompany]);
+          await c.query("SET LOCAL ROLE app_web");
+          return (await c.query("SELECT 1 FROM core.seller_order")).rowCount;
+        },
+        { userId },
+      );
+    expect(await sellerOrdersSeen(owner)).toBe(1);
+    expect(await sellerOrdersSeen(a.userId, company)).toBe(0);
   });
 
   it("app_web cannot read private.user_secret of another user", async () => {

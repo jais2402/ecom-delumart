@@ -1,3 +1,24 @@
+-- =====================================================================================
+-- KNOWN GAP - REQUIRES AUTH INTEGRATION (not fixed; tracked by the it.todo tests titled
+-- "requires auth integration" in tests/money-attacks.test.ts)
+--
+-- The acting user is whatever the connection puts in app.user_id. A holder of the app_pay
+-- credential (for example a fully compromised web process, see below) can therefore:
+--   * set app.user_id to ANY user and spend that user's wallet through ordinary purchases
+--     (every structural money rule of 0016 holds, but "the acting user" is the attacker's
+--     choice), and
+--   * provision invented users (app_pay inserts core.user_profile for the acting user),
+--     each of which receives the starting grant.
+-- This cannot be closed until sign-in exists. Planned design:
+--   * the auth service signs a short-lived session token with an asymmetric key; the web
+--     process holds only the public key;
+--   * the database verifies that token inside a SECURITY DEFINER function, which yields the
+--     acting user id; policies and checks use that function instead of app.user_id, so
+--     the id cannot be chosen by the connection;
+--   * core.user_profile.id gets a foreign key to the auth service's user table, so only a
+--     user the auth service created can be provisioned.
+-- =====================================================================================
+--
 -- LLD §2: privileges. Runs after every table exists (the LLD lists the grants
 -- before the tables, which cannot execute).
 --
@@ -53,8 +74,8 @@ GRANT USAGE ON SCHEMA private TO app_web, app_pay;
 GRANT USAGE ON SCHEMA sandbox TO npc_worker;
 GRANT USAGE ON SCHEMA research TO research_ro;
 
--- RLS context helpers, used inside policies.
-GRANT EXECUTE ON FUNCTION core.app_user_id(), core.app_company_id() TO app_web, app_pay, app_jobs, npc_worker;
+-- RLS context helper, used inside policies (company scope is core.actor_company_ids(), 0012).
+GRANT EXECUTE ON FUNCTION core.app_user_id() TO app_web, app_pay, app_jobs, npc_worker;
 
 -- ---------------------------------------------------------------- core: reference
 GRANT SELECT ON core.config_version, core.system_switch,
@@ -121,13 +142,15 @@ GRANT UPDATE (status, response) ON core.idempotency_record TO app_pay;
 GRANT SELECT, DELETE ON core.idempotency_record TO app_jobs;   -- retention purge (kept >= 24 h)
 
 -- ---------------------------------------------------------------- core: catalog and inventory
--- A company creates DRAFT products (never with stock or the seed-only zap flag) and
--- moves its own listings' status. Stock counters are written only by app_pay (issue in
--- pay) and app_jobs, and must equal the AVAILABLE units at commit (0016).
+-- A company owner creates DRAFT products (never with stock, unlimited stock or the
+-- seed-only zap flag), submits them for screening with a version, and archives its own
+-- listings; which status moves each role may make is enforced by a trigger (0017). Stock
+-- counters are written only by app_pay (issue in pay) and app_jobs, and must equal the
+-- AVAILABLE units at commit (0016).
 GRANT SELECT ON core.product TO app_web;
 GRANT INSERT (id, company_id, seller_type, status, current_version_id, category, inventory_mode,
               exclusive_supply, offers_express, free_standard_delivery, published_at) ON core.product TO app_web;
-GRANT UPDATE (status) ON core.product TO app_web;
+GRANT UPDATE (status, current_version_id) ON core.product TO app_web;
 GRANT SELECT ON core.product TO app_pay;
 GRANT UPDATE (available_units) ON core.product TO app_pay;              -- stock issue in pay
 GRANT SELECT, INSERT, UPDATE ON core.product TO app_jobs;

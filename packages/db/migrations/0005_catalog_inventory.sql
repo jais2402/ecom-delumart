@@ -14,7 +14,9 @@ CREATE TABLE core.product (
   free_standard_delivery boolean NOT NULL DEFAULT false,
   zap_flag               boolean NOT NULL DEFAULT false,                    -- seed items only
   published_at           timestamptz,
-  CHECK ((seller_type='SEED') = (company_id IS NULL))
+  CHECK ((seller_type='SEED') = (company_id IS NULL)),
+  -- unlimited stock is platform seed stock only: a user's company sells units it holds
+  CONSTRAINT product_user_stock_is_finite CHECK (seller_type <> 'USER' OR inventory_mode <> 'UNLIMITED_SEED')
 );
 
 CREATE TABLE core.product_version (                           -- immutable

@@ -6,9 +6,15 @@
 --     whose jobs_all policy is unchanged). Enforced by the row-level-security WITH CHECK
 --     on insert, and again by a role check in 0016. app_web inserts no journal at all
 --     (no INSERT privilege, 0011).
+--
+--     COMPANY_REGISTRATION, WAREHOUSE_PURCHASE and MEMBERSHIP are NOT allowed yet: nothing
+--     backs them (no company-registration, warehouse or membership purchase records and
+--     checks exist), so the money role could use them to burn its own balance and drop
+--     below the relief or creator thresholds. Add each type here only together with the
+--     table and commit-time check that back it (0016 refuses them for app_pay and app_web
+--     as well).
 CREATE POLICY pay_insert ON ledger.journal FOR INSERT TO app_pay
-  WITH CHECK (event_type IN ('STARTER_GRANT','RELIEF_GRANT','PURCHASE','COMPANY_REGISTRATION',
-                             'WAREHOUSE_PURCHASE','MEMBERSHIP'));
+  WITH CHECK (event_type IN ('STARTER_GRANT','RELIEF_GRANT','PURCHASE'));
 
 -- A2. A posting is never committed without the wallet reflecting it: at commit,
 --     every USER account that received a posting in the transaction must have a
@@ -22,6 +28,7 @@ DECLARE
   balance   bigint;
   posted    bigint;
 BEGIN
+  PERFORM ledger.require_read_committed();
   SELECT type INTO acct_type FROM ledger.ledger_account WHERE id = NEW.account_id;
   IF acct_type IS DISTINCT FROM 'USER' THEN
     RETURN NULL;   -- MINT and SINK have no cached balance

@@ -45,7 +45,10 @@ CREATE TABLE core.order_line (
   platform_discount_paise bigint NOT NULL CHECK (platform_discount_paise >= 0),
   fee_paise               bigint NOT NULL CHECK (fee_paise >= 0),
   inventory_unit_id       uuid,
-  edition_serial          int
+  edition_serial          int,
+  -- position of the line in the pricing function's input (0..n-1 within the order group);
+  -- a FLAT coupon is split across lines in this order (0016)
+  line_no                 int NOT NULL DEFAULT 0 CHECK (line_no >= 0)
 );
 CREATE INDEX order_line_seller_order ON core.order_line (seller_order_id);
 

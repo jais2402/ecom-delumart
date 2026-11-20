@@ -60,10 +60,26 @@ CREATE UNIQUE INDEX one_relief_per_day ON ledger.grant_record (user_id, utc_day)
 -- (owned by the migration/owner role, which RLS does not filter) so that the checks
 -- see every posting even when the inserting role's RLS policies hide other accounts.
 
+-- The money checks judge the transaction's final state against the latest committed rows
+-- (prices, switches, other postings). That holds only under READ COMMITTED, where every
+-- statement of a check takes a fresh snapshot; under REPEATABLE READ or SERIALIZABLE a check
+-- would read the snapshot taken at the transaction's first statement, so a purchase could
+-- commit at a stale price or with the purchases switch already off. Every money trigger
+-- therefore refuses to run at any other isolation level.
+CREATE FUNCTION ledger.require_read_committed() RETURNS void
+LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+BEGIN
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'money writes run only at READ COMMITTED isolation (this transaction is %)',
+      current_setting('transaction_isolation') USING ERRCODE = 'invalid_transaction_state';
+  END IF;
+END $$;
+
 -- Every journal sums to zero, checked at commit (deferred), once per inserted posting.
 CREATE FUNCTION ledger.assert_zero_sum() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
+  PERFORM ledger.require_read_committed();
   IF (SELECT COALESCE(SUM(amount),0) FROM ledger.posting WHERE journal_id = NEW.journal_id) <> 0 THEN
     RAISE EXCEPTION 'journal % does not sum to zero', NEW.journal_id USING ERRCODE = 'check_violation';
   END IF;
@@ -82,11 +98,23 @@ END $$;
 CREATE TRIGGER stamp_txid BEFORE INSERT ON ledger.journal
   FOR EACH ROW EXECUTE FUNCTION ledger.stamp_journal_txid();
 
+-- journal.created_at is the database clock at insert, whatever the caller sent: rules that
+-- date a journal (one relief per UTC day, the shipment schedule) must not be fed a date.
+CREATE FUNCTION ledger.stamp_journal_created_at() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+BEGIN
+  NEW.created_at := clock_timestamp();
+  RETURN NEW;
+END $$;
+CREATE TRIGGER stamp_created_at BEFORE INSERT ON ledger.journal
+  FOR EACH ROW EXECUTE FUNCTION ledger.stamp_journal_created_at();
+
 -- Postings may only be added by the transaction that created their journal. Runs
 -- after the row's CHECK and foreign-key checks, immediately (not deferred).
 CREATE FUNCTION ledger.assert_posting_same_tx() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
+  PERFORM ledger.require_read_committed();
   IF NOT EXISTS (SELECT 1 FROM ledger.journal
                   WHERE id = NEW.journal_id AND created_txid = txid_current()) THEN
     RAISE EXCEPTION 'journal % was created in an earlier transaction and is closed; post a new journal instead',
@@ -186,6 +214,7 @@ DECLARE
   balance   bigint;
   posted    bigint;
 BEGIN
+  PERFORM ledger.require_read_committed();
   IF TG_OP = 'UPDATE' AND OLD.account_id IS DISTINCT FROM NEW.account_id THEN
     RAISE EXCEPTION 'wallet account_id cannot change' USING ERRCODE = 'check_violation';
   END IF;

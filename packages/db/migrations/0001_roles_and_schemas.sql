@@ -79,6 +79,32 @@ BEGIN
   END LOOP;
 END $$;
 
+-- Session defaults for the application roles (security review, denial of service): a
+-- connection logging in as one of them cannot sit idle inside a transaction holding locks
+-- for more than 15 s, waits at most 2 s for a lock, and runs no statement longer than 10 s
+-- (60 s for the job runner). Scoped to this database.
+--
+-- These are DEFAULTS. A role can override them for its own session or transaction with SET
+-- (the data-access layer itself sets tighter transaction-local values, LLD §4), so they bound
+-- accidents and simple abuse, not a determined holder of the credential. The definer
+-- functions that lock other users' rows (ledger.sync_wallets, the commit-time checks of 0016)
+-- carry their own lock_timeout, which a caller cannot raise.
+DO $$
+DECLARE
+  r record;
+BEGIN
+  FOR r IN
+    SELECT * FROM (VALUES ('app_web', '10s'), ('app_pay', '10s'), ('app_jobs', '60s'), ('npc_worker', '10s'))
+      AS t(name, statement_timeout)
+  LOOP
+    EXECUTE format('ALTER ROLE %I IN DATABASE %I SET idle_in_transaction_session_timeout = %L',
+                   r.name, current_database(), '15s');
+    EXECUTE format('ALTER ROLE %I IN DATABASE %I SET lock_timeout = %L', r.name, current_database(), '2s');
+    EXECUTE format('ALTER ROLE %I IN DATABASE %I SET statement_timeout = %L',
+                   r.name, current_database(), r.statement_timeout);
+  END LOOP;
+END $$;
+
 -- No role but the owner creates objects or temporary tables in this database.
 DO $$
 BEGIN
@@ -109,9 +135,8 @@ END $$;
 
 -- Row-level security context, set transaction-locally by the data-access layer.
 -- Unset or empty settings read as NULL, so a request without them matches no rows.
+-- There is deliberately no company setting: a role could set it to any company. Company
+-- scope is derived from the acting user in the database (core.actor_company_ids(), 0012).
 CREATE FUNCTION core.app_user_id() RETURNS uuid LANGUAGE sql STABLE AS $$
   SELECT nullif(current_setting('app.user_id', true), '')::uuid
-$$;
-CREATE FUNCTION core.app_company_id() RETURNS uuid LANGUAGE sql STABLE AS $$
-  SELECT nullif(current_setting('app.company_id', true), '')::uuid
 $$;

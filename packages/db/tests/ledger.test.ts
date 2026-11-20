@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MINT_ACCOUNT_ID, SINK_ACCOUNT_ID } from "../src/provision";
+import { MINT_ACCOUNT_ID } from "../src/provision";
 import {
   createProfile,
   createTestDatabase,
@@ -183,8 +183,8 @@ describe("ledger invariants", () => {
       expect(rows.length).toBe(36);
     });
     // COMPENSATION is an admin action and runs as app_jobs; the money-command role app_pay
-    // posts the user's own journals (here a MEMBERSHIP fee, user -> SINK; a PURCHASE needs a
-    // whole order group, 0016). Both stay insert-only, not read-only. app_web inserts none.
+    // posts the user's own journals (grants at provisioning, purchases). Both stay insert-only,
+    // not read-only. app_web inserts none.
     it("app_jobs can still INSERT a balanced COMPENSATION journal (insert-only, not read-only)", async () => {
       const state = await inRolledBackTx(pool, async (c) => {
         await c.query("SET LOCAL ROLE app_jobs");
@@ -209,22 +209,15 @@ describe("ledger invariants", () => {
       ).toBe("42501");
     });
     it("app_pay can still INSERT a balanced journal of its own user (insert-only, not read-only)", async () => {
-      const state = await inRolledBackTx(pool, async (c) => {
-        await c.query("SELECT set_config('app.user_id', $1, true)", [userId]);
-        await c.query("SET LOCAL ROLE app_pay");
-        const id = await insertJournal(
-          c,
-          [
-            [userAccount, -7n],
-            [SINK_ACCOUNT_ID, 7n],
-          ],
-          "MEMBERSHIP",
-        );
-        await c.query("SELECT ledger.sync_wallets($1)", [[userAccount]]);
-        await c.query("SET CONSTRAINTS ALL IMMEDIATE");
-        return id;
-      });
-      expect(state).toMatch(/^[0-9a-f-]{36}$/);
+      // Provisioning runs as app_pay and writes the user's STARTER_GRANT journal and postings.
+      // (COMPANY_REGISTRATION, WAREHOUSE_PURCHASE and MEMBERSHIP are refused for app_pay until
+      // they are backed, 0014; a PURCHASE needs a whole order group, 0016.)
+      const fresh = await provisionAccount(pool, provisionInput());
+      const { rows } = await pool.query<{ n: string; s: string }>(
+        "SELECT count(*) AS n, SUM(amount)::text AS s FROM ledger.posting WHERE journal_id = $1",
+        [fresh.starterJournalId],
+      );
+      expect(rows[0]).toEqual({ n: "2", s: "0" });
     });
   });
 

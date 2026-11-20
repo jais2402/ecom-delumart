@@ -28,6 +28,15 @@
 --  R6  A CARD attempt is never inserted authenticated; authentication is a later update,
 --      stamped with the database clock. Cards and sessions belong to the attempt's user.
 --
+--  R7  Every check runs only at READ COMMITTED (ledger.require_read_committed, 0003), so
+--      each of its statements reads the latest committed rows; the order-group check also
+--      locks the products, the coupon and the switches it reads (FOR SHARE) so they cannot
+--      change between the check and the commit. Expiry (session, coupon window,
+--      membership) is judged by clock_timestamp(), not by the transaction start, so a
+--      long-open transaction cannot keep something expired alive.
+--  R8  COMPANY_REGISTRATION, WAREHOUSE_PURCHASE and MEMBERSHIP are refused for app_pay and
+--      app_web until the records and checks that back them exist (see 0014).
+--
 -- Every check is a SECURITY DEFINER function (owned by the migration role, so it sees
 -- rows that RLS hides from the caller) run as a deferred constraint trigger, so it
 -- judges the transaction's final state at commit regardless of statement order.
@@ -102,6 +111,12 @@ BEGIN
     RAISE EXCEPTION '% journals are created only by the job runner (app_jobs), not %', NEW.event_type, current_user
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  -- R8: nothing backs these yet, so the application roles may not create them at all
+  IF NEW.event_type IN ('COMPANY_REGISTRATION', 'WAREHOUSE_PURCHASE', 'MEMBERSHIP')
+     AND current_user IN ('app_pay', 'app_web') THEN
+    RAISE EXCEPTION '% journals are not available until their backing records and checks exist', NEW.event_type
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
   RETURN NEW;
 END $$;
 CREATE TRIGGER admin_journal_role BEFORE INSERT ON ledger.journal
@@ -142,6 +157,7 @@ DECLARE
   sink_sum  bigint;
   sink_due  bigint;
 BEGIN
+  PERFORM ledger.require_read_committed();
   SELECT event_type, created_at, order_group_id INTO ev, j_created, j_group FROM ledger.journal WHERE id = NEW.id;
   SELECT count(*),
          count(*) FILTER (WHERE a.type = 'MINT'),
@@ -294,7 +310,10 @@ BEGIN
         RAISE EXCEPTION 'a RELIEF_GRANT is exactly % paise, not %', ledger.relief_grant_paise(), user_net
           USING ERRCODE = 'check_violation';
       END IF;
-      IF gr.utc_day IS DISTINCT FROM (j_created AT TIME ZONE 'UTC')::date THEN
+      -- created_at is stamped by the database clock at insert (0003), never supplied, and the
+      -- day must still be today at commit: a relief cannot be dated on another day
+      IF gr.utc_day IS DISTINCT FROM (j_created AT TIME ZONE 'UTC')::date
+         OR gr.utc_day IS DISTINCT FROM (clock_timestamp() AT TIME ZONE 'UTC')::date THEN
         RAISE EXCEPTION 'RELIEF_GRANT journal %: the grant''s UTC day must be today', NEW.id
           USING ERRCODE = 'check_violation';
       END IF;
@@ -316,9 +335,59 @@ END $$;
 CREATE CONSTRAINT TRIGGER journal_rules AFTER INSERT ON ledger.journal
   DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ledger.assert_journal_rules();
 
+-- ---------------------------------------------------------------- R4: FLAT coupon split
+-- Mirrors discountsOn() for a FLAT amount in packages/core/src/pricing: each base may be
+-- discounted down to 10,000 paise (₹100); the amount is split in proportion to the bases,
+-- each share floored and the remainder added to the last open base; a share above a base's
+-- room is re-split across the bases that still have room, until the amount is given or no
+-- base has room. Returns one discount per base, in order. Numeric arithmetic: the product of
+-- an amount and a base can exceed bigint.
+CREATE FUNCTION core.flat_split(amount bigint, bases bigint[]) RETURNS bigint[]
+LANGUAGE plpgsql IMMUTABLE SET search_path = pg_catalog, pg_temp AS $$
+DECLARE
+  n         int := COALESCE(cardinality(bases), 0);
+  rooms     numeric[];
+  given     numeric[];
+  remaining numeric := amount;
+  pass      numeric;
+  open_idx  int[];
+  sum_w     numeric;
+  share     numeric;
+  allocated numeric;
+  take      numeric;
+  k         int;
+  i         int;
+BEGIN
+  IF n = 0 THEN
+    RETURN ARRAY[]::bigint[];
+  END IF;
+  rooms := ARRAY(SELECT GREATEST(b - 10000, 0)::numeric FROM unnest(bases) WITH ORDINALITY AS x(b, o) ORDER BY o);
+  given := array_fill(0::numeric, ARRAY[n]);
+  WHILE remaining > 0 LOOP
+    open_idx := ARRAY(SELECT j FROM generate_series(1, n) j WHERE given[j] < rooms[j] ORDER BY j);
+    EXIT WHEN cardinality(open_idx) = 0;
+    sum_w := (SELECT SUM(bases[j]) FROM unnest(open_idx) j);
+    pass := remaining;          -- the shares of this pass split what remained at its start
+    allocated := 0;
+    FOR k IN 1 .. cardinality(open_idx) LOOP
+      i := open_idx[k];
+      IF k < cardinality(open_idx) THEN
+        share := div(pass * bases[i], sum_w);
+        allocated := allocated + share;
+      ELSE
+        share := pass - allocated;   -- the last share takes the remainder
+      END IF;
+      take := LEAST(share, rooms[i] - given[i]);
+      given[i] := given[i] + take;
+      remaining := remaining - take;
+    END LOOP;
+  END LOOP;
+  RETURN given::bigint[];
+END $$;
+
 -- ---------------------------------------------------------------- R4: the order group, priced from the database
 CREATE FUNCTION core.assert_order_group() RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp SET lock_timeout = '2s' AS $$
 DECLARE
   g        core.order_group%ROWTYPE;
   actor    uuid := nullif(current_setting('app.user_id', true), '')::uuid;
@@ -340,10 +409,35 @@ DECLARE
   eligible_room bigint;
   discount bigint;
   redemptions int;
+  now_ts   timestamptz := clock_timestamp();   -- expiry is judged by the clock, not the transaction start
+  is_test  boolean;
+  d_ms     bigint;
+  shp      record;
+  bases    bigint[];
+  sds      bigint[];
 BEGIN
+  PERFORM ledger.require_read_committed();
   SELECT * INTO g FROM core.order_group WHERE id = NEW.id;
   IF g.buyer_user_id IS DISTINCT FROM actor THEN
     RAISE EXCEPTION 'order group %: the buyer must be the acting user (app.user_id)', g.id USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- What can change under a concurrent transaction is locked before it is read (canonical
+  -- order, LLD §4: coupon, then products; then the switches), so it cannot change between
+  -- this check and the commit. pay() already holds the coupon and products FOR UPDATE.
+  PERFORM 1 FROM core.coupon c
+   WHERE c.id IN (SELECT cr.coupon_id FROM core.coupon_redemption cr WHERE cr.order_group_id = g.id)
+   ORDER BY c.id FOR SHARE;
+  PERFORM 1 FROM core.product p
+   WHERE p.id IN (SELECT l.product_id FROM core.order_line l JOIN core.seller_order so ON so.id = l.seller_order_id
+                   WHERE so.order_group_id = g.id)
+   ORDER BY p.id FOR SHARE;
+  PERFORM 1 FROM core.system_switch sw WHERE sw.name IN ('payments_card', 'purchases') ORDER BY sw.name FOR SHARE;
+
+  SELECT u.is_test_account INTO is_test FROM core.user_profile u WHERE u.id = g.buyer_user_id;
+  IF g.buyer_source IS DISTINCT FROM (CASE WHEN is_test THEN 'STAFF' ELSE 'PLAYER' END) THEN
+    RAISE EXCEPTION 'order group %: buyer_source must be STAFF for a test account and PLAYER otherwise', g.id
+      USING ERRCODE = 'check_violation';
   END IF;
 
   SELECT * INTO j FROM ledger.journal WHERE id = g.journal_id;
@@ -357,7 +451,7 @@ BEGIN
   SELECT * INTO s FROM core.checkout_session WHERE id = g.session_id;
   IF NOT FOUND OR s.user_id <> g.buyer_user_id OR s.type <> 'PRODUCT_PURCHASE' OR s.state <> 'SUCCEEDED'
      OR s.config_version <> g.config_version OR s.total_paise <> g.total_paise
-     OR s.expires_at <= now() OR s.expires_at > s.created_at + make_interval(secs => ttl)
+     OR s.expires_at <= now_ts OR s.expires_at > s.created_at + make_interval(secs => ttl)
      OR s.config_version IS DISTINCT FROM (SELECT cv.id FROM core.config_version cv
                                             WHERE cv.effective_from <= s.created_at ORDER BY cv.id DESC LIMIT 1) THEN
     RAISE EXCEPTION 'order group % needs the buyer''s unexpired PRODUCT_PURCHASE session, SUCCEEDED, for the same total and configuration',
@@ -383,8 +477,17 @@ BEGIN
   END IF;
 
   member := EXISTS (SELECT 1 FROM core.membership m
-                     WHERE m.user_id = g.buyer_user_id AND m.starts_at <= now() AND m.ends_at > now());
+                     WHERE m.user_id = g.buyer_user_id AND m.starts_at <= now_ts AND m.ends_at > now_ts);
   fee_pct := core.config_int(g.config_version, ARRAY['fee_percent'], 5);
+
+  -- lines are numbered 0..n-1 in the pricing function's input order (the FLAT split uses it)
+  IF EXISTS (SELECT 1 FROM (SELECT count(*) AS n, count(DISTINCT l.line_no) AS d, min(l.line_no) AS lo, max(l.line_no) AS hi
+                              FROM core.order_line l JOIN core.seller_order so ON so.id = l.seller_order_id
+                             WHERE so.order_group_id = g.id) x
+              WHERE x.n > 0 AND (x.d <> x.n OR x.lo <> 0 OR x.hi <> x.n - 1)) THEN
+    RAISE EXCEPTION 'order group %: order lines must be numbered 0..n-1 in pricing order', g.id
+      USING ERRCODE = 'check_violation';
+  END IF;
 
   -- ------------------------------------------------ lines, priced from product rows
   FOR ln IN
@@ -478,6 +581,24 @@ BEGIN
       RAISE EXCEPTION 'seller order %: net must be list - seller discount - fee - seller-funded delivery', sor.id
         USING ERRCODE = 'check_violation';
     END IF;
+    IF sor.qualifies_for_progression AND (is_test OR sor.owner = g.buyer_user_id) THEN
+      RAISE EXCEPTION 'seller order %: a test account''s or own-company purchase does not qualify for progression', sor.id
+        USING ERRCODE = 'check_violation';
+    END IF;
+    -- the shipment schedule (LLD §5.7): placed at the journal's time, then 10/30/70/100% of
+    -- the configured duration for the speed; within one second
+    SELECT * INTO shp FROM core.shipment WHERE seller_order_id = sor.id;
+    d_ms := core.config_int(g.config_version, ARRAY['delivery_duration_ms', sor.speed],
+                            CASE sor.speed WHEN 'STANDARD' THEN 86400000 WHEN 'EXPRESS' THEN 7200000 ELSE 600000 END);
+    IF shp.cancelled_at IS NOT NULL OR shp.delivered_notified
+       OR abs(extract(epoch FROM shp.placed_at - j.created_at)) > 1
+       OR abs(extract(epoch FROM shp.packed_at - (j.created_at + (d_ms * 10 / 100) * interval '1 millisecond'))) > 1
+       OR abs(extract(epoch FROM shp.shipped_at - (j.created_at + (d_ms * 30 / 100) * interval '1 millisecond'))) > 1
+       OR abs(extract(epoch FROM shp.out_at - (j.created_at + (d_ms * 70 / 100) * interval '1 millisecond'))) > 1
+       OR abs(extract(epoch FROM shp.delivered_at - (j.created_at + d_ms * interval '1 millisecond'))) > 1 THEN
+      RAISE EXCEPTION 'seller order %: the shipment does not follow the % schedule from the purchase time', sor.id, sor.speed
+        USING ERRCODE = 'check_violation';
+    END IF;
     buyer_total := buyer_total + sor.list_paise - sor.seller_discount_paise - sor.platform_discount_paise
                    + sor.delivery_fee_buyer_paise;
   END LOOP;
@@ -496,7 +617,7 @@ BEGIN
     SELECT * INTO r FROM core.coupon_redemption WHERE order_group_id = g.id LIMIT 1;
     SELECT * INTO cp FROM core.coupon WHERE id = r.coupon_id;
     IF redemptions > 1 OR r.user_id <> g.buyer_user_id OR cp.scope <> 'MERCHANT' OR cp.status <> 'ACTIVE'
-       OR (cp.starts_at IS NOT NULL AND cp.starts_at > now()) OR (cp.ends_at IS NOT NULL AND cp.ends_at <= now())
+       OR (cp.starts_at IS NOT NULL AND cp.starts_at > now_ts) OR (cp.ends_at IS NOT NULL AND cp.ends_at <= now_ts)
        OR EXISTS (SELECT 1 FROM core.company c WHERE c.id = cp.company_id AND c.owner_user_id = g.buyer_user_id)
        OR NOT EXISTS (SELECT 1 FROM core.seller_order o WHERE o.order_group_id = g.id AND o.company_id = cp.company_id)
        OR EXISTS (SELECT 1 FROM core.seller_order o WHERE o.order_group_id = g.id
@@ -505,18 +626,31 @@ BEGIN
         USING ERRCODE = 'check_violation';
     END IF;
     SELECT COALESCE(SUM(l.list_paise), 0), COALESCE(SUM(GREATEST(l.list_paise - 10000, 0)), 0),
-           COALESCE(SUM(l.seller_discount_paise), 0)
-      INTO eligible_list, eligible_room, discount
+           COALESCE(SUM(l.seller_discount_paise), 0),
+           array_agg(l.list_paise ORDER BY l.line_no), array_agg(l.seller_discount_paise ORDER BY l.line_no)
+      INTO eligible_list, eligible_room, discount, bases, sds
       FROM core.order_line l JOIN core.seller_order o ON o.id = l.seller_order_id
      WHERE o.order_group_id = g.id AND o.company_id = cp.company_id;
-    IF eligible_list < cp.min_spend_paise OR r.discount_paise <> discount
-       OR (cp.kind = 'FLAT' AND discount <> LEAST(cp.value, eligible_room))
+    IF eligible_list < cp.min_spend_paise THEN
+      RAISE EXCEPTION 'order group %: the order does not reach coupon %''s minimum spend', g.id, cp.id
+        USING ERRCODE = 'check_violation';
+    END IF;
+    IF r.discount_paise <> discount THEN
+      RAISE EXCEPTION 'order group %: the redemption records % but the lines give %', g.id, r.discount_paise, discount
+        USING ERRCODE = 'check_violation';
+    END IF;
+    IF (cp.kind = 'FLAT' AND discount <> LEAST(cp.value, eligible_room))
        OR (cp.kind = 'PERCENT' AND EXISTS (
              SELECT 1 FROM core.order_line l JOIN core.seller_order o ON o.id = l.seller_order_id
               WHERE o.order_group_id = g.id AND o.company_id = cp.company_id
                 AND l.seller_discount_paise <> LEAST(l.list_paise * cp.value / 100, GREATEST(l.list_paise - 10000, 0)))) THEN
       RAISE EXCEPTION 'order group %: the seller discount is not what coupon % gives', g.id, cp.id
         USING ERRCODE = 'check_violation';
+    END IF;
+    -- a FLAT amount is split across the lines exactly as the pricing function splits it
+    IF cp.kind = 'FLAT' AND core.flat_split(cp.value, bases) IS DISTINCT FROM sds THEN
+      RAISE EXCEPTION 'order group %: coupon %''s FLAT discount is not split across the lines as the pricing function splits it',
+        g.id, cp.id USING ERRCODE = 'check_violation';
     END IF;
   END IF;
   RETURN NULL;
@@ -532,6 +666,7 @@ DECLARE
   buyer uuid;
   ok    boolean;
 BEGIN
+  PERFORM ledger.require_read_committed();
   CASE TG_TABLE_NAME
     WHEN 'seller_order' THEN
       SELECT g.id INTO grp FROM core.order_group g
@@ -591,6 +726,7 @@ CREATE CONSTRAINT TRIGGER joins_new_group AFTER INSERT ON core.creator_entitleme
 CREATE FUNCTION core.assert_unit_issue() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
+  PERFORM ledger.require_read_committed();
   IF NEW.state = 'ISSUED' AND (TG_OP = 'INSERT' OR OLD.state IS DISTINCT FROM 'ISSUED'
                                OR OLD.order_line_id IS DISTINCT FROM NEW.order_line_id) THEN
     IF (TG_OP = 'UPDATE' AND OLD.state <> 'AVAILABLE') OR NOT EXISTS (
@@ -617,6 +753,7 @@ DECLARE
   cid  uuid;
   bad  text;
 BEGIN
+  PERFORM ledger.require_read_committed();
   -- plpgsql resolves NEW.<field> when an expression is planned, so pick fields per table
   IF TG_TABLE_NAME = 'product' THEN
     pid := NEW.id;
@@ -676,6 +813,7 @@ CREATE CONSTRAINT TRIGGER counters AFTER INSERT ON core.coupon_redemption
 CREATE FUNCTION core.guard_payment_attempt() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
+  PERFORM ledger.require_read_committed();
   IF TG_OP = 'INSERT' THEN
     IF NEW.method = 'CARD' AND NEW.authenticated_at IS NOT NULL THEN
       RAISE EXCEPTION 'a CARD attempt is created unauthenticated; authentication is a separate step'
@@ -723,6 +861,7 @@ CREATE TRIGGER guard BEFORE INSERT OR UPDATE ON core.payment_attempt
 CREATE FUNCTION core.guard_checkout_session() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
+  PERFORM ledger.require_read_committed();
   IF (NEW.user_id, NEW.type, NEW.quote, NEW.total_paise, NEW.config_version, NEW.created_at)
      IS DISTINCT FROM (OLD.user_id, OLD.type, OLD.quote, OLD.total_paise, OLD.config_version, OLD.created_at) THEN
     RAISE EXCEPTION 'checkout session % is immutable except for its state', OLD.id USING ERRCODE = 'check_violation';
@@ -740,6 +879,7 @@ CREATE TRIGGER guard BEFORE UPDATE ON core.checkout_session
 CREATE FUNCTION core.assert_succeeded_has_order() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
+  PERFORM ledger.require_read_committed();
   IF NEW.state = 'SUCCEEDED' AND NOT EXISTS (
        SELECT 1 FROM core.order_group g
         WHERE CASE TG_TABLE_NAME WHEN 'payment_attempt' THEN g.payment_attempt_id ELSE g.session_id END = NEW.id) THEN
@@ -757,10 +897,13 @@ CREATE CONSTRAINT TRIGGER succeeded_has_order AFTER INSERT OR UPDATE ON core.che
 -- the caller has a reason to touch: the acting user's own, any account that received a
 -- posting in this transaction, and the owners of companies with a published product
 -- (pay locks seller wallets before posting, LLD §4 #9). Anything else is refused, so
--- the function cannot be used to hold arbitrary users' wallet locks.
+-- the function cannot be used to hold arbitrary users' wallet locks. It never waits more
+-- than 2 s for a wallet lock, whatever lock_timeout the caller set (SET clause below): a
+-- caller cannot make it queue unboundedly behind someone holding a wallet.
 CREATE OR REPLACE FUNCTION ledger.sync_wallets(account_ids uuid[]) RETURNS void
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp SET lock_timeout = '2s' AS $$
 BEGIN
+  PERFORM ledger.require_read_committed();
   IF EXISTS (
     SELECT 1 FROM unnest(account_ids) AS x(id)
      WHERE NOT EXISTS (
@@ -787,7 +930,7 @@ REVOKE ALL ON FUNCTION
   core.assert_joins_new_group(), core.assert_unit_issue(), core.assert_counters(),
   core.guard_payment_attempt(), core.guard_checkout_session(), core.assert_succeeded_has_order(),
   core.config_paise(int, text[], bigint), core.config_int(int, text[], bigint),
-  core.delivery_fee_paise(int, text, boolean),
+  core.delivery_fee_paise(int, text, boolean), core.flat_split(bigint, bigint[]),
   ledger.starter_grant_paise(), ledger.relief_grant_paise(), ledger.relief_wallet_ceiling_paise(),
   ledger.relief_lifetime_max()
 FROM PUBLIC;

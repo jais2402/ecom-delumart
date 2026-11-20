@@ -101,18 +101,17 @@ export async function inRolledBackTx<T>(pool: pg.Pool, fn: (c: pg.PoolClient) =>
   }
 }
 
-/** Who a statement runs as: a database role plus the transaction-local RLS settings. */
+/**
+ * Who a statement runs as: a database role plus the transaction-local app.user_id. (There is
+ * no company: the database derives the actor's companies from the user, migration 0012.)
+ */
 export interface Actor {
   role?: string;
   userId?: string;
-  companyId?: string;
 }
 
 async function become(c: pg.PoolClient, as: Actor): Promise<void> {
-  await c.query("SELECT set_config('app.user_id', $1, true), set_config('app.company_id', $2, true)", [
-    as.userId ?? "",
-    as.companyId ?? "",
-  ]);
+  await c.query("SELECT set_config('app.user_id', $1, true)", [as.userId ?? ""]);
   if (as.role) await c.query(`SET LOCAL ROLE ${as.role}`);
 }
 

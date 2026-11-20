@@ -16,10 +16,12 @@ export interface TransactionOptions {
    * that role or a member of it; otherwise the transaction fails with 42501.
    */
   role?: AppRole;
-  /** Sets app.user_id for row-level security policies (transaction-local). */
+  /**
+   * Sets app.user_id for row-level security policies (transaction-local). There is no
+   * company option: the database derives the actor's companies from this user
+   * (core.actor_company_ids(), migration 0012).
+   */
   userId?: string | null;
-  /** Sets app.company_id; only after the server confirmed the actor owns the company. */
-  companyId?: string | null;
   /** LLD §4 default: 2s. */
   lockTimeout?: string;
   /** LLD §4 default: 5s. */
@@ -27,7 +29,8 @@ export interface TransactionOptions {
 }
 
 /**
- * Runs fn inside one transaction with the LLD §4 timeouts and the RLS settings
+ * Runs fn inside one READ COMMITTED transaction (the database's money checks refuse any
+ * other isolation level, migration 0003) with the LLD §4 timeouts and the RLS settings
  * applied transaction-locally. Commits on success, rolls back on any error.
  */
 export async function withTransaction<T>(
@@ -38,7 +41,7 @@ export async function withTransaction<T>(
   const client = await pool.connect();
   let broken = false;
   try {
-    await client.query("BEGIN");
+    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
     try {
       if (options.role !== undefined) {
         // a fixed allow-list: the role name is interpolated, never caller text
@@ -47,13 +50,8 @@ export async function withTransaction<T>(
       }
       await client.query(
         `SELECT set_config('lock_timeout', $1, true), set_config('statement_timeout', $2, true),
-                set_config('app.user_id', $3, true), set_config('app.company_id', $4, true)`,
-        [
-          options.lockTimeout ?? "2s",
-          options.statementTimeout ?? "5s",
-          options.userId ?? "",
-          options.companyId ?? "",
-        ],
+                set_config('app.user_id', $3, true)`,
+        [options.lockTimeout ?? "2s", options.statementTimeout ?? "5s", options.userId ?? ""],
       );
       const result = await fn(client);
       await client.query("COMMIT");

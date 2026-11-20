@@ -1,10 +1,12 @@
 -- LLD §2: row-level security on every table in core, ledger, private, analytics,
 -- audit, sandbox and research.
 --
--- The data-access layer sets app.user_id and app.company_id (transaction-local) on
--- every transaction; core.app_user_id() / core.app_company_id() read them and return
--- NULL when unset, so a request without them matches no owner rows (fails closed).
--- app.company_id is set only after the server confirmed the actor owns the company.
+-- The data-access layer sets app.user_id (transaction-local) on every transaction;
+-- core.app_user_id() reads it and returns NULL when unset, so a request without it matches
+-- no owner rows (fails closed). Company scope is never taken from a setting the connection
+-- controls: a row belongs to the actor's company iff that company's owner_user_id is the
+-- acting user (core.actor_company_ids() below). See 0011 for the gap that remains while
+-- app.user_id itself is connection-supplied.
 --
 -- Every policy names its roles (TO ...): a role with no policy on a table sees no
 -- rows even if it is granted access. app_jobs (no user context) gets explicit
@@ -88,7 +90,30 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
      WHERE p.current_version_id = version_id AND p.status = 'PUBLISHED')
 $$;
 
-REVOKE ALL ON FUNCTION core.identity_is_tombstoned(bytea, bytea), core.is_published_version(uuid) FROM PUBLIC;
+-- The companies the acting user owns. SECURITY INVOKER and inlinable: every role that uses
+-- it can already read core.company (0011). Policies use it as
+-- `company_id IN (SELECT core.actor_company_ids())`.
+CREATE FUNCTION core.actor_company_ids() RETURNS SETOF uuid
+LANGUAGE sql STABLE AS $$
+  SELECT c.id FROM core.company c WHERE c.owner_user_id = core.app_user_id()
+$$;
+
+-- Coupon lookup for checkout (app_pay): the ACTIVE merchant coupon with exactly this
+-- normalised code among the given companies, or nothing. app_pay cannot list coupons: its
+-- SELECT policy shows only public coupons and coupons named in the buyer's own checkout
+-- sessions, so a private code is found only by someone who already knows it.
+CREATE FUNCTION core.find_coupon(p_code text, p_company_ids uuid[]) RETURNS SETOF core.coupon
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+  SELECT c.* FROM core.coupon c
+   WHERE c.scope = 'MERCHANT' AND c.status = 'ACTIVE' AND c.code_normalised = p_code
+     AND c.company_id = ANY(p_company_ids)
+   ORDER BY c.id LIMIT 1
+$$;
+
+REVOKE ALL ON FUNCTION core.identity_is_tombstoned(bytea, bytea), core.is_published_version(uuid),
+  core.actor_company_ids(), core.find_coupon(text, uuid[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION core.actor_company_ids() TO app_web, app_pay, app_jobs;
+GRANT EXECUTE ON FUNCTION core.find_coupon(text, uuid[]) TO app_pay;
 GRANT EXECUTE ON FUNCTION core.identity_is_tombstoned(bytea, bytea) TO app_web, app_pay, app_jobs;
 GRANT EXECUTE ON FUNCTION core.is_published_version(uuid) TO app_web, app_pay, app_jobs, npc_worker;
 
@@ -216,7 +241,7 @@ CREATE POLICY pay_owner ON core.payment_challenge TO app_pay
 
 -- ---------------------------------------------------------------- orders: buyer and seller sides
 CREATE POLICY seller_order_parties ON core.seller_order FOR SELECT TO app_web
-  USING (buyer_user_id = core.app_user_id() OR company_id = core.app_company_id());
+  USING (buyer_user_id = core.app_user_id() OR company_id IN (SELECT core.actor_company_ids()));
 -- seller orders, lines and shipments are created inside the buyer's pay transaction (app_pay)
 CREATE POLICY pay_buyer ON core.seller_order TO app_pay
   USING (buyer_user_id = core.app_user_id()) WITH CHECK (buyer_user_id = core.app_user_id());
@@ -236,17 +261,18 @@ CREATE POLICY pay_buyer ON core.shipment TO app_pay
                        WHERE so.id = seller_order_id AND so.buyer_user_id = core.app_user_id()));
 
 -- ---------------------------------------------------------------- catalog and inventory
--- Buyers see published products and products they own; a company sees its own.
+-- Buyers see published products and products they own; a company owner sees its own.
 CREATE POLICY web_read ON core.product FOR SELECT TO app_web
   USING (status = 'PUBLISHED'
-      OR company_id = core.app_company_id()
+      OR company_id IN (SELECT core.actor_company_ids())
       OR EXISTS (SELECT 1 FROM core.ownership o WHERE o.product_id = product.id));
 CREATE POLICY web_company_insert ON core.product FOR INSERT TO app_web
-  WITH CHECK (seller_type = 'USER' AND company_id = core.app_company_id() AND status = 'DRAFT');
--- the company moves its own listings (submit); the column grant limits this to status
+  WITH CHECK (seller_type = 'USER' AND status = 'DRAFT' AND company_id IN (SELECT core.actor_company_ids()));
+-- the owner moves its own listings; the column grant limits this to status and current
+-- version, and the transition trigger (0017) to the moves app_web may make
 CREATE POLICY web_update ON core.product FOR UPDATE TO app_web
-  USING (company_id = core.app_company_id())
-  WITH CHECK (company_id = core.app_company_id());
+  USING (company_id IN (SELECT core.actor_company_ids()))
+  WITH CHECK (company_id IN (SELECT core.actor_company_ids()));
 -- app_pay: reads published products (and ones the buyer owns); issues stock of, and so
 -- locks, published products only (column grant: available_units)
 CREATE POLICY pay_read ON core.product FOR SELECT TO app_pay
@@ -256,9 +282,11 @@ CREATE POLICY pay_issue ON core.product FOR UPDATE TO app_pay
 
 CREATE POLICY web_read ON core.product_version FOR SELECT TO app_web
   USING (core.is_published_version(id)
-      OR EXISTS (SELECT 1 FROM core.product p WHERE p.id = product_id AND p.company_id = core.app_company_id()));
+      OR EXISTS (SELECT 1 FROM core.product p
+                  WHERE p.id = product_id AND p.company_id IN (SELECT core.actor_company_ids())));
 CREATE POLICY web_company_insert ON core.product_version FOR INSERT TO app_web
-  WITH CHECK (EXISTS (SELECT 1 FROM core.product p WHERE p.id = product_id AND p.company_id = core.app_company_id()));
+  WITH CHECK (EXISTS (SELECT 1 FROM core.product p
+                       WHERE p.id = product_id AND p.company_id IN (SELECT core.actor_company_ids())));
 CREATE POLICY npc_published ON core.product_version FOR SELECT TO npc_worker
   USING (core.is_published_version(id));
 CREATE POLICY pay_published ON core.product_version FOR SELECT TO app_pay
@@ -274,9 +302,9 @@ CREATE POLICY pay_read ON core.inventory_unit FOR SELECT TO app_pay
 CREATE POLICY pay_issue ON core.inventory_unit FOR UPDATE TO app_pay
   USING (state = 'AVAILABLE' AND EXISTS (SELECT 1 FROM core.product p WHERE p.id = product_id AND p.status = 'PUBLISHED'))
   WITH CHECK (state = 'ISSUED' AND order_line_id IS NOT NULL);
--- warehouses: the company's own, or ones holding units of visible products
+-- warehouses: the owner's own, or ones holding units of visible products
 CREATE POLICY web_read ON core.warehouse FOR SELECT TO app_web
-  USING (company_id = core.app_company_id()
+  USING (company_id IN (SELECT core.actor_company_ids())
       OR EXISTS (SELECT 1 FROM core.inventory_unit u WHERE u.warehouse_id = warehouse.id));
 -- app_pay locks and decrements `used` (column grant) of warehouses holding AVAILABLE
 -- units of published products
@@ -288,13 +316,27 @@ CREATE POLICY pay_issue ON core.warehouse FOR UPDATE TO app_pay
   WITH CHECK (true);
 
 -- ---------------------------------------------------------------- promotions
--- Coupons are redeemed by code inside pay (cap counter); merchants create their own.
-CREATE POLICY web_read ON core.coupon FOR SELECT TO app_web USING (status = 'ACTIVE' OR company_id = core.app_company_id());
+-- Coupons are redeemed by code inside pay (cap counter); company owners create their own.
+-- A private coupon's code is readable only by the owner of its company; everyone else sees
+-- public ACTIVE coupons only (a buyer types a private code; it is looked up, not listed).
+CREATE POLICY web_read ON core.coupon FOR SELECT TO app_web
+  USING (company_id IN (SELECT core.actor_company_ids()) OR (is_public AND status = 'ACTIVE'));
 CREATE POLICY web_company_insert ON core.coupon FOR INSERT TO app_web
-  WITH CHECK (scope = 'MERCHANT' AND company_id = core.app_company_id());
--- the cap counter moves only in pay (app_pay) and must equal the redemptions (0016)
-CREATE POLICY pay_read ON core.coupon FOR SELECT TO app_pay USING (status = 'ACTIVE');
-CREATE POLICY pay_redeem ON core.coupon FOR UPDATE TO app_pay USING (status = 'ACTIVE') WITH CHECK (status = 'ACTIVE');
+  WITH CHECK (scope = 'MERCHANT' AND company_id IN (SELECT core.actor_company_ids()));
+-- app_pay finds a coupon by exact code through core.find_coupon() (checkout) and then reads
+-- and locks it by the id stored in the buyer's own checkout session (pay); it cannot list
+-- private coupons. The cap counter moves only in pay and must equal the redemptions (0016).
+CREATE POLICY pay_read ON core.coupon FOR SELECT TO app_pay
+  USING (status = 'ACTIVE'
+     AND (is_public OR EXISTS (SELECT 1 FROM core.checkout_session s
+                                WHERE s.user_id = core.app_user_id()
+                                  AND s.quote #>> '{coupon,id}' = coupon.id::text)));
+CREATE POLICY pay_redeem ON core.coupon FOR UPDATE TO app_pay
+  USING (status = 'ACTIVE'
+     AND (is_public OR EXISTS (SELECT 1 FROM core.checkout_session s
+                                WHERE s.user_id = core.app_user_id()
+                                  AND s.quote #>> '{coupon,id}' = coupon.id::text)))
+  WITH CHECK (status = 'ACTIVE');
 CREATE POLICY web_active ON core.promo_campaign FOR SELECT TO app_web USING (status = 'ACTIVE');
 
 -- ---------------------------------------------------------------- ledger

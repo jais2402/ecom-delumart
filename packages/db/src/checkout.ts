@@ -413,9 +413,10 @@ interface CouponRow {
   in_window: boolean;
 }
 
+// Expiry is judged by the clock, not the transaction start (as the database does, 0016).
 const COUPON_COLUMNS = `id, scope, company_id, code_normalised, kind, value::text, min_spend_paise::text,
   max_redemptions, redeemed, status,
-  ((starts_at IS NULL OR starts_at <= now()) AND (ends_at IS NULL OR ends_at > now())) AS in_window`;
+  ((starts_at IS NULL OR starts_at <= clock_timestamp()) AND (ends_at IS NULL OR ends_at > clock_timestamp())) AS in_window`;
 
 /** Coupon rules shared by quote and pay. Returns the error to raise, or null when usable. */
 async function couponProblem(
@@ -447,7 +448,7 @@ async function couponProblem(
 
 async function isMember(c: PoolClient, userId: string): Promise<boolean> {
   const { rowCount } = await c.query(
-    "SELECT 1 FROM core.membership WHERE user_id = $1 AND starts_at <= now() AND ends_at > now()",
+    "SELECT 1 FROM core.membership WHERE user_id = $1 AND starts_at <= clock_timestamp() AND ends_at > clock_timestamp()",
     [userId],
   );
   return (rowCount ?? 0) > 0;
@@ -553,10 +554,9 @@ export async function createCheckoutSession(
 
     let coupon: StoredCoupon | null = null;
     if (input.couponCode !== undefined) {
+      // exact-code lookup: app_pay cannot list private coupons (migration 0012)
       const { rows } = await c.query<CouponRow>(
-        `SELECT ${COUPON_COLUMNS} FROM core.coupon
-          WHERE scope = 'MERCHANT' AND status = 'ACTIVE' AND code_normalised = $1 AND company_id = ANY($2::uuid[])
-          ORDER BY id LIMIT 1`,
+        `SELECT ${COUPON_COLUMNS} FROM core.find_coupon($1, $2::uuid[])`,
         [normaliseCode(input.couponCode), companyIds],
       );
       const row = rows[0];
@@ -703,7 +703,7 @@ export async function createPaymentAttempt(
   }
   return asPay(pool, input.userId, async (c) => {
     const { rows } = await c.query<{ state: string; expired: boolean }>(
-      "SELECT state, expires_at <= now() AS expired FROM core.checkout_session WHERE id = $1 AND user_id = $2",
+      "SELECT state, expires_at <= clock_timestamp() AS expired FROM core.checkout_session WHERE id = $1 AND user_id = $2",
       [input.sessionId, input.userId],
     );
     const session = rows[0];
@@ -953,7 +953,7 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
   // 3. locks in canonical order (LLD §4), validating each as it is taken
   // #1 checkout session (the buyer's own; RLS and the explicit user check agree)
   const sessionRes = await c.query<SessionRow>(
-    `SELECT state, expires_at <= now() AS expired, quote, total_paise::text, config_version
+    `SELECT state, expires_at <= clock_timestamp() AS expired, quote, total_paise::text, config_version
        FROM core.checkout_session WHERE id = $1 AND user_id = $2 AND type = 'PRODUCT_PURCHASE' FOR UPDATE`,
     [input.sessionId, userId],
   );
@@ -1077,25 +1077,12 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
     card = r.rows[0];
   }
 
-  // #9 wallets: buyer and every seller, ascending account id (inside ledger.sync_wallets)
   const buyerAccount = await c.query<{ id: string }>(
     "SELECT id FROM ledger.ledger_account WHERE user_id = $1 AND type = 'USER'",
     [userId],
   );
   const buyerAccountId = buyerAccount.rows[0]?.id;
   if (!buyerAccountId) fail("FORBIDDEN", "buyer has no ledger account");
-  const walletAccounts = [...new Set([buyerAccountId, ...accountByOwner.values()])].sort();
-  await c.query("SELECT ledger.sync_wallets($1::uuid[])", [walletAccounts]);
-  const buyerWallet = await c.query<{ available_paise: string }>(
-    "SELECT available_paise::text FROM ledger.wallet WHERE account_id = $1 FOR UPDATE",
-    [buyerAccountId],
-  );
-  const available = BigInt(buyerWallet.rows[0]?.available_paise ?? "0");
-
-  // #10 entitlement (read under the buyer's wallet lock, which serialises this user's
-  // purchases; the unique user_id is the last line of defence)
-  const ent = await c.query("SELECT 1 FROM core.creator_entitlement WHERE user_id = $1", [userId]);
-  const hasEntitlement = (ent.rowCount ?? 0) > 0;
 
   // 4. re-validate everything against the locked state and rebuild the quote from it
   if (attempt.method === "CARD") {
@@ -1193,6 +1180,23 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
   }
   if (priced.buyerTotal !== BigInt(session.total_paise))
     fail("CART_CHANGED", "the total changed since the quote");
+
+  // #9 wallets: buyer and every seller, ascending account id (inside ledger.sync_wallets,
+  // which waits at most 2 s). Taken as late as possible: only once everything else is locked
+  // and validated, so a refused purchase never queues on (or holds) anyone's wallet.
+  const walletAccounts = [...new Set([buyerAccountId, ...accountByOwner.values()])].sort();
+  await c.query("SELECT ledger.sync_wallets($1::uuid[])", [walletAccounts]);
+  const buyerWallet = await c.query<{ available_paise: string }>(
+    "SELECT available_paise::text FROM ledger.wallet WHERE account_id = $1 FOR UPDATE",
+    [buyerAccountId],
+  );
+  const available = BigInt(buyerWallet.rows[0]?.available_paise ?? "0");
+
+  // #10 entitlement (read under the buyer's wallet lock, which serialises this user's
+  // purchases; the unique user_id is the last line of defence)
+  const ent = await c.query("SELECT 1 FROM core.creator_entitlement WHERE user_id = $1", [userId]);
+  const hasEntitlement = (ent.rowCount ?? 0) > 0;
+
   if (available < priced.buyerTotal) fail("INSUFFICIENT_FUNDS", "not enough fictional balance");
 
   // 5. write
@@ -1241,11 +1245,21 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
     [journalId, postAccounts, postAmounts, postSellerOrders, postMemos],
   );
 
+  // the purchase time is the journal's, stamped by the database clock (migration 0003);
+  // shipments are scheduled from it
+  const journalTime = await c.query<{ ms: string }>(
+    "SELECT floor(extract(epoch FROM created_at) * 1000)::bigint::text AS ms FROM ledger.journal WHERE id = $1",
+    [journalId],
+  );
+  const placedAt = Number(journalTime.rows[0]?.ms);
+  if (!Number.isSafeInteger(placedAt)) throw new Error("pay: journal time is not readable");
+
   const profile = await c.query<{ is_test_account: boolean }>(
     "SELECT is_test_account FROM core.user_profile WHERE id = $1",
     [userId],
   );
-  const buyerSource = profile.rows[0]?.is_test_account ? "STAFF" : "PLAYER";
+  const isTestAccount = profile.rows[0]?.is_test_account === true;
+  const buyerSource = isTestAccount ? "STAFF" : "PLAYER";
   await c.query(
     `INSERT INTO core.order_group (id, buyer_user_id, session_id, payment_attempt_id, journal_id, buyer_source,
                                    total_paise, config_version)
@@ -1266,8 +1280,8 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
     await c.query(
       `INSERT INTO core.seller_order (id, order_group_id, buyer_user_id, company_id, seller_type, list_paise,
          seller_discount_paise, platform_discount_paise, fee_paise, delivery_fee_buyer_paise,
-         delivery_fee_seller_paise, net_paise)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+         delivery_fee_seller_paise, net_paise, qualifies_for_progression)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [
         sellerOrderIds.get(s.sellerId),
         groupId,
@@ -1281,6 +1295,9 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
         s.deliveryBuyer.toString(),
         s.deliverySeller.toString(),
         s.net.toString(),
+        // a test account's purchase never counts towards a seller's progression; a purchase
+        // from one's own company is refused above
+        !isTestAccount,
       ],
     );
   }
@@ -1288,7 +1305,9 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
   for (const line of lines) {
     const p = line.product;
     const v = line.version;
-    const out = priced.lines.find((l) => l.productId === p.id);
+    // the line's position in the pricing input: the database splits a FLAT coupon in this order
+    const lineNo = priced.lines.findIndex((l) => l.productId === p.id);
+    const out = priced.lines[lineNo];
     if (!out) throw new Error("pay: priced line missing after validation");
     const unit = units.get(p.id) ?? null;
     const lineId = uuidv7();
@@ -1304,8 +1323,8 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
     };
     await c.query(
       `INSERT INTO core.order_line (id, seller_order_id, product_id, product_version_id, snapshot, list_paise,
-         seller_discount_paise, platform_discount_paise, fee_paise, inventory_unit_id, edition_serial)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+         seller_discount_paise, platform_discount_paise, fee_paise, inventory_unit_id, edition_serial, line_no)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         lineId,
         sellerOrderIds.get(line.sellerId),
@@ -1318,6 +1337,7 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
         out.fee.toString(),
         unit?.id ?? null,
         p.inventory_mode === "EXCLUSIVE" ? (unit?.serial ?? null) : null,
+        lineNo,
       ],
     );
     await c.query(
@@ -1346,10 +1366,6 @@ async function payTransaction(c: PoolClient, input: PayInput, hash: Buffer): Pro
     );
   }
 
-  const nowRes = await c.query<{ ms: string }>(
-    "SELECT (extract(epoch FROM now()) * 1000)::bigint::text AS ms",
-  );
-  const placedAt = Number(nowRes.rows[0]?.ms);
   for (const s of priced.perSeller) {
     const t = computeShipmentSchedule(s.speed, placedAt, cfg.durations);
     const iso = (ms: number) => new Date(ms).toISOString();

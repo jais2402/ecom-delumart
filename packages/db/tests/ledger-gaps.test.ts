@@ -99,17 +99,20 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
       expect(state).toBe("42501");
     });
 
-    for (const type of [
-      "STARTER_GRANT",
-      "RELIEF_GRANT",
-      "PURCHASE",
-      "COMPANY_REGISTRATION",
-      "WAREHOUSE_PURCHASE",
-      "MEMBERSHIP",
-    ]) {
+    for (const type of ["STARTER_GRANT", "RELIEF_GRANT", "PURCHASE"]) {
       it(`app_pay may insert a ${type} journal row; app_web may not`, async () => {
         const insert = "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, $2, 1)";
         expect(await stateOf(pool, insert, [uuidv7(), type], payRole())).toBe("no error");
+        expect(await stateOf(pool, insert, [uuidv7(), type], web())).toBe("42501");
+      });
+    }
+
+    // Nothing backs these yet (no registration, warehouse or membership records and checks),
+    // so neither application role may create them: they would only burn money (0014, 0016).
+    for (const type of ["COMPANY_REGISTRATION", "WAREHOUSE_PURCHASE", "MEMBERSHIP"]) {
+      it(`neither app_pay nor app_web may insert a ${type} journal row (unbacked)`, async () => {
+        const insert = "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, $2, 1)";
+        expect(await stateOf(pool, insert, [uuidv7(), type], payRole())).toBe("42501");
         expect(await stateOf(pool, insert, [uuidv7(), type], web())).toBe("42501");
       });
     }
@@ -144,9 +147,11 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
   });
 
   describe("A2: every USER account that received postings has a matching wallet at commit", () => {
-    it("app_pay: a journal debiting the buyer without a wallet update is rejected at commit", async () => {
-      const message = await commitError(pool, payRole(), (c) =>
-        journal(c, "MEMBERSHIP", [
+    it("an application role: a journal debiting a user without a wallet update is rejected at commit", async () => {
+      // (app_pay's own debits are PURCHASEs, which need a whole order group, 0016; the job
+      // runner's REVERSAL debits a user the same way)
+      const message = await commitError(pool, jobs, (c) =>
+        journal(c, "REVERSAL", [
           [a.ledgerAccountId, -700],
           [SINK_ACCOUNT_ID, 700],
         ]),
