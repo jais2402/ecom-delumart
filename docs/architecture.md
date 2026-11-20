@@ -342,7 +342,7 @@ A single policy layer in `core` is called by every command and query — web rou
 
 **Data protection**
 - TLS everywhere, including app-to-database; encryption at rest with managed keys for database, backups and buckets.
-- Data minimisation as specified in §7.7: no payment data, phone number or device location is collected at all. The one exception added in Revision 1.5 is an optional, owner-only, field-encrypted delivery address (§15.5).
+- Data minimisation as specified in §7.7: no real payment data, phone number or device location is collected at all. Revision 1.5 adds two personal fields, both owner-only and field-encrypted: an optional delivery address (§15.5) and the date of birth used for card issuance and the adult check (§15.4).
 - Secrets live only in the secret manager, are distinct per environment and are rotated on a schedule and on any staff departure.
 - Retention jobs enforce the §7.7 schedule; logs and analytics are redacted at source (no email, token or full IP).
 
@@ -677,8 +677,18 @@ A single pure function `price(quote inputs, config version) → amounts` compute
 - Method configuration (enabled, order, limits, maintenance windows) is versioned console data, read inside the pay transaction so a disabled method cannot be used by calling the API directly.
 - Test scenarios are keyed to reserved test identifiers and a staff flag, and are compiled out of the decision path for ordinary players.
 
+Card number and PIN (R4.7):
+
+- **Number generation.** `digits = HMAC-SHA-256(card_key, user_id ‖ birthdate ‖ card_sequence)` reduced to nine decimal digits, placed after a fixed six-digit prefix beginning with 0 (a range no payment network issues in), followed by a final digit set to the Luhn check digit plus five, modulo ten, so the result is always checksum-invalid. The birthdate is an input, as required, but the function is one-way and keyed, so the number reveals nothing about it and cannot be predicted from it. The number is stored with a unique constraint; on the rare collision the sequence is incremented and the derivation repeated. The key lives in the secret manager; rotating it affects only future cards.
+- **The number is not a credential.** It is never accepted as proof of anything; card lookups in the pay path use the internal card id bound to the session's owner (US-15). It is masked in lists and revealed only to the owner.
+- **PIN storage.** `pin_hash = Argon2id(HMAC-SHA-256(pin_pepper, pin), per-card salt)`. A six-digit PIN has only a million possibilities, so the hash alone would not survive a stolen database; the pepper, held in the secret manager and never in the database, is what makes an offline guess infeasible. Verification is constant-time.
+- **PIN attempts** are counted on the card row under the card lock (step 6 of the lock order), so parallel guesses cannot exceed the limit. Lockout affects card payments only and cannot be used to lock someone out of their account.
+- **PIN checks** happen in the web process only; the job runner and console have no code path or key for it. The PIN is redacted at the request-logging layer and excluded from error reports.
+- **Weak-PIN rejection** uses a fixed deny-list plus the owner's own birthdate permutations, evaluated server-side.
+- **Birthdate** is stored with the same field-level encryption and owner-only policy as addresses (15.5). Onboarding order becomes: verify sign-in → birthdate and adult check → provisioning (account, grant, card) in one transaction.
+
 Security rules specific to the simulator (from R4.5), enforced in code and tests:
-- No input component for card number, expiry, CVV, PIN or password exists in the codebase; a lint rule bans the corresponding `autocomplete` values and field names.
+- No input component for typing a card number, expiry, CVV or password exists in the codebase; a lint rule bans the corresponding `autocomplete` values and field names. The single exception is one shared Delulu PIN component (six digits, labelled as a game PIN, not saved by password managers).
 - Checkout text inputs reject card-number-like and real-UPI-like patterns on the server.
 - Codes are generated server-side with a cryptographic random source, stored hashed, compared in constant time, and never sent by email, SMS or push.
 - Bank-styled pages are served from the same origin, cannot be framed, and always carry the in-game label.
@@ -727,6 +737,8 @@ Addresses (R5.2) may be real, which makes them the most sensitive personal data 
 | Threat | Control |
 |---|---|
 | A realistic payment page used to harvest real card or UPI data, or mistaken for a real bank | No field accepts real payment data; system-generated codes only; in-app delivery only; persistent in-game label; no real brand names (15.4) |
+| Players reusing a real card PIN as their game PIN; PINs or birthdates exposed in a breach | Six-digit PIN (real ones are four), warning at entry, weak and birthdate-based PINs rejected, peppered slow hash, attempt limits, redaction from logs; birthdate encrypted and never embedded in the card number (15.4) |
+| Card numbers guessed, enumerated, or confused with real cards | Keyed one-way derivation, unused prefix, always checksum-invalid, number never accepted as a credential (15.4) |
 | Coupon abuse: enumeration, cap races, self-dealing, farming with linked accounts | Rate limit and uniform errors; cap and budget enforced under row locks; relationship rules; progression counts buyer-paid amounts only (R6.6) |
 | Price manipulation through the cart (stale or client-supplied totals) | Server-side quote; totals recomputed in the pay transaction by the single pricing function |
 | Fake discounts misleading players | Reference price rule enforced from price history |
