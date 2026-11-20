@@ -4,7 +4,7 @@ import { ShieldCheck } from "lucide-react";
 import { type ComponentPropsWithRef, type FormEvent, useId, useState } from "react";
 import { Button } from "../../atoms/Button";
 import { FictionLabel } from "../../atoms/FictionLabel";
-import { Heading } from "../../atoms/Heading";
+import { Heading, type HeadingLevel } from "../../atoms/Heading";
 import { Icon } from "../../atoms/Icon";
 import { Input } from "../../atoms/Input";
 import { Label } from "../../atoms/Label";
@@ -23,6 +23,8 @@ export type BankChallengeProps = Omit<ComponentPropsWithRef<"form">, "onSubmit" 
   onCancel: () => void;
   error?: string;
   loading?: boolean;
+  /** Semantic level of the title; 1 on a standalone bank page. */
+  headingLevel?: HeadingLevel;
 };
 
 /** Mock bank step. There is deliberately no field for a card number, expiry or CVV. */
@@ -35,6 +37,7 @@ export function BankChallenge({
   onCancel,
   error,
   loading,
+  headingLevel = 1,
   className,
   ...props
 }: BankChallengeProps) {
@@ -60,7 +63,7 @@ export function BankChallenge({
     >
       <div className="flex items-center gap-2 text-action">
         <Icon icon={ShieldCheck} size={24} />
-        <Heading level={1} size="md" id={titleId} className="text-fg">
+        <Heading level={headingLevel} size="md" id={titleId} className="text-fg">
           Delulu Bank SecureCheck
         </Heading>
       </div>

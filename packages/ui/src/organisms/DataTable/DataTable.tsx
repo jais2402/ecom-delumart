@@ -41,7 +41,10 @@ export function DataTable<Row>({
       // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be keyboard reachable
       tabIndex={0}
       aria-label={caption}
-      className={cn("max-w-full overflow-x-auto rounded-lg border border-border bg-surface", className)}
+      className={cn(
+        "relative max-w-full overflow-x-auto rounded-lg border border-border bg-surface",
+        className,
+      )}
       {...props}
     >
       <table className="w-full border-collapse font-body text-sm text-fg">

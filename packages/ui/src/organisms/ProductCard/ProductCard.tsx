@@ -1,6 +1,7 @@
 import { Zap } from "lucide-react";
 import { type ComponentPropsWithRef, useId } from "react";
 import { Badge } from "../../atoms/Badge";
+import { Heading, type HeadingLevel } from "../../atoms/Heading";
 import { Icon } from "../../atoms/Icon";
 import { Price } from "../../atoms/Price";
 import { ProductArt } from "../../atoms/ProductArt";
@@ -20,6 +21,8 @@ export type ProductCardProps = Omit<ComponentPropsWithRef<"article">, "children"
   storeName: string;
   stock?: StockState;
   zapEligible?: boolean;
+  /** Semantic level of the product name; pick the level below the surrounding heading. */
+  headingLevel?: HeadingLevel;
 };
 
 /** The whole card is one link named after the product; price and store are its description. */
@@ -34,6 +37,7 @@ export function ProductCard({
   storeName,
   stock,
   zapEligible = false,
+  headingLevel = 3,
   className,
   ...props
 }: ProductCardProps) {
@@ -50,7 +54,7 @@ export function ProductCard({
     >
       <ProductArt hue={hue} seed={artSeed ?? name} alt={imageAlt ?? ""} className="rounded-none" />
       <div className="flex flex-1 flex-col gap-2 p-3 font-body">
-        <h3 id={nameId} className="font-display text-lg font-bold text-fg">
+        <Heading level={headingLevel} size="sm" id={nameId} className="text-lg">
           <a
             href={href}
             aria-labelledby={nameId}
@@ -59,7 +63,7 @@ export function ProductCard({
           >
             {name}
           </a>
-        </h3>
+        </Heading>
         <p className="text-sm text-fg-muted">{hook}</p>
         <div className="mt-auto flex flex-wrap items-center gap-2">
           {stock ? <StockBadge {...stock} /> : null}

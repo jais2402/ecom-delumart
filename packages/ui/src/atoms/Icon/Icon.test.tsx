@@ -17,3 +17,11 @@ describe("Icon", () => {
     expect(container.querySelector("svg")).toHaveAttribute("width", "32");
   });
 });
+
+describe("named icon exports", () => {
+  it("renders a re-exported glyph through Icon", async () => {
+    const { WalletIcon } = await import("./icons");
+    render(<Icon icon={WalletIcon} label="Wallet" />);
+    expect(screen.getByRole("img", { name: "Wallet" })).toBeInTheDocument();
+  });
+});

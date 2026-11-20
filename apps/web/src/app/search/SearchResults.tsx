@@ -49,6 +49,7 @@ export function SearchResults({
         <ProductGrid
           items={results}
           label="Search results"
+          headingLevel={2}
           emptyTitle="Nothing matches that search"
           emptyDescription="Try a shorter word, like “jar” or “moon”."
         />

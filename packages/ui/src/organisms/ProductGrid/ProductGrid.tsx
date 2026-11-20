@@ -1,4 +1,5 @@
 import type { ComponentPropsWithRef } from "react";
+import type { HeadingLevel } from "../../atoms/Heading";
 import { cn } from "../../lib/cn";
 import { EmptyState } from "../../molecules/EmptyState";
 import { ProductCard, type ProductCardProps } from "../ProductCard";
@@ -11,6 +12,8 @@ export type ProductGridProps = Omit<ComponentPropsWithRef<"div">, "children"> & 
   label?: string;
   emptyTitle?: string;
   emptyDescription?: string;
+  /** Semantic level of each card name. */
+  headingLevel?: HeadingLevel;
 };
 
 export function ProductGrid({
@@ -18,6 +21,7 @@ export function ProductGrid({
   label = "Products",
   emptyTitle = "Nothing here yet",
   emptyDescription = "Try another search or loosen the filters.",
+  headingLevel = 3,
   className,
   ...props
 }: ProductGridProps) {
@@ -36,7 +40,7 @@ export function ProductGrid({
       >
         {items.map(({ id, ...card }) => (
           <li key={id}>
-            <ProductCard {...card} />
+            <ProductCard headingLevel={headingLevel} {...card} />
           </li>
         ))}
       </ul>

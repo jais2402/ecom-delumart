@@ -46,6 +46,7 @@ export function CategoryBrowser({ items }: { items: readonly ProductGridItem[] }
         <ProductGrid
           items={visible}
           label="Products in this category"
+          headingLevel={2}
           emptyTitle="No products match these filters"
           emptyDescription="Widen the price range or switch off Zap."
         />

@@ -8,7 +8,9 @@ import {
   type DataColumn,
   DataTable,
   FilterPanel,
+  HomeIcon,
   OrderSummary,
+  PackageIcon,
   ProductCard,
   ProductGrid,
   Receipt,
@@ -20,6 +22,7 @@ import {
   type TrackingStage,
   TrackingTimeline,
   VirtualCard,
+  WalletIcon,
 } from "@delulu/ui";
 import { useState } from "react";
 import { CATEGORIES, SEED_PRODUCTS } from "../../data/seed-catalog";
@@ -73,16 +76,16 @@ export function OrganismsSection() {
         {first ? (
           <>
             <div className="w-56 max-w-full">
-              <ProductCard {...first} />
+              <ProductCard headingLevel={4} {...first} />
             </div>
             <div className="w-56 max-w-full">
-              <ProductCard {...first} stock={{ state: "low", count: 2 }} zapEligible />
+              <ProductCard headingLevel={4} {...first} stock={{ state: "low", count: 2 }} zapEligible />
             </div>
           </>
         ) : null}
       </Specimen>
       <Specimen title="ProductGrid (filled and empty)">
-        <ProductGrid items={items.slice(0, 2)} label="Demo products" className="w-full" />
+        <ProductGrid items={items.slice(0, 2)} label="Demo products" headingLevel={4} className="w-full" />
         <ProductGrid items={[]} emptyTitle="No products found" className="w-full" />
       </Specimen>
       <Specimen title="FilterPanel">
@@ -129,6 +132,7 @@ export function OrganismsSection() {
       </Specimen>
       <Specimen title="BankChallenge">
         <BankChallenge
+          headingLevel={4}
           className="w-full"
           amountPaise={2_800_00n}
           cardAlias="Everyday card"
@@ -190,6 +194,16 @@ export function OrganismsSection() {
             { label: "Overview", href: "/account" },
             { label: "Orders", href: "/account/orders" },
             { label: "Wallet", href: "/account/wallet" },
+          ]}
+        />
+        <SidebarNav
+          label="Demo sections with icons"
+          currentHref="/account/orders"
+          className="w-full"
+          items={[
+            { label: "Overview", href: "/account", icon: HomeIcon },
+            { label: "Orders", href: "/account/orders", icon: PackageIcon },
+            { label: "Wallet", href: "/account/wallet", icon: WalletIcon },
           ]}
         />
       </Specimen>

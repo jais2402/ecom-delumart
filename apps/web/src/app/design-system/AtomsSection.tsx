@@ -4,14 +4,18 @@ import {
   Avatar,
   Badge,
   Button,
+  CartIcon,
   Checkbox,
   Divider,
   FictionLabel,
   Heading,
+  HomeIcon,
+  Icon,
   IconButton,
   Input,
   Label,
   Link,
+  PackageIcon,
   Price,
   ProductArt,
   ProgressBar,
@@ -19,11 +23,14 @@ import {
   Select,
   Skeleton,
   Spinner,
+  StarIcon,
   Switch,
   Tag,
   Text,
   Textarea,
   VisuallyHidden,
+  WalletIcon,
+  ZapIcon,
 } from "@delulu/ui";
 import { Level, Specimen } from "./Specimen";
 
@@ -39,6 +46,14 @@ export function AtomsSection() {
         <Button loading>Loading</Button>
         <Button size="sm">Small</Button>
         <Button size="lg">Large</Button>
+      </Specimen>
+      <Specimen title="Icon (decorative and labelled)">
+        <Icon icon={HomeIcon} />
+        <Icon icon={PackageIcon} size={28} />
+        <Icon icon={CartIcon} size={32} />
+        <Icon icon={WalletIcon} label="Wallet balance" />
+        <Icon icon={StarIcon} size={24} label="Favourite" />
+        <Icon icon={ZapIcon} size={24} />
       </Specimen>
       <Specimen title="IconButton">
         <IconButton aria-label="Close demo">
