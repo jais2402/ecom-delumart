@@ -98,13 +98,38 @@ describe("roles, grants and row-level security", () => {
         return {
           bank: await count("SELECT count(*) AS n FROM core.bank_account"),
           cards: await count("SELECT count(*) AS n FROM core.virtual_card"),
+          wallets: await count("SELECT count(*) AS n FROM ledger.wallet"),
+          ownWallet: await count(
+            `SELECT count(*) AS n FROM ledger.wallet WHERE account_id = '${a.ledgerAccountId}'`,
+          ),
+          otherWallet: await count(
+            `SELECT count(*) AS n FROM ledger.wallet WHERE account_id = '${b.ledgerAccountId}'`,
+          ),
+          userAccounts: await count("SELECT count(*) AS n FROM ledger.ledger_account WHERE type = 'USER'"),
+          postings: await count("SELECT count(*) AS n FROM ledger.posting"),
+          otherPostings: await count(
+            `SELECT count(*) AS n FROM ledger.posting WHERE account_id = '${b.ledgerAccountId}'`,
+          ),
+          grants: await count("SELECT count(*) AS n FROM ledger.grant_record"),
           groups: await count("SELECT count(*) AS n FROM core.order_group"),
           sellerOrders: await count("SELECT count(*) AS n FROM core.seller_order"),
         };
       },
       { userId: a.userId },
     );
-    expect(seen).toEqual({ bank: 1, cards: 1, groups: 0, sellerOrders: 0 });
+    expect(seen).toEqual({
+      bank: 1,
+      cards: 1,
+      wallets: 1,
+      ownWallet: 1,
+      otherWallet: 0,
+      userAccounts: 1,
+      postings: 1,
+      otherPostings: 0,
+      grants: 1,
+      groups: 0,
+      sellerOrders: 0,
+    });
     const asSeller = await withTransaction(
       pool,
       async (c) => {

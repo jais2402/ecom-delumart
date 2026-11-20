@@ -142,7 +142,11 @@ export async function commitError(
 }
 
 /** Number of rows a counting query returns as `n`. */
-export async function countRows(c: pg.Pool | pg.PoolClient, sql: string, params: unknown[] = []): Promise<number> {
+export async function countRows(
+  c: pg.Pool | pg.PoolClient,
+  sql: string,
+  params: unknown[] = [],
+): Promise<number> {
   const { rows } = await c.query<{ n: string }>(sql, params);
   return Number(rows[0]?.n);
 }

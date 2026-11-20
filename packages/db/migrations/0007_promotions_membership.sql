@@ -5,7 +5,7 @@ CREATE TABLE core.promo_campaign (
   name         text NOT NULL,
   budget_paise bigint NOT NULL CHECK (budget_paise >= 0),
   spent_paise  bigint NOT NULL DEFAULT 0,
-  status       text NOT NULL,
+  status       text NOT NULL CHECK (status IN ('DRAFT','ACTIVE','PAUSED','ENDED')),
   CONSTRAINT campaign_spent_within_budget CHECK (spent_paise BETWEEN 0 AND budget_paise)
 );
 
@@ -23,7 +23,7 @@ CREATE TABLE core.coupon (
   max_redemptions int,
   redeemed        int NOT NULL DEFAULT 0 CHECK (redeemed >= 0),
   is_public       boolean NOT NULL DEFAULT false,
-  status          text NOT NULL DEFAULT 'ACTIVE',
+  status          text NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','PAUSED','ENDED','ARCHIVED')),
   CHECK ((scope='MERCHANT') = (company_id IS NOT NULL)),
   CHECK (kind <> 'PERCENT' OR value BETWEEN 1 AND 90),
   CONSTRAINT coupon_redeemed_within_cap CHECK (max_redemptions IS NULL OR redeemed <= max_redemptions)
@@ -35,7 +35,7 @@ CREATE TABLE core.coupon_redemption (
   coupon_id      uuid NOT NULL REFERENCES core.coupon(id),
   user_id        uuid NOT NULL,
   order_group_id uuid NOT NULL,
-  discount_paise bigint NOT NULL,
+  discount_paise bigint NOT NULL CHECK (discount_paise >= 0),
   PRIMARY KEY (coupon_id, user_id)
 );
 

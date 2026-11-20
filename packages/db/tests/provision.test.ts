@@ -79,8 +79,16 @@ describe("provisionAccount", () => {
     ).toBe(1);
   });
 
+  async function tombstone(fingerprint: Buffer, kind: "EMAIL" | "PHONE", expiresIn: string): Promise<void> {
+    await pool.query(
+      `INSERT INTO core.identity_tombstone (fingerprint, kind, expires_at) VALUES ($1, $2, now() + $3::interval)`,
+      [fingerprint, kind, expiresIn],
+    );
+  }
+
   it("tombstoned identity: provisioned without a starting grant, wallet 0", async () => {
-    const input = provisionInput({ isTombstoned: true });
+    const input = provisionInput();
+    await tombstone(input.emailFingerprint, "EMAIL", "30 days");
     const r = await provisionAccount(pool, input);
     expect(r.walletPaise).toBe(0n);
     expect(r.starterJournalId).toBeNull();
@@ -93,22 +101,70 @@ describe("provisionAccount", () => {
     ).toBe(1);
   });
 
+  it("tombstone lookup happens inside provisioning: a tombstoned phone also skips the grant, as app_web", async () => {
+    const input = provisionInput();
+    if (!input.phoneFingerprint) throw new Error("fixture has a phone");
+    await tombstone(input.phoneFingerprint, "PHONE", "30 days");
+    const r = await withAppWeb(db.url, (p) => provisionAccount(p, input));
+    expect(r.created).toBe(true);
+    expect(r.walletPaise).toBe(0n);
+    expect(r.grantRecordId).toBeNull();
+  });
+
+  it("an expired tombstone no longer blocks the starting grant", async () => {
+    const input = provisionInput();
+    await tombstone(input.emailFingerprint, "EMAIL", "-1 day");
+    const r = await provisionAccount(pool, input);
+    expect(r.walletPaise).toBe(STARTER);
+  });
+
+  it("finding 1: the STARTER amount is the fixed constant, whatever the newest configuration says", async () => {
+    await pool.query(
+      `INSERT INTO core.config_version (values, effective_from, note)
+       VALUES ('{"starter_grant_paise":"999999999999999"}', now() - interval '1 second', 'hostile')`,
+    );
+    const r = await provisionAccount(pool, provisionInput());
+    expect(r.walletPaise).toBe(STARTER);
+    const { rows } = await pool.query<{ amount: string }>(
+      "SELECT amount FROM ledger.grant_record WHERE id = $1",
+      [r.grantRecordId],
+    );
+    expect(rows.map((x) => BigInt(x.amount))).toEqual([STARTER]);
+  });
+
   it("provisioning works as app_web under row-level security (app.user_id set by withTransaction)", async () => {
     const input = provisionInput();
-    const client = new pg.Client({ connectionString: db.url });
-    await client.connect();
-    try {
-      await client.query("SET ROLE app_web");
-      const asPoolClient = Object.assign(client, { release: () => undefined }) as unknown as pg.PoolClient;
-      const appWebPool = { connect: async () => asPoolClient } as unknown as pg.Pool;
+    await withAppWeb(db.url, async (appWebPool) => {
       const r = await provisionAccount(appWebPool, input);
       expect(r.created).toBe(true);
       expect(r.walletPaise).toBe(STARTER);
       const again = await provisionAccount(appWebPool, input);
       expect(again.created).toBe(false);
-    } finally {
-      await client.end();
-    }
+    });
+  });
+
+  it("US-14 concurrency from an existing profile row: 20 parallel calls create exactly one grant", async () => {
+    const input = provisionInput();
+    await pool.query(
+      "INSERT INTO core.user_profile (id, email_fingerprint, phone_fingerprint) VALUES ($1, $2, $3)",
+      [input.userId, input.emailFingerprint, input.phoneFingerprint],
+    );
+    const results = await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        provisionAccount(pool, i === 0 ? input : { ...input, ...pick(provisionInput()) }),
+      ),
+    );
+    expect(results.filter((r) => r.created)).toHaveLength(1);
+    const u = [input.userId];
+    expect(
+      await count(
+        pool,
+        "SELECT count(*) AS n FROM ledger.grant_record WHERE user_id = $1 AND type = 'STARTER'",
+        u,
+      ),
+    ).toBe(1);
+    expect(await count(pool, "SELECT count(*) AS n FROM core.virtual_card WHERE user_id = $1", u)).toBe(1);
+    for (const r of results) expect(r.walletPaise).toBe(STARTER);
   });
 
   it("US-01/US-14 concurrency: 10 simultaneous provisionAccount calls for one user create exactly one of everything", async () => {
@@ -147,7 +203,9 @@ describe("provisionAccount", () => {
 
   it("global conservation: after several provisions SUM(posting.amount) = 0 and each wallet equals its postings (LLD §5.9)", async () => {
     await Promise.all(Array.from({ length: 5 }, () => provisionAccount(pool, provisionInput())));
-    await provisionAccount(pool, provisionInput({ isTombstoned: true }));
+    const tombstoned = provisionInput();
+    await tombstone(tombstoned.emailFingerprint, "EMAIL", "30 days");
+    await provisionAccount(pool, tombstoned);
     const r = await reconcile(pool);
     expect(r).toEqual({ unbalanced: 0, walletMismatch: 0, walletMismatchIncludingEmpty: 0, total: 0n });
     const wallets = await count(pool, "SELECT count(*) AS n FROM ledger.wallet", []);
@@ -195,23 +253,63 @@ describe("provisionAccount", () => {
   });
 
   it("concurrency: even without the application check, the CHECK constraint stops the second blind debit", async () => {
+    // Finding 3: a wallet change must be matched by postings, so each blind debit posts a
+    // balanced PURCHASE journal first; neither transaction checks the balance itself.
     const buyer = await provisionAccount(pool, provisionInput());
     const debit = ((STARTER * 6n) / 10n).toString();
     const blind = () =>
-      withTransaction(pool, (c) =>
-        c.query("UPDATE ledger.wallet SET available_paise = available_paise - $2 WHERE account_id = $1", [
-          buyer.ledgerAccountId,
-          debit,
-        ]),
-      ).then(
+      withTransaction(pool, async (c) => {
+        const journal = uuidv7();
+        await c.query(
+          "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'PURCHASE', 1)",
+          [journal],
+        );
+        await c.query(
+          `INSERT INTO ledger.posting (journal_id, account_id, amount, memo) VALUES
+             ($1, $2, -$3::bigint, 'blind'), ($1, $4, $3::bigint, 'blind')`,
+          [journal, buyer.ledgerAccountId, debit, SINK_ACCOUNT_ID],
+        );
+        await c.query(
+          "UPDATE ledger.wallet SET available_paise = available_paise - $2 WHERE account_id = $1",
+          [buyer.ledgerAccountId, debit],
+        );
+        await c.query("SELECT pg_sleep(0.2)");
+      }).then(
         () => "ok",
         (e: { code?: string }) => e.code ?? "unknown",
       );
     const outcomes = await Promise.all([blind(), blind()]);
     expect(outcomes.sort()).toEqual(["23514", "ok"]);
+    expect((await reconcile(pool)).walletMismatchIncludingEmpty).toBe(0);
+  });
+
+  it("finding 3: a wallet update without postings is rejected at commit (the old blind debit)", async () => {
+    const buyer = await provisionAccount(pool, provisionInput());
+    const outcome = await withTransaction(pool, (c) =>
+      c.query("UPDATE ledger.wallet SET available_paise = available_paise - 1 WHERE account_id = $1", [
+        buyer.ledgerAccountId,
+      ]),
+    ).then(
+      () => "ok",
+      (e: { code?: string }) => e.code ?? "unknown",
+    );
+    expect(outcome).toBe("23514");
   });
 });
 
 function pick(i: ReturnType<typeof provisionInput>) {
   return { cardNumber: i.cardNumber, alias: i.alias, upiStyleId: i.upiStyleId };
+}
+
+/** Runs fn with a one-connection "pool" whose session is SET ROLE app_web. */
+async function withAppWeb<T>(url: string, fn: (p: pg.Pool) => Promise<T>): Promise<T> {
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  try {
+    await client.query("SET ROLE app_web");
+    const asPoolClient = Object.assign(client, { release: () => undefined }) as unknown as pg.PoolClient;
+    return await fn({ connect: async () => asPoolClient } as unknown as pg.Pool);
+  } finally {
+    await client.end();
+  }
 }

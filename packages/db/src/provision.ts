@@ -6,6 +6,13 @@ import { uuidv7 } from "./uuid";
 export const MINT_ACCOUNT_ID = "00000000-0000-7000-8000-000000000001";
 export const SINK_ACCOUNT_ID = "00000000-0000-7000-8000-000000000002";
 
+/**
+ * The STARTER grant: ₹100 crore in paise. Fixed by the product rules, enforced by the
+ * database (ledger.assert_starter_amount), and deliberately not read from
+ * core.config_version, so that no configuration row can change what a new account gets.
+ */
+export const STARTER_GRANT_PAISE = 100_000_000_000n;
+
 export interface ProvisionInput {
   userId: string;
   /** HMAC of the normalised email (LLD §5.6). */
@@ -16,8 +23,6 @@ export interface ProvisionInput {
   cardNumber: string;
   alias: string;
   upiStyleId: string;
-  /** Email or phone matched an unexpired identity tombstone: no starting grant. */
-  isTombstoned: boolean;
 }
 
 export interface ProvisionResult {
@@ -70,8 +75,10 @@ async function loadExisting(client: PoolClient, userId: string): Promise<Provisi
 
 /**
  * LLD §7.1 provisioning, one transaction: profile (if absent), ledger account,
- * bank account, wallet, STARTER grant journal (skipped when tombstoned), grant
- * record, one ACTIVE card. Concurrent and repeated calls serialise on the
+ * bank account, wallet, STARTER grant journal, grant record, one ACTIVE card. The
+ * grant is skipped when the profile's email or phone fingerprint matches an
+ * unexpired identity tombstone; the lookup happens here, inside the transaction,
+ * through core.identity_is_tombstoned() (callers cannot read or override it). Concurrent and repeated calls serialise on the
  * profile row lock and return the existing records; the grant is never repeated
  * (US-01, US-14). The one_starter unique index is the last line of defence.
  */
@@ -85,8 +92,15 @@ export async function provisionAccount(pool: Pool, input: ProvisionInput): Promi
          ON CONFLICT (id) DO NOTHING`,
         [input.userId, input.emailFingerprint, input.phoneFingerprint],
       );
-      // Serialises every provisioning attempt for this user.
-      await client.query("SELECT id FROM core.user_profile WHERE id = $1 FOR UPDATE", [input.userId]);
+      // Serialises every provisioning attempt for this user. The tombstone rule uses the
+      // stored fingerprints of the locked profile row, not values supplied by the caller.
+      const locked = await client.query<{ tombstoned: boolean }>(
+        `SELECT core.identity_is_tombstoned(email_fingerprint, phone_fingerprint) AS tombstoned
+           FROM core.user_profile WHERE id = $1 FOR UPDATE`,
+        [input.userId],
+      );
+      const profile = locked.rows[0];
+      if (!profile) throw new Error("user profile is not visible to this transaction");
 
       const existing = await loadExisting(client, input.userId);
       if (existing) return existing;
@@ -109,14 +123,14 @@ export async function provisionAccount(pool: Pool, input: ProvisionInput): Promi
       let starterJournalId: string | null = null;
       let grantRecordId: string | null = null;
 
-      if (!input.isTombstoned) {
-        const { rows } = await client.query<{ id: number; starter: string | null }>(
-          `SELECT id, values->>'starter_grant_paise' AS starter
-             FROM core.config_version WHERE effective_from <= now() ORDER BY id DESC LIMIT 1`,
+      if (!profile.tombstoned) {
+        // The journal records the configuration in force; the amount is the fixed constant.
+        const { rows } = await client.query<{ id: number }>(
+          "SELECT id FROM core.config_version WHERE effective_from <= now() ORDER BY id DESC LIMIT 1",
         );
         const config = rows[0];
-        if (!config?.starter) throw new Error("No effective configuration with starter_grant_paise");
-        const amount = BigInt(config.starter);
+        if (!config) throw new Error("No effective configuration version");
+        const amount = STARTER_GRANT_PAISE;
         starterJournalId = uuidv7();
         grantRecordId = uuidv7();
 

@@ -7,7 +7,7 @@ CREATE TABLE core.bank_account (
   ledger_account_id uuid NOT NULL UNIQUE REFERENCES ledger.ledger_account(id),
   alias             text NOT NULL UNIQUE,
   upi_style_id      text NOT NULL UNIQUE,     -- e.g. handle@delulu
-  status            text NOT NULL DEFAULT 'OPEN',
+  status            text NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','FROZEN','CLOSED')),
   UNIQUE (user_id, bank_code)
 );
 
@@ -34,7 +34,7 @@ CREATE TABLE core.checkout_session (
   type           text NOT NULL CHECK (type IN ('PRODUCT_PURCHASE','COMPANY_REGISTRATION','WAREHOUSE_PURCHASE','MEMBERSHIP_PURCHASE')),
   state          text NOT NULL DEFAULT 'OPEN' CHECK (state IN ('OPEN','SUCCEEDED','CANCELED','EXPIRED')),
   quote          jsonb NOT NULL,                 -- immutable: lines, prices, versions, coupon, delivery, totals
-  total_paise    bigint NOT NULL,
+  total_paise    bigint NOT NULL CHECK (total_paise >= 0),
   config_version int NOT NULL REFERENCES core.config_version(id),
   expires_at     timestamptz NOT NULL,
   created_at     timestamptz NOT NULL DEFAULT now()

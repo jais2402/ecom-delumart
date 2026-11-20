@@ -5,6 +5,7 @@ export {
   type ProvisionResult,
   provisionAccount,
   SINK_ACCOUNT_ID,
+  STARTER_GRANT_PAISE,
 } from "./provision";
 export { type TransactionOptions, withTransaction } from "./transaction";
 export { uuidv7 } from "./uuid";

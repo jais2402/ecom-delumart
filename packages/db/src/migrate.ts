@@ -19,6 +19,108 @@ export interface MigrateOptions {
   directory?: string;
 }
 
+// Statement-level transaction control. The runner wraps each file in one
+// transaction; a COMMIT inside a file would commit half a migration and leave the
+// rest running outside any transaction, unrecorded.
+const TRANSACTION_CONTROL = /^(BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT|PREPARE\s+TRANSACTION)\b/i;
+
+const IDENTIFIER_CHAR = /[A-Za-z0-9_$]/;
+const DOLLAR_TAG = /^\$(?:[A-Za-z_\u0080-\uffff][A-Za-z0-9_\u0080-\uffff]*)?\$/;
+
+/**
+ * Splits SQL into top-level statements, with comments, string literals, quoted
+ * identifiers and dollar-quoted bodies (function bodies, DO blocks) blanked out, so
+ * that only real statement keywords remain. SQL-standard `BEGIN ATOMIC ... END`
+ * function bodies are kept inside their CREATE statement.
+ */
+export function topLevelStatements(sql: string): string[] {
+  const segments: string[] = [];
+  let current = "";
+  let i = 0;
+  while (i < sql.length) {
+    const ch = sql.charAt(i);
+    const rest = sql.slice(i, i + 2);
+    if (rest === "--") {
+      const end = sql.indexOf("\n", i);
+      i = end === -1 ? sql.length : end;
+      current += " ";
+    } else if (rest === "/*") {
+      let depth = 1;
+      i += 2;
+      while (i < sql.length && depth > 0) {
+        if (sql.startsWith("/*", i)) {
+          depth += 1;
+          i += 2;
+        } else if (sql.startsWith("*/", i)) {
+          depth -= 1;
+          i += 2;
+        } else i += 1;
+      }
+      current += " ";
+    } else if (ch === "'" || ch === '"') {
+      const prev = i > 0 ? sql.charAt(i - 1) : "";
+      const backslashEscapes =
+        ch === "'" && /[eE]/.test(prev) && !IDENTIFIER_CHAR.test(sql.charAt(i - 2) || " ");
+      i += 1;
+      while (i < sql.length) {
+        const c = sql.charAt(i);
+        if (backslashEscapes && c === "\\") i += 2;
+        else if (c === ch && sql.charAt(i + 1) === ch) i += 2;
+        else if (c === ch) {
+          i += 1;
+          break;
+        } else i += 1;
+      }
+      current += ch === "'" ? "''" : '"x"';
+    } else if (ch === "$" && !IDENTIFIER_CHAR.test(i > 0 ? sql.charAt(i - 1) : " ")) {
+      const tag = DOLLAR_TAG.exec(sql.slice(i))?.[0];
+      if (tag) {
+        const end = sql.indexOf(tag, i + tag.length);
+        i = end === -1 ? sql.length : end + tag.length;
+        current += "$$";
+      } else {
+        current += ch;
+        i += 1;
+      }
+    } else if (ch === ";") {
+      segments.push(current);
+      current = "";
+      i += 1;
+    } else {
+      current += ch;
+      i += 1;
+    }
+  }
+  segments.push(current);
+
+  const statements: string[] = [];
+  for (let k = 0; k < segments.length; k++) {
+    let statement = segments[k]?.trim() ?? "";
+    if (/\bBEGIN\s+ATOMIC\b/i.test(statement)) {
+      while (k + 1 < segments.length) {
+        k += 1;
+        const part = segments[k]?.trim() ?? "";
+        statement += `; ${part}`;
+        if (/^END$/i.test(part)) break;
+      }
+    }
+    if (statement !== "") statements.push(statement);
+  }
+  return statements;
+}
+
+function assertNoTransactionControl(name: string, sql: string): void {
+  topLevelStatements(sql).forEach((statement, index) => {
+    const match = TRANSACTION_CONTROL.exec(statement);
+    if (match?.[1]) {
+      throw new Error(
+        `Migration ${name} contains transaction control (${match[1].toUpperCase().replace(/\s+/g, " ")}) ` +
+          `in statement ${index + 1}; the runner wraps each file in its own transaction, so remove it`,
+      );
+    }
+  });
+}
+
 interface MigrationFile {
   version: string;
   name: string;
@@ -37,6 +139,7 @@ async function loadMigrations(directory: string): Promise<MigrationFile[]> {
     if (seen.has(version)) throw new Error(`Duplicate migration version ${version}`);
     seen.add(version);
     const sql = await readFile(join(directory, name), "utf8");
+    assertNoTransactionControl(name, sql);
     const checksum = createHash("sha256").update(sql).digest("hex");
     files.push({ version, name, sql, checksum });
   }
