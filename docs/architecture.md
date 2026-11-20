@@ -342,7 +342,7 @@ A single policy layer in `core` is called by every command and query — web rou
 
 **Data protection**
 - TLS everywhere, including app-to-database; encryption at rest with managed keys for database, backups and buckets.
-- Data minimisation as specified in §7.7: no real name, address, payment or location data is collected at all, which removes the most damaging breach classes outright.
+- Data minimisation as specified in §7.7: no payment data, phone number or device location is collected at all. The one exception added in Revision 1.5 is an optional, owner-only, field-encrypted delivery address (§15.5).
 - Secrets live only in the secret manager, are distinct per environment and are rotated on a schedule and on any staff departure.
 - Retention jobs enforce the §7.7 schedule; logs and analytics are redacted at source (no email, token or full IP).
 
@@ -689,7 +689,15 @@ Shipment stage times are computed once, at commit, from the speed and the config
 
 Zap eligibility reuses inventory: a warehouse has a `zap_hub` flag (at most one per company), and "Zap available" means an `AVAILABLE` unit exists in that warehouse. A Zap purchase takes its unit from the hub under the same inventory locks, so the last-hub-unit race is the existing last-unit race.
 
-Delivery spots are two foreign keys into staff-managed lists. There is no address table and no free-text field to protect.
+Addresses (R5.2) may be real, which makes them the most sensitive personal data in the system after the email address. Design:
+
+- A dedicated `address` table in its own schema, with row-level security restricting every operation to the owner. No other module has a query that reads it; `fulfilment` exposes only "format this owner's address for this owner's request".
+- Address fields are encrypted in the application before they reach the database, with a key held in the secret manager and available to the web process only, not the job runner. A database dump or a leaked read-only credential therefore yields ciphertext.
+- Shipments reference the address by id with `ON DELETE SET NULL` and keep no copy, so deleting an address removes it everywhere in one statement and deletion is real, not a flag.
+- Addresses are excluded by construction from analytics events, logs (the request logger redacts the address routes' bodies), partner queries, exports and the outbox. A test asserts that no outbox or analytics payload contains an address field.
+- No outside service ever receives an address: no geocoding, no validation API, no map.
+- Staff access goes through one audited console command guarded by its own permission.
+- Fictional delivery spots are two foreign keys into staff-managed lists and carry no personal data.
 
 ### 15.6 Coupons and campaigns
 
@@ -711,7 +719,7 @@ Delivery spots are two foreign keys into staff-managed lists. There is no addres
 |---|---|
 | Category, store, deals pages; product delivery speeds offered; public coupons; sale and reference price | Yes, public, with tags (`category:{id}`, `store:{id}`, `deals`, `product:{id}`) |
 | Zap availability badge | Public but short-lived (about 30 s); authoritative at payment |
-| Cart, delivery fees for this buyer, membership pricing, coupon validity, delivery spots, order tracking, account hub | Never shared-cached; `private, no-store` |
+| Cart, delivery fees for this buyer, membership pricing, coupon validity, addresses, order tracking, account hub | Never shared-cached; `private, no-store` |
 | Console | Never cached |
 
 ### 15.9 Additional threats and controls
@@ -723,6 +731,7 @@ Delivery spots are two foreign keys into staff-managed lists. There is no addres
 | Price manipulation through the cart (stale or client-supplied totals) | Server-side quote; totals recomputed in the pay transaction by the single pricing function |
 | Fake discounts misleading players | Reference price rule enforced from price history |
 | Console misuse or over-broad staff access | Per-area roles, two-person approval for minting settings, versioned and audited configuration, no balance-editing screen |
+| Exposure of real addresses through a breach, a seller-facing screen, logs, exports or support staff | Owner-only row-level security, field-level encryption with a key the job runner does not hold, no copies on orders, redacted logs, audited staff access, hard delete, optional by design (15.5) |
 | Platform coupons or fee changes silently inflating supply | Ledgered MINT postings, campaign budgets, mint/sink reporting, announced versioned changes |
 | Larger multi-row transactions causing lock pile-ups | Canonical ordering, lock and statement timeouts, cart size cap, per-product admission control (§14.2) |
 

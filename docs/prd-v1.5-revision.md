@@ -67,7 +67,7 @@ One area at `/account`, replacing the scattered "My bank" and collection entry p
 | Payments | Every payment attempt with method, status, reference and decline reason; refunds from staff reversals |
 | Wallet and bank | Balance, bank identity, paginated statement (§7.13), statement download |
 | Cards and methods | Delulu Card freeze/unfreeze/replace; DeluluPay ID; default method |
-| Delivery spots | Saved fictional delivery spots (R5.2) |
+| Addresses | Saved delivery addresses, real or fictional (R5.2) |
 | Membership | Delulu Plus status, expiry, renew |
 | Collection and saves | As §6.3 and US-09 |
 | Privacy and security | Active sessions and sign-out everywhere, privacy flags, data export, account deletion (US-12) |
@@ -131,13 +131,33 @@ Staff and staging accounts can force outcomes (decline, bank unavailable, slow b
 
 ### R5.1 Contract
 
-Nothing physical exists and nothing real is shipped. Delivery is a simulation that gives an order a journey. v1.4's sentence "no physical delivery … or shipping addresses" (§1.1) is amended to: **no physical delivery and no real addresses; delivery is simulated to fictional delivery spots.** Microcopy changes from "Nothing ships" to "Nothing real ships — delivery is simulated."
+Nothing physical exists and nothing real is shipped. Delivery is a simulation that gives an order a journey. v1.4's sentence "no physical delivery … or shipping addresses" (§1.1) is amended to: **no physical delivery; delivery is simulated. Players may save a real address or choose a fictional delivery spot.** Microcopy changes from "Nothing ships" to "Nothing real ships — delivery is simulated."
 
 Ownership, creator-threshold evaluation, seller proceeds, brand-qualifying revenue and collector counts are all still settled at payment commit (§7.4). Delivery changes presentation only: an item shows as "Arriving" until delivered, then appears on the shelf with its receipt reveal.
 
-### R5.2 Delivery spots, not addresses
+### R5.2 Delivery addresses
 
-A delivery spot is chosen from lists: a fictional locality (for example "Cloud Nine Heights", "Monsoon Jar Lane") and a fictional landmark. There is no free-text address, pincode, phone number or map location. This keeps the v1.4 privacy position of collecting no address or location data (§7.7).
+Players may add a real address so checkout feels like real shopping. Because nothing is ever delivered, the address has no operational use; it is personal data held only for the player's own experience, and it is protected accordingly. This amends the v1.4 position of collecting no address or location data (§7.7) and must be covered by the privacy review before the first invite.
+
+**What a player can save**
+- Up to five addresses. Fields: label (Home, Work, Other), recipient name, address line 1, address line 2 (optional), city, state, pincode.
+- No phone number, no map pin, no device location, and no lookup against any outside address or geocoding service. Pincode is checked for format only.
+- A **fictional delivery spot** remains available as an equal alternative, chosen from lists (for example "Cloud Nine Heights"), so nobody has to give a real address to shop. Whether the address form or the fictional spot is the pre-selected option is a decision for the product and privacy owners (R13).
+
+**Notice at the point of entry**
+"Nothing will be delivered to this address. It is used only to make checkout and tracking feel real, and only you can see it. You can use a fictional spot instead."
+
+**Who can see an address**
+- The owner only: in the address book, at checkout, and on their own orders and tracking.
+- Never the seller, a worker, another player, a share card, a receipt download shared publicly, analytics, logs, or any partner export. Sellers see no location for an order at all in this release, consistent with anonymous purchase attribution (§7.2 J5).
+- Support staff can open an address only through a specific permission, with a recorded reason, and each view is audit-logged.
+
+**Handling**
+- Stored encrypted at field level, in addition to database encryption; readable by the owner's requests only.
+- A player can edit or delete an address at any time. Deleting it removes it from past orders too: orders keep only "Address removed".
+- On account deletion all addresses are erased immediately, not pseudonymised, and are covered by the deletion tombstone so a backup restore cannot bring them back (§7.7).
+- Included in the owner's own data export (US-12); excluded from every other export.
+- Delivery promises, fees and Zap eligibility do not depend on the address in this release, so no feature needs to read it.
 
 ### R5.3 Speeds
 
@@ -273,7 +293,7 @@ Fulfilment is automatic in this release: merchants watch the timeline but do not
 | v1.4 | Change |
 |---|---|
 | §1, §7.1, §7.2 J4, US-07, §7.8 "AI behavior and operational budget" | **AI-assisted creation is removed from this release.** Creators write listing text and choose a template illustration. Generation jobs, AI quotas, the real-spend budget, `BUDGET_PAUSED` and the "₹50 per first approved listing" goal (§4.1) do not apply. Text screening and human review remain. |
-| §1.1 "no physical delivery … or shipping addresses" | Simulated delivery to fictional delivery spots (R5). Still no physical delivery, real address or location data. |
+| §1.1 "no physical delivery … or shipping addresses"; §7.7 "no location data" | Simulated delivery (R5). Still no physical delivery. Players may optionally save a real address, visible only to them and protected as personal data (R5.2); no phone, map or device location. |
 | §6.4 "Fictional money only. Nothing ships." | "Fictional money only. Nothing real ships — delivery is simulated." |
 | §7.1 Shopping: buy-now; multi-item cart P1 | Cart is P0 (R2.2). Gifting, auctions and resale stay out. |
 | §7.2 J1 "Receipt and collection update" immediately | Ownership is immediate; the item shows as "Arriving" until its simulated delivery completes (R5.1). |
@@ -299,7 +319,7 @@ Unchanged and still binding: fictional, non-redeemable currency; one starting gr
 | OrderGroup | buyer, checkout session, payment attempt, totals snapshot; one per successful product checkout |
 | SellerOrder (the v1.4 PlayerOrder) | adds order_group_id, list amount, seller discount, platform discount, delivery fee, coupon snapshot |
 | Shipment / ShipmentEvent | one per seller order; speed, fee, delivery-spot snapshot, fixed stage timestamps; append-only events |
-| DeliverySpot | owner, locality code, landmark code; no free text |
+| Address | owner; kind REAL or FICTIONAL; REAL: label, recipient name, lines, city, state, pincode, all encrypted; FICTIONAL: locality and landmark codes; max five per owner; owner-only access; hard delete |
 | PaymentMethodConfig | method, enabled, order, limits, maintenance window; versioned |
 | PaymentChallenge | attempt, code hash, expiry, attempts used; single use |
 | Coupon / CouponRedemption | scope MERCHANT or PLATFORM, owner company or campaign, rule, limits; unique (coupon, buyer); redemption linked to seller order and journal |
@@ -310,7 +330,7 @@ Unchanged and still binding: fictional, non-redeemable currency; one starting gr
 
 **New commands (outline)**
 
-`GET/PUT /cart`, `POST /cart/lines`, `DELETE /cart/lines/:id`, `POST /cart/coupon`; `GET/POST/DELETE /account/delivery-spots`; `GET /delivery-options` (for a cart); `POST /checkout-sessions` now accepts a cart, delivery choices, coupon and method; `POST /checkout-sessions/:id/challenge` and `/challenge/verify`; `GET /orders/:id/tracking`; `POST /memberships`; `POST /companies/:id/coupons` and `PATCH …/:id`; `PUT /products/:id/shipping`; `PUT /products/:id/sale-price`; `PUT /warehouses/:id/zap-hub`; staff: `/console/…` for catalog, merchandising, promotions, shipping, payments, economy configuration.
+`GET/PUT /cart`, `POST /cart/lines`, `DELETE /cart/lines/:id`, `POST /cart/coupon`; `GET/POST/PATCH/DELETE /account/addresses`; `GET /delivery-options` (for a cart); `POST /checkout-sessions` now accepts a cart, delivery choices, coupon and method; `POST /checkout-sessions/:id/challenge` and `/challenge/verify`; `GET /orders/:id/tracking`; `POST /memberships`; `POST /companies/:id/coupons` and `PATCH …/:id`; `PUT /products/:id/shipping`; `PUT /products/:id/sale-price`; `PUT /warehouses/:id/zap-hub`; staff: `/console/…` for catalog, merchandising, promotions, shipping, payments, economy configuration.
 
 New stable error codes: `CART_CHANGED`, `COUPON_INVALID`, `COUPON_NOT_APPLICABLE`, `DELIVERY_UNAVAILABLE`, `METHOD_UNAVAILABLE`, `METHOD_LIMIT_EXCEEDED`, `CHALLENGE_FAILED`, `CHALLENGE_EXPIRED`, `CHALLENGE_LOCKED`, `MEMBERSHIP_ACTIVE`, `REFERENCE_PRICE_INELIGIBLE`.
 
@@ -325,6 +345,7 @@ New stable error codes: `CART_CHANGED`, `COUPON_INVALID`, `COUPON_NOT_APPLICABLE
 - **US-35 · Payment methods:** each enabled method completes a purchase with the same ledger result. A disabled method cannot be used by calling the API directly. Exceeding a method limit declines with no debit.
 - **US-36 · Authentication step:** a correct code proceeds to payment; three wrong codes fail the attempt with no debit; an expired code cannot be used; a code cannot be reused or used on another attempt. No code is ever sent outside the app.
 - **US-37 · No real payment data:** no page contains a field for card number, expiry, CVV, PIN or password. Pasting a 16-digit number or a real-format UPI handle into any checkout field is rejected.
+- **US-46 · Address privacy:** a saved real address is returned only to its owner. A seller, worker or another player cannot obtain it through any order, tracking, export or API route. It appears in no analytics event or log line. Deleting it removes it from past orders; account deletion erases it. A staff view without the permission is refused, and a permitted view is audit-logged. Checkout completes equally with a fictional spot.
 - **US-38 · Delivery timeline:** a Standard order shows five stages with times fixed at purchase, reaches Delivered at the promised time without further user action, and then appears on the shelf. Ownership, seller proceeds and unlock evaluation are already recorded at payment.
 - **US-39 · Zap eligibility:** Zap is offered only while a unit is available in the seller's Zap hub; two buyers racing for the last hub unit produce one Zap order and one `SOLD_OUT` or downgrade prompt with no debit.
 - **US-40 · Delivery fees and membership:** a ₹1,000 Standard fee is posted to SINK and appears in no sales, GMV or brand-revenue figure. A Plus member pays no Standard or Express fee and half the Zap fee. Buying Plus from ₹1.01 crore leaving ₹0.99 crore does not unlock creator access.
@@ -366,7 +387,7 @@ The console's moderation queue and kill switches are needed from phase 1; the re
 | Payment methods | Card, DeluluPay ID, net banking, bank balance; in-app code step | User requirement; details proposed; engineering/design |
 | Real-credential rule | No field accepts real payment data; no user-chosen numeric secret | Proposed; security/legal |
 | Delivery | Simulated; Standard 24 h, Express 2 h, Zap 10 min; fees to SINK | User requirement; times and fees proposed; product/economy |
-| Delivery spots | Fictional lists only, no free text | Proposed; privacy |
+| Delivery addresses | Real address allowed, owner-only, encrypted, deletable; fictional spot offered as an alternative; no phone or location | User requirement (real address); protections and default option proposed; privacy/legal |
 | Membership name and price | "Delulu Plus", ₹2 lakh / 30 days, manual renewal | Name provisional (the requested "Prime" is another company's brand); product/legal |
 | Cancellations and returns | None; staff reversal only | Carried from v1.4; product |
 | Coupons | One code per checkout; merchant coupons seller-funded; platform coupons MINT-funded with budget | User requirement; rules proposed; economy |
