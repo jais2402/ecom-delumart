@@ -3,7 +3,7 @@
  * Pure: no clock, no randomness, no I/O. Money is bigint paise throughout.
  */
 import { DomainError } from "../errors/index";
-import { MAX_PRICE_PAISE, MIN_PRICE_PAISE, type Paise, PAISE_PER_RUPEE } from "../money/index";
+import { MAX_PRICE_PAISE, MIN_PRICE_PAISE, PAISE_PER_RUPEE, type Paise } from "../money/index";
 
 export type Speed = "STANDARD" | "EXPRESS" | "ZAP";
 export const SEED_SELLER = "SEED";
@@ -108,10 +108,18 @@ function validateLines(lines: readonly LineIn[]): void {
     if ((RESERVED_ACCOUNTS as readonly string[]).includes(l.sellerId) || l.sellerId.length === 0) {
       throw new DomainError("VALIDATION_FAILED", "invalid seller id", { productId: l.productId });
     }
-    if (l.listPaise < MIN_PRICE_PAISE || l.listPaise > MAX_PRICE_PAISE || l.listPaise % PAISE_PER_RUPEE !== 0n) {
-      throw new DomainError("VALIDATION_FAILED", "list price must be whole rupees between ₹100 and ₹100 crore", {
-        productId: l.productId,
-      });
+    if (
+      l.listPaise < MIN_PRICE_PAISE ||
+      l.listPaise > MAX_PRICE_PAISE ||
+      l.listPaise % PAISE_PER_RUPEE !== 0n
+    ) {
+      throw new DomainError(
+        "VALIDATION_FAILED",
+        "list price must be whole rupees between ₹100 and ₹100 crore",
+        {
+          productId: l.productId,
+        },
+      );
     }
   }
 }
@@ -214,7 +222,8 @@ export function price(q: Quote): Priced {
   const sellerIds = [...new Set(lines.map((l) => l.sellerId))];
   const perSeller: SellerOut[] = sellerIds.map((sellerId) => {
     const speed = q.speedBySeller.get(sellerId);
-    if (!speed) throw new DomainError("VALIDATION_FAILED", "no delivery speed chosen for a seller", { sellerId });
+    if (!speed)
+      throw new DomainError("VALIDATION_FAILED", "no delivery speed chosen for a seller", { sellerId });
     const own = lines.filter((l) => l.sellerId === sellerId);
     const ownIn = q.lines.filter((l) => l.sellerId === sellerId);
     const s = deliveryFee(speed, q.isMember, q.cfg);
@@ -250,7 +259,8 @@ export function price(q: Quote): Priced {
     buyerTotal += s.list - s.sellerDisc - s.platformDisc + s.deliveryBuyer;
     mint += s.platformDisc;
     sink += s.fee + s.deliveryBuyer + s.deliverySeller;
-    if (s.sellerId === SEED_SELLER) sink += s.net; // seed proceeds go to SINK in place of a seller credit
+    if (s.sellerId === SEED_SELLER)
+      sink += s.net; // seed proceeds go to SINK in place of a seller credit
     else if (s.net > 0n) sellerCredits.push({ account: s.sellerId, amountPaise: s.net });
   }
 
@@ -260,7 +270,8 @@ export function price(q: Quote): Priced {
   if (sink > 0n) postings.push({ account: "SINK", amountPaise: sink });
 
   // Invariants (a violation here is a bug, not a user error).
-  if (postings.reduce((a, p) => a + p.amountPaise, 0n) !== 0n) throw new Error("pricing: postings do not sum to zero");
+  if (postings.reduce((a, p) => a + p.amountPaise, 0n) !== 0n)
+    throw new Error("pricing: postings do not sum to zero");
   if (buyerTotal <= 0n) throw new Error("pricing: buyer total must be positive");
 
   return { lines, perSeller, buyerTotal, mint, sink, postings };

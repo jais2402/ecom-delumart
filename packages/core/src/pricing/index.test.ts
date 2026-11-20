@@ -8,8 +8,8 @@ import {
   DEFAULT_PRICING_CONFIG,
   type LineIn,
   type Posting,
-  type Quote,
   price,
+  type Quote,
   type Speed,
 } from "./index";
 
@@ -169,7 +169,11 @@ describe("pricing rules", () => {
     const priced = price(
       quote({
         lines: [line("a", rupees(150n))],
-        coupon: { scope: "MERCHANT", companyId: "a", discount: { kind: "FLAT", amountPaise: rupees(1_000n) } },
+        coupon: {
+          scope: "MERCHANT",
+          companyId: "a",
+          discount: { kind: "FLAT", amountPaise: rupees(1_000n) },
+        },
         speedBySeller: new Map<string, Speed>([["a", "STANDARD"]]),
         isMember: true,
       }),
@@ -299,20 +303,22 @@ const lineArb: fc.Arbitrary<LineIn> = fc.record({
 });
 
 const couponArb: fc.Arbitrary<Coupon | undefined> = fc.option(
-  fc.record({
-    scope: fc.constantFrom("MERCHANT" as const, "PLATFORM" as const),
-    companyId: fc.constantFrom("co-1", "co-2", "co-3"),
-    discount: fc.oneof(
-      fc.integer({ min: 1, max: 90 }).map((percent) => ({ kind: "PERCENT" as const, percent })),
-      fc.bigInt({ min: 1n, max: MAX_PRICE_PAISE }).map((amountPaise) => ({ kind: "FLAT" as const, amountPaise })),
-    ),
-    minSpendPaise: fc.option(fc.bigInt({ min: 0n, max: MAX_PRICE_PAISE }), { nil: undefined }),
-  }).map(({ scope, companyId, discount, minSpendPaise }): Coupon => {
-    const min = minSpendPaise === undefined ? {} : { minSpendPaise };
-    return scope === "MERCHANT"
-      ? { scope, companyId, discount, ...min }
-      : { scope, discount, ...min };
-  }),
+  fc
+    .record({
+      scope: fc.constantFrom("MERCHANT" as const, "PLATFORM" as const),
+      companyId: fc.constantFrom("co-1", "co-2", "co-3"),
+      discount: fc.oneof(
+        fc.integer({ min: 1, max: 90 }).map((percent) => ({ kind: "PERCENT" as const, percent })),
+        fc
+          .bigInt({ min: 1n, max: MAX_PRICE_PAISE })
+          .map((amountPaise) => ({ kind: "FLAT" as const, amountPaise })),
+      ),
+      minSpendPaise: fc.option(fc.bigInt({ min: 0n, max: MAX_PRICE_PAISE }), { nil: undefined }),
+    })
+    .map(({ scope, companyId, discount, minSpendPaise }): Coupon => {
+      const min = minSpendPaise === undefined ? {} : { minSpendPaise };
+      return scope === "MERCHANT" ? { scope, companyId, discount, ...min } : { scope, discount, ...min };
+    }),
   { nil: undefined },
 );
 
@@ -422,7 +428,11 @@ describe("pricing properties", () => {
                 listPaise: l,
                 freeStdDelivery: false,
               })),
-              coupon: { scope: "MERCHANT", companyId: "co-1", discount: { kind: "FLAT", amountPaise: amount } },
+              coupon: {
+                scope: "MERCHANT",
+                companyId: "co-1",
+                discount: { kind: "FLAT", amountPaise: amount },
+              },
               speedBySeller: new Map<string, Speed>([["co-1", "STANDARD"]]),
             }),
           );

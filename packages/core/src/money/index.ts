@@ -38,7 +38,8 @@ export function formatInrExact(paise: Paise): string {
   const abs = negative ? -paise : paise;
   const whole = abs / PAISE_PER_RUPEE;
   const fraction = abs % PAISE_PER_RUPEE;
-  const body = groupIndian(whole.toString()) + (fraction === 0n ? "" : `.${fraction.toString().padStart(2, "0")}`);
+  const body =
+    groupIndian(whole.toString()) + (fraction === 0n ? "" : `.${fraction.toString().padStart(2, "0")}`);
   return `${negative ? "−" : ""}₹${body}`;
 }
 
