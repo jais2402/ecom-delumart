@@ -384,6 +384,48 @@ Risk signals for linked-account review are limited to session/device identifiers
 - Security gates on the roadmap: threat-model review at the end of week 1; authorisation and ledger abuse-case tests from week 2; self-assessment against OWASP ASVS and an automated ZAP baseline scan before the first invite; an independent penetration test before public expansion once there is budget, or an invited peer review until then (§8.2 of the PRD requires a permission/security review there).
 - Published security contact and a written incident-response runbook: contain with kill switches, preserve evidence, reconcile, notify per the privacy reviewer's guidance.
 
+### 8.7 Common attacks and what stops each
+
+Security controls are spread across this document because each module has its own. This table gathers them by the kind of attack seen most often in real breaches.
+
+| Attack | What the attacker tries | What stops it here |
+|---|---|---|
+| Stolen or guessed passwords (credential stuffing) | Reusing leaked passwords from other sites | There are no passwords. Sign-in is by emailed link or Google; staff use passkeys (§8.2). |
+| Session theft | Stealing a login cookie through a script or a shared device | Cookies unreadable by scripts, strict content policy, session rotation, re-sign-in for sensitive actions, card payments also need the PIN (§8.2, §15.4) |
+| Reading other people's data by changing an id in a URL | Opening another user's order, address, card or a rival company's finances | Central permission check on every request, database row-level security as a second barrier, random ids, automated test of every private route for every role (§8.3) |
+| Injection and malicious scripts | SQL injection; script hidden in a product name; formula in a CSV export | Parameterised queries only, escaped output, strict content policy, inert CSV cells, no user HTML or uploads (§8.4) |
+| Stealing the database | Dump obtained through a leaked credential or provider incident | Encrypted at rest; birthdate and addresses additionally field-encrypted with a key outside the database; PIN hash useless without an outside secret; tokens stored only as hashes; no real payment data exists to steal (§15.4, §15.5) |
+| Leaked secrets | API keys committed to code or exposed in a build | Secrets only in the hosting secret store, per environment; secret scanning on every change; the powerful database key never reaches the browser or the web project (§8.6, §9.1.2) |
+| Poisoned dependency or build step | A compromised package runs in the build or the app | Locked dependency versions, vulnerability and static scans on every change, pinned build actions (§8.6) |
+| Cheating the economy | Double-spending, replaying a payment, racing two purchases, farming grants or coupons | One atomic transaction with a fixed lock order, retry keys, database constraints, daily reconciliation, verified phone and email per account (§5, §8.2, §15.6) |
+| Insider or hijacked staff account | Minting currency, reading private data, deleting evidence | Separate admin site with passkeys, narrow roles, second approver for minting, no balance-editing screen, tamper-evident audit log copied off-site (§8.5) |
+| Phishing through the fake payment pages | Using a realistic bank page to collect real card or UPI details | No field accepts real payment data; game PIN is six digits with reuse warnings; codes never leave the app; in-game label everywhere (§15.4) |
+| Bots and abuse that costs money | Mass sign-ups, scraping, SMS flooding | Bot challenge, layered rate limits, daily SMS ceiling, firewall rules (§8.2, §8.4) |
+| Overload | Flooding the site or one hot product | CDN-cached public pages, timeouts and per-product limits on payment, browse-only mode (§5.8, §14.2) |
+| Cache leaks | One user's page served to another | Public and private never share a response; logged-in routes are uncacheable, checked in the build (§5.8) |
+| Research data misuse | Using the research copy to identify players | Separate de-identified copy, separate role, consent filter (§17.2) |
+
+### 8.8 Remaining weak points, most serious first
+
+No design removes all risk. These are the known gaps in the current plan.
+
+1. **Solo operation defeats the two-person rules.** Second-approver controls and required code review assume at least two people. Until there is a second trusted person, the compensating controls are: a separate staff identity from your player identity, passkey on a hardware-backed device, the off-site audit log, and your own review of every guarded-zone change (§16.3). This is the weakest point of the plan.
+2. **Free-tier database.** No point-in-time recovery, and the database endpoint is reachable from the internet (§9.1.2). A ransomware-style wipe or bad migration could cost up to an hour of data.
+3. **Email and phone are held by the auth service and are not field-encrypted.** They are protected by disk encryption and access control only, unlike birthdate and address. A database-level breach would expose them. The phone uniqueness fingerprint is keyed, but the number itself is readable in the auth tables.
+4. **Code written largely with AI assistance.** Generated code can contain subtle permission or logic errors. The guarded-zone rules, database constraints and automated authorisation tests exist to catch them, but they only work if the tests are written and kept passing.
+5. **No independent penetration test** until there is budget (§8.6).
+6. **More personal data than the original PRD planned.** Phone, birthdate, optional address and approximate location raise the cost of any breach and the legal duties that follow one.
+7. **Third-party services.** Hosting, database, email, SMS and bot-protection providers can each fail or be breached; the exposure is limited by giving each only what it needs.
+
+### 8.9 If a breach happens
+
+1. Contain: turn on the purchase and sign-up kill switches; revoke all sessions; rotate every secret.
+2. Preserve: keep logs and the audit trail; do not repair data by hand.
+3. Assess: what data, which accounts, how. The audit log, off-site copies and ledger reconciliation show what changed.
+4. Recover: restore if needed, reapply deletions, reconcile the ledger before reopening (§9.4).
+5. Notify: affected players, and the regulator where the law requires, on the privacy reviewer's guidance. Have the notice template written before launch, not during an incident.
+6. Learn: record cause and fix; add a test that would have caught it.
+
 ---
 
 ## 9. Infrastructure
