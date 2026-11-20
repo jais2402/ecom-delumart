@@ -28,7 +28,12 @@ export async function withTransaction<T>(
       await client.query(
         `SELECT set_config('lock_timeout', $1, true), set_config('statement_timeout', $2, true),
                 set_config('app.user_id', $3, true), set_config('app.company_id', $4, true)`,
-        [options.lockTimeout ?? "2s", options.statementTimeout ?? "5s", options.userId ?? "", options.companyId ?? ""],
+        [
+          options.lockTimeout ?? "2s",
+          options.statementTimeout ?? "5s",
+          options.userId ?? "",
+          options.companyId ?? "",
+        ],
       );
       const result = await fn(client);
       await client.query("COMMIT");

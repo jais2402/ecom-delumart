@@ -35,13 +35,15 @@ describe("ledger invariants", () => {
 
   async function insertJournal(c: pg.PoolClient, amounts: [string, bigint][]): Promise<string> {
     const id = uuidv7();
-    await c.query("INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'COMPENSATION', 1)", [id]);
+    await c.query(
+      "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'COMPENSATION', 1)",
+      [id],
+    );
     for (const [account, amount] of amounts) {
-      await c.query("INSERT INTO ledger.posting (journal_id, account_id, amount, memo) VALUES ($1, $2, $3, 'test')", [
-        id,
-        account,
-        amount.toString(),
-      ]);
+      await c.query(
+        "INSERT INTO ledger.posting (journal_id, account_id, amount, memo) VALUES ($1, $2, $3, 'test')",
+        [id, account, amount.toString()],
+      );
     }
     return id;
   }
@@ -80,9 +82,10 @@ describe("ledger invariants", () => {
         [userAccount, 300n],
         [userAccount, 200n],
       ]);
-      await c.query("UPDATE ledger.wallet SET available_paise = available_paise + 500 WHERE account_id = $1", [
-        userAccount,
-      ]);
+      await c.query(
+        "UPDATE ledger.wallet SET available_paise = available_paise + 500 WHERE account_id = $1",
+        [userAccount],
+      );
       await c.query("COMMIT");
     } finally {
       c.release();
@@ -96,18 +99,27 @@ describe("ledger invariants", () => {
 
   it("zero-sum: a posting of 0 paise is rejected", async () => {
     expect(
-      await stateOf(pool, "INSERT INTO ledger.posting (journal_id, account_id, amount, memo) VALUES ($1, $2, 0, 'x')", [
-        journalId,
-        userAccount,
-      ]),
+      await stateOf(
+        pool,
+        "INSERT INTO ledger.posting (journal_id, account_id, amount, memo) VALUES ($1, $2, 0, 'x')",
+        [journalId, userAccount],
+      ),
     ).toBe("23514");
   });
 
   describe("append-only: rejected by trigger (as the owner / superuser)", () => {
     const cases: [string, string, () => unknown[]][] = [
-      ["UPDATE ledger.posting", "UPDATE ledger.posting SET memo = 'edited' WHERE journal_id = $1", () => [journalId]],
+      [
+        "UPDATE ledger.posting",
+        "UPDATE ledger.posting SET memo = 'edited' WHERE journal_id = $1",
+        () => [journalId],
+      ],
       ["DELETE ledger.posting", "DELETE FROM ledger.posting WHERE journal_id = $1", () => [journalId]],
-      ["UPDATE ledger.journal", "UPDATE ledger.journal SET idempotency_ref = NULL WHERE id = $1", () => [journalId]],
+      [
+        "UPDATE ledger.journal",
+        "UPDATE ledger.journal SET idempotency_ref = NULL WHERE id = $1",
+        () => [journalId],
+      ],
       ["DELETE ledger.journal", "DELETE FROM ledger.journal WHERE id = $1", () => [journalId]],
       ["UPDATE audit.audit_log", "UPDATE audit.audit_log SET reason = 'edited'", () => []],
       ["DELETE audit.audit_log", "DELETE FROM audit.audit_log", () => []],
@@ -134,9 +146,17 @@ describe("ledger invariants", () => {
 
   describe("append-only: rejected by missing grants for app_web (SET ROLE)", () => {
     const cases: [string, string, () => unknown[]][] = [
-      ["UPDATE ledger.posting", "UPDATE ledger.posting SET memo = 'edited' WHERE journal_id = $1", () => [journalId]],
+      [
+        "UPDATE ledger.posting",
+        "UPDATE ledger.posting SET memo = 'edited' WHERE journal_id = $1",
+        () => [journalId],
+      ],
       ["DELETE ledger.posting", "DELETE FROM ledger.posting WHERE journal_id = $1", () => [journalId]],
-      ["UPDATE ledger.journal", "UPDATE ledger.journal SET idempotency_ref = NULL WHERE id = $1", () => [journalId]],
+      [
+        "UPDATE ledger.journal",
+        "UPDATE ledger.journal SET idempotency_ref = NULL WHERE id = $1",
+        () => [journalId],
+      ],
       ["DELETE ledger.journal", "DELETE FROM ledger.journal WHERE id = $1", () => [journalId]],
       ["UPDATE audit.audit_log", "UPDATE audit.audit_log SET reason = 'edited'", () => []],
       ["DELETE audit.audit_log", "DELETE FROM audit.audit_log", () => []],
@@ -173,9 +193,11 @@ describe("ledger invariants", () => {
   });
 
   it("wallet cannot go negative (CHECK available_paise >= 0)", async () => {
-    expect(await stateOf(pool, "UPDATE ledger.wallet SET available_paise = -1 WHERE account_id = $1", [userAccount])).toBe(
-      "23514",
-    );
+    expect(
+      await stateOf(pool, "UPDATE ledger.wallet SET available_paise = -1 WHERE account_id = $1", [
+        userAccount,
+      ]),
+    ).toBe("23514");
     expect(
       await stateOf(
         pool,

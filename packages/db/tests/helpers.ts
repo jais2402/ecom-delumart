@@ -14,7 +14,9 @@ export interface TestDatabase {
 }
 
 /** Creates a uniquely named throwaway database, migrates it, and returns a pool to it. */
-export async function createTestDatabase(options: { migrate?: boolean; poolSize?: number } = {}): Promise<TestDatabase> {
+export async function createTestDatabase(
+  options: { migrate?: boolean; poolSize?: number } = {},
+): Promise<TestDatabase> {
   const name = `delulu_test_${randomBytes(6).toString("hex")}`;
   const admin = new pg.Client({ connectionString: ADMIN_URL });
   await admin.connect();
@@ -101,7 +103,10 @@ export function provisionInput(overrides: Partial<ProvisionInput> = {}): Provisi
 
 /** Creates a bare user profile (no provisioning). */
 export async function createProfile(pool: pg.Pool, id: string = uuidv7()): Promise<string> {
-  await pool.query("INSERT INTO core.user_profile (id, email_fingerprint) VALUES ($1, $2)", [id, randomBytes(32)]);
+  await pool.query("INSERT INTO core.user_profile (id, email_fingerprint) VALUES ($1, $2)", [
+    id,
+    randomBytes(32),
+  ]);
   return id;
 }
 

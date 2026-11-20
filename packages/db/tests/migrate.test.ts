@@ -48,7 +48,9 @@ describe("migration runner", () => {
     const scratch = await createTestDatabase({ migrate: false });
     try {
       await expect(migrate(scratch.pool, { directory: dir })).rejects.toThrow(/0002_bad\.sql failed/);
-      const { rows } = await scratch.pool.query<{ version: string }>("SELECT version FROM public.schema_migrations");
+      const { rows } = await scratch.pool.query<{ version: string }>(
+        "SELECT version FROM public.schema_migrations",
+      );
       expect(rows.map((r) => r.version)).toEqual(["0001"]);
       const probe = await scratch.pool.query("SELECT to_regclass('public.runner_probe2') AS t");
       expect(probe.rows[0]?.t).toBeNull();

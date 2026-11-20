@@ -2,7 +2,15 @@ import { randomBytes } from "node:crypto";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTransaction } from "../src/transaction";
-import { createProfile, createTestDatabase, provisionAccount, provisionInput, stateOf, type TestDatabase, uuidv7 } from "./helpers";
+import {
+  createProfile,
+  createTestDatabase,
+  provisionAccount,
+  provisionInput,
+  stateOf,
+  type TestDatabase,
+  uuidv7,
+} from "./helpers";
 
 const APP_SCHEMAS = ["core", "ledger", "private", "sandbox", "analytics", "audit", "research"];
 
@@ -42,7 +50,8 @@ describe("roles, grants and row-level security", () => {
       pool,
       async (c) => {
         await c.query("SET LOCAL ROLE app_web");
-        return (await c.query("UPDATE private.address SET label = 'WORK' WHERE user_id = $1", [userB])).rowCount;
+        return (await c.query("UPDATE private.address SET label = 'WORK' WHERE user_id = $1", [userB]))
+          .rowCount;
       },
       { userId: userA },
     );
@@ -50,9 +59,12 @@ describe("roles, grants and row-level security", () => {
   });
 
   it("RLS: as app_web with app.user_id = A, an address cannot be inserted for user B", async () => {
-    const insert = "INSERT INTO private.address (id, user_id, kind, label, payload_enc) VALUES ($1, $2, 'REAL', 'HOME', '\\x01')";
+    const insert =
+      "INSERT INTO private.address (id, user_id, kind, label, payload_enc) VALUES ($1, $2, 'REAL', 'HOME', '\\x01')";
     expect(await stateOf(pool, insert, [uuidv7(), userB], { role: "app_web", userId: userA })).toBe("42501");
-    expect(await stateOf(pool, insert, [uuidv7(), userA], { role: "app_web", userId: userA })).toBe("no error");
+    expect(await stateOf(pool, insert, [uuidv7(), userA], { role: "app_web", userId: userA })).toBe(
+      "no error",
+    );
   });
 
   it("RLS: without app.user_id, app_web sees no addresses (fails closed, no error)", async () => {
@@ -105,10 +117,10 @@ describe("roles, grants and row-level security", () => {
   });
 
   it("app_web cannot read private.user_secret of another user", async () => {
-    await pool.query("INSERT INTO private.user_secret (user_id, birthdate_enc) VALUES ($1, '\\x01'), ($2, '\\x02')", [
-      userA,
-      userB,
-    ]);
+    await pool.query(
+      "INSERT INTO private.user_secret (user_id, birthdate_enc) VALUES ($1, '\\x01'), ($2, '\\x02')",
+      [userA, userB],
+    );
     const rows = await withTransaction(
       pool,
       async (c) => {
@@ -150,12 +162,21 @@ describe("roles, grants and row-level security", () => {
 
   it("invariant 9: npc_worker cannot write orders or inventory, only sandbox", async () => {
     expect(await stateOf(pool, "SELECT 1 FROM core.order_group", [], { role: "npc_worker" })).toBe("42501");
-    expect(await stateOf(pool, "UPDATE core.product SET available_units = 0", [], { role: "npc_worker" })).toBe("42501");
-    expect(await stateOf(pool, "SELECT 1 FROM core.product_version", [], { role: "npc_worker" })).toBe("no error");
     expect(
-      await stateOf(pool, "INSERT INTO sandbox.npc_actor (id, persona) VALUES (gen_random_uuid(), 'bargain hunter')", [], {
-        role: "npc_worker",
-      }),
+      await stateOf(pool, "UPDATE core.product SET available_units = 0", [], { role: "npc_worker" }),
+    ).toBe("42501");
+    expect(await stateOf(pool, "SELECT 1 FROM core.product_version", [], { role: "npc_worker" })).toBe(
+      "no error",
+    );
+    expect(
+      await stateOf(
+        pool,
+        "INSERT INTO sandbox.npc_actor (id, persona) VALUES (gen_random_uuid(), 'bargain hunter')",
+        [],
+        {
+          role: "npc_worker",
+        },
+      ),
     ).toBe("no error");
     for (const role of ["app_web", "app_jobs"]) {
       expect(await stateOf(pool, "SELECT 1 FROM sandbox.npc_actor", [], { role })).toBe("42501");

@@ -69,7 +69,9 @@ export async function migrate(pool: Pool, options: MigrateOptions = {}): Promise
         const existing = applied.get(file.version);
         if (existing !== undefined) {
           if (existing !== file.checksum) {
-            throw new Error(`Migration ${file.name} was changed after it was applied; add a new migration instead`);
+            throw new Error(
+              `Migration ${file.name} was changed after it was applied; add a new migration instead`,
+            );
           }
           result.skipped.push(file.name);
           continue;
@@ -77,11 +79,10 @@ export async function migrate(pool: Pool, options: MigrateOptions = {}): Promise
         await client.query("BEGIN");
         try {
           await client.query(file.sql);
-          await client.query("INSERT INTO public.schema_migrations (version, name, checksum) VALUES ($1, $2, $3)", [
-            file.version,
-            file.name,
-            file.checksum,
-          ]);
+          await client.query(
+            "INSERT INTO public.schema_migrations (version, name, checksum) VALUES ($1, $2, $3)",
+            [file.version, file.name, file.checksum],
+          );
           await client.query("COMMIT");
         } catch (error) {
           await client.query("ROLLBACK");
