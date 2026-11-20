@@ -1,0 +1,5 @@
+@import "tailwindcss";
+@import "@delulu/ui/styles.css";
+
+/* Tailwind scans the app automatically; the design system lives outside it. */
+@source "../../../../packages/ui/src";

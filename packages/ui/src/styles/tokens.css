@@ -1,0 +1,91 @@
+/* Daydream tokens. Components use these only; never literal colours. */
+:root {
+  --dd-bg: #faf8f2;
+  --dd-surface: #ffffff;
+  --dd-surface-raised: #ffffff;
+  --dd-border: #ddd6e6;
+  --dd-border-strong: #b9b0c9;
+  --dd-fg: #171717;
+  --dd-fg-muted: #5d586b;
+  --dd-fg-on-action: #ffffff;
+  --dd-fg-on-highlight: #171717;
+  --dd-action: #5b21b6;
+  --dd-action-hover: #4a1a96;
+  --dd-action-soft: #ede6fb;
+  --dd-highlight: #d9f75c;
+  --dd-success: #1d6b3a;
+  --dd-success-soft: #e2f4e8;
+  --dd-warning: #8a5300;
+  --dd-warning-soft: #fdf0d5;
+  --dd-danger: #a3261b;
+  --dd-danger-soft: #fbe6e3;
+  --dd-info: #1f5c99;
+  --dd-info-soft: #e3eefa;
+  --dd-source-player: #5b21b6;
+  --dd-source-npc: #6b6470;
+  --dd-shadow-raised: 0 1px 2px rgb(23 23 23 / 0.06), 0 4px 12px rgb(23 23 23 / 0.06);
+  --dd-shadow-overlay: 0 12px 40px rgb(23 23 23 / 0.22);
+  --dd-focus: #5b21b6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --dd-bg: #14121b;
+    --dd-surface: #1e1a2a;
+    --dd-surface-raised: #272236;
+    --dd-border: #3b3550;
+    --dd-border-strong: #5a5275;
+    --dd-fg: #ece9f5;
+    --dd-fg-muted: #a8a2b8;
+    --dd-fg-on-action: #171717;
+    --dd-fg-on-highlight: #171717;
+    --dd-action: #b49bff;
+    --dd-action-hover: #c9b6ff;
+    --dd-action-soft: #2b2348;
+    --dd-highlight: #d9f75c;
+    --dd-success: #7fdca0;
+    --dd-success-soft: #173323;
+    --dd-warning: #f3c56b;
+    --dd-warning-soft: #3a2c0e;
+    --dd-danger: #ff9a8f;
+    --dd-danger-soft: #3d1a17;
+    --dd-info: #8fc1f5;
+    --dd-info-soft: #152a40;
+    --dd-source-player: #b49bff;
+    --dd-source-npc: #a8a2b8;
+    --dd-shadow-raised: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 12px rgb(0 0 0 / 0.3);
+    --dd-shadow-overlay: 0 12px 40px rgb(0 0 0 / 0.6);
+    --dd-focus: #d9f75c;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --dd-bg: #14121b;
+  --dd-surface: #1e1a2a;
+  --dd-surface-raised: #272236;
+  --dd-border: #3b3550;
+  --dd-border-strong: #5a5275;
+  --dd-fg: #ece9f5;
+  --dd-fg-muted: #a8a2b8;
+  --dd-fg-on-action: #171717;
+  --dd-fg-on-highlight: #171717;
+  --dd-action: #b49bff;
+  --dd-action-hover: #c9b6ff;
+  --dd-action-soft: #2b2348;
+  --dd-highlight: #d9f75c;
+  --dd-success: #7fdca0;
+  --dd-success-soft: #173323;
+  --dd-warning: #f3c56b;
+  --dd-warning-soft: #3a2c0e;
+  --dd-danger: #ff9a8f;
+  --dd-danger-soft: #3d1a17;
+  --dd-info: #8fc1f5;
+  --dd-info-soft: #152a40;
+  --dd-source-player: #b49bff;
+  --dd-source-npc: #a8a2b8;
+  --dd-shadow-raised: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 12px rgb(0 0 0 / 0.3);
+  --dd-shadow-overlay: 0 12px 40px rgb(0 0 0 / 0.6);
+  --dd-focus: #d9f75c;
+  color-scheme: dark;
+}

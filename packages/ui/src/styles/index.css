@@ -1,0 +1,58 @@
+/* Daydream theme for Tailwind v4. Import after `@import "tailwindcss";` in the app stylesheet. */
+@import "./tokens.css";
+
+@theme inline {
+  --color-bg: var(--dd-bg);
+  --color-surface: var(--dd-surface);
+  --color-surface-raised: var(--dd-surface-raised);
+  --color-border: var(--dd-border);
+  --color-border-strong: var(--dd-border-strong);
+  --color-fg: var(--dd-fg);
+  --color-fg-muted: var(--dd-fg-muted);
+  --color-fg-on-action: var(--dd-fg-on-action);
+  --color-fg-on-highlight: var(--dd-fg-on-highlight);
+  --color-action: var(--dd-action);
+  --color-action-hover: var(--dd-action-hover);
+  --color-action-soft: var(--dd-action-soft);
+  --color-highlight: var(--dd-highlight);
+  --color-success: var(--dd-success);
+  --color-success-soft: var(--dd-success-soft);
+  --color-warning: var(--dd-warning);
+  --color-warning-soft: var(--dd-warning-soft);
+  --color-danger: var(--dd-danger);
+  --color-danger-soft: var(--dd-danger-soft);
+  --color-info: var(--dd-info);
+  --color-info-soft: var(--dd-info-soft);
+  --color-source-player: var(--dd-source-player);
+  --color-source-npc: var(--dd-source-npc);
+  --color-focus: var(--dd-focus);
+  --font-display: var(--font-space-grotesk), "Segoe UI", system-ui, sans-serif;
+  --font-body: var(--font-inter), "Segoe UI", system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, Menlo, monospace;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+  --shadow-raised: var(--dd-shadow-raised);
+  --shadow-overlay: var(--dd-shadow-overlay);
+  --container-content: 1120px;
+  --spacing-touch: 44px;
+}
+
+@layer base {
+  body {
+    background: var(--dd-bg);
+    color: var(--dd-fg);
+    font-family: var(--font-body);
+  }
+  :focus-visible {
+    outline: 2px solid var(--dd-focus);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
