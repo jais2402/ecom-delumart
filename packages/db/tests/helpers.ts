@@ -82,6 +82,71 @@ export async function inRolledBackTx<T>(pool: pg.Pool, fn: (c: pg.PoolClient) =>
   }
 }
 
+/** Who a statement runs as: a database role plus the transaction-local RLS settings. */
+export interface Actor {
+  role?: string;
+  userId?: string;
+  companyId?: string;
+}
+
+async function become(c: pg.PoolClient, as: Actor): Promise<void> {
+  await c.query("SELECT set_config('app.user_id', $1, true), set_config('app.company_id', $2, true)", [
+    as.userId ?? "",
+    as.companyId ?? "",
+  ]);
+  if (as.role) await c.query(`SET LOCAL ROLE ${as.role}`);
+}
+
+/** Runs fn as the actor inside a transaction that is always rolled back. */
+export async function asActor<T>(pool: pg.Pool, as: Actor, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
+  return inRolledBackTx(pool, async (c) => {
+    await become(c, as);
+    return fn(c);
+  });
+}
+
+/**
+ * Runs fn as the actor, then fires every deferred constraint (as COMMIT would) and
+ * returns the SQLSTATE of the first failure, or "no error". Always rolled back.
+ */
+export async function commitState(
+  pool: pg.Pool,
+  as: Actor,
+  fn: (c: pg.PoolClient) => Promise<unknown>,
+): Promise<string> {
+  return asActor(pool, as, (c) =>
+    sqlState(
+      (async () => {
+        await fn(c);
+        await c.query("SET CONSTRAINTS ALL IMMEDIATE");
+      })(),
+    ),
+  );
+}
+
+/** Like commitState, but returns the error message (or "no error") for asserting which rule fired. */
+export async function commitError(
+  pool: pg.Pool,
+  as: Actor,
+  fn: (c: pg.PoolClient) => Promise<unknown>,
+): Promise<string> {
+  return asActor(pool, as, async (c) => {
+    try {
+      await fn(c);
+      await c.query("SET CONSTRAINTS ALL IMMEDIATE");
+      return "no error";
+    } catch (error) {
+      return (error as Error).message;
+    }
+  });
+}
+
+/** Number of rows a counting query returns as `n`. */
+export async function countRows(c: pg.Pool | pg.PoolClient, sql: string, params: unknown[] = []): Promise<number> {
+  const { rows } = await c.query<{ n: string }>(sql, params);
+  return Number(rows[0]?.n);
+}
+
 let counter = 0;
 
 /** Fresh, unique provisioning input. Card numbers are synthetic 16-digit strings. */
@@ -96,7 +161,6 @@ export function provisionInput(overrides: Partial<ProvisionInput> = {}): Provisi
     cardNumber: `0${digits}`,
     alias: `alias-${tag}-${counter}`,
     upiStyleId: `u${tag}${counter}@delulu`,
-    isTombstoned: false,
     ...overrides,
   };
 }
