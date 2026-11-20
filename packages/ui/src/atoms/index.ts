@@ -11,6 +11,7 @@ export * from "./Input";
 export * from "./Label";
 export * from "./Link";
 export * from "./Price";
+export * from "./ProductArt";
 export * from "./ProgressBar";
 export * from "./Radio";
 export * from "./Select";
