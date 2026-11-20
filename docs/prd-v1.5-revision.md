@@ -73,6 +73,36 @@ One area at `/account`, replacing the scattered "My bank" and collection entry p
 | Privacy and security | Active sessions and sign-out everywhere, privacy flags, data export, account deletion (US-12) |
 | Notifications | In-app notification history and preferences |
 
+### R3.1 One account per person: phone and email
+
+To avoid duplicate accounts (and duplicate ₹100 crore grants), every account has exactly one email address and one phone number, and neither can belong to another account.
+
+**Collection**
+- Phone number with country code, chosen from a country list and stored in the international standard format (for example +91 followed by the number). Numbers are validated for the selected country.
+- Email as today (§7.2 J1).
+
+**Uniqueness**
+- One account per phone number and one account per email address, enforced by the database, not only by the sign-up form.
+- Emails are compared in a normalised form (case, and provider tricks such as dots and "+tags" in Gmail addresses) so one mailbox cannot open several accounts. The address as typed is kept for sending.
+- Signing in with Google and with an email link to the same address reaches the same account (explicit linking, US-01).
+
+**Verification — required for uniqueness to mean anything**
+- The phone number is confirmed with a one-time code sent by SMS during onboarding. Without this, anyone could type a made-up number, or type someone else's and block them.
+- The starting grant, bank account and card are created only after both email and phone are verified. This strengthens US-01.
+- "This number already has an account" is shown only after the code is confirmed, so the form cannot be used to check whether a stranger's number is registered.
+- This is the product's only SMS. It is labelled as DeluluMart account verification and is never part of a payment (R4.5 unchanged).
+- SMS verification is a small real cost and needs a provider; see R13. Until a provider is live, numbers are stored as unverified claims: unique, but released automatically if someone else later proves ownership of that number.
+
+**Changes and edge cases**
+- Changing the phone number requires a fresh sign-in and a code sent to the new number; the old number is then released.
+- Mobile numbers get reassigned by carriers. If a new owner verifies a number already on another account, the number moves to them; the earlier account keeps working through its email and is asked for a new number at next sign-in. Nobody can take over an account with a phone number alone: sign-in stays email-based.
+- After account deletion the phone and email are erased. A non-reversible fingerprint of each is kept for 12 months for one purpose only: a returning person can open a new account but does not receive a second starting grant. Retention period to be confirmed by the privacy reviewer.
+
+**Privacy**
+- Phone number is visible only to its owner. Sellers, workers, other players, share cards, analytics and partner exports never contain it.
+- It is used for verification and account recovery only: no marketing messages, no sharing, no contact-list matching.
+- Stored encrypted; staff see it masked, with full view behind an audited permission.
+
 "Wallet" and "bank balance" remain two views of one ledger balance (§1.2). Orders, Payments and Transactions are three views of the same committed records and must reconcile: one seller order ↔ one share of one successful payment ↔ the corresponding statement rows.
 
 ---
@@ -164,7 +194,7 @@ Players may add a real address so checkout feels like real shopping. Because not
 
 **What a player can save**
 - Up to five addresses. Fields: label (Home, Work, Other), recipient name, address line 1, address line 2 (optional), city, state, pincode.
-- No phone number, no map pin, no device location, and no lookup against any outside address or geocoding service. Pincode is checked for format only.
+- No separate phone number on an address (the account's own number is in R3.1), no map pin, no device location, and no lookup against any outside address or geocoding service. Pincode is checked for format only.
 - A **fictional delivery spot** remains available as an equal alternative, chosen from lists (for example "Cloud Nine Heights"), so nobody has to give a real address to shop. Whether the address form or the fictional spot is the pre-selected option is a decision for the product and privacy owners (R13).
 
 **Notice at the point of entry**
@@ -323,6 +353,7 @@ Fulfilment is automatic in this release: merchants watch the timeline but do not
 | §7.4 fee formula | Fee is on the list price after seller-funded discounts (R6.6). Delivery fees and membership are new SINK events; platform coupons are a new MINT event. Reconciliation identity gains these terms. |
 | §7.5 limits | 100 completed purchases/day counts cart lines. Adds coupon-attempt and authentication-attempt limits. |
 | §7.13 "no SMS, email OTP or additional PIN"; "Do not fabricate OTP messages"; "deliberately nonnumeric alias … no real card-number" | Cards get a 16-digit game number derived with the player's birthdate and a six-digit Delulu PIN (R4.7); net banking gets an in-app code step (R4.4). The number is built so it cannot be a valid real card. The prohibition on real-world messages and real credentials is kept (R4.5). |
+| §7.2 J1, US-01, §7.5 "one account per human is not fully provable" | A verified phone number with country code is required in addition to email; one account per phone and per email (R3.1). This is a much stronger duplicate barrier, though still not proof of one human. |
 | §1.1, §7.9 User `age_attested_at` | Date of birth is collected once at onboarding for card issuance and the adult check (R4.7). |
 | §7.13 checkout types | Adds `MEMBERSHIP_PURCHASE`. `PRODUCT_PURCHASE` now covers an order group of one or more seller orders. |
 | §7.14 qualifying revenue | Defined on buyer-paid item amounts (R6.6). |
@@ -347,7 +378,8 @@ Unchanged and still binding: fictional, non-redeemable currency; one starting gr
 | PaymentMethodConfig | method, enabled, order, limits, maintenance window; versioned |
 | PaymentChallenge | attempt, type PIN or CODE, code hash (CODE), expiry, attempts used; single use |
 | VirtualCard (amended) | adds card_number unique (fixed prefix, checksum-invalid), sequence, pin_hash, pin_set_at, failed_pin_count, pin_locked_until |
-| User (amended) | adds birthdate, encrypted, owner-only |
+| User (amended) | adds birthdate, encrypted, owner-only; phone in international format, encrypted, with unique lookup fingerprint and phone_verified_at; normalised-email fingerprint unique |
+| IdentityTombstone | fingerprints of deleted accounts' phone and email, expiry; used only to withhold a repeat starting grant |
 | Coupon / CouponRedemption | scope MERCHANT or PLATFORM, owner company or campaign, rule, limits; unique (coupon, buyer); redemption linked to seller order and journal |
 | PromoCampaign | budget, spent, approvals; spent ≤ budget enforced transactionally |
 | Membership | user, period start/end, purchase journal; one active per user |
@@ -358,7 +390,7 @@ Unchanged and still binding: fictional, non-redeemable currency; one starting gr
 
 `GET/PUT /cart`, `POST /cart/lines`, `DELETE /cart/lines/:id`, `POST /cart/coupon`; `GET/POST/PATCH/DELETE /account/addresses`; `GET /delivery-options` (for a cart); `POST /checkout-sessions` now accepts a cart, delivery choices, coupon and method; `POST /checkout-sessions/:id/challenge` and `/challenge/verify`; `GET /orders/:id/tracking`; `POST /memberships`; `POST /companies/:id/coupons` and `PATCH …/:id`; `PUT /products/:id/shipping`; `PUT /products/:id/sale-price`; `PUT /warehouses/:id/zap-hub`; staff: `/console/…` for catalog, merchandising, promotions, shipping, payments, economy configuration.
 
-New stable error codes: `CART_CHANGED`, `COUPON_INVALID`, `COUPON_NOT_APPLICABLE`, `DELIVERY_UNAVAILABLE`, `METHOD_UNAVAILABLE`, `METHOD_LIMIT_EXCEEDED`, `CHALLENGE_FAILED`, `CHALLENGE_EXPIRED`, `CHALLENGE_LOCKED`, `PIN_NOT_SET`, `PIN_INCORRECT`, `PIN_LOCKED`, `PIN_WEAK`, `UNDERAGE`, `MEMBERSHIP_ACTIVE`, `REFERENCE_PRICE_INELIGIBLE`.
+New stable error codes: `CART_CHANGED`, `COUPON_INVALID`, `COUPON_NOT_APPLICABLE`, `DELIVERY_UNAVAILABLE`, `METHOD_UNAVAILABLE`, `METHOD_LIMIT_EXCEEDED`, `CHALLENGE_FAILED`, `CHALLENGE_EXPIRED`, `CHALLENGE_LOCKED`, `PIN_NOT_SET`, `PIN_INCORRECT`, `PIN_LOCKED`, `PIN_WEAK`, `UNDERAGE`, `PHONE_REQUIRED`, `PHONE_INVALID`, `PHONE_IN_USE`, `PHONE_CODE_FAILED`, `MEMBERSHIP_ACTIVE`, `REFERENCE_PRICE_INELIGIBLE`.
 
 **New events:** `cart_updated`, `coupon_applied / coupon_rejected / coupon_redeemed`, `payment_method_selected`, `payment_challenge_issued / passed / failed`, `shipment_created / shipment_stage_changed / shipment_delivered`, `membership_purchased / membership_expired`, `sale_price_set`, `console_config_changed`. Purchase events gain discount, delivery-fee and speed fields. Delivery fees and membership are reported as sinks, never as sales.
 
@@ -369,6 +401,7 @@ New stable error codes: `CART_CHANGED`, `COUPON_INVALID`, `COUPON_NOT_APPLICABLE
 - **US-33 · Cart checkout:** a cart with three products from two sellers produces one order group, two seller orders, one payment and one balanced journal. If one line sells out before payment, nothing is debited and the cart shows the change. Repeating the request returns the same order group.
 - **US-34 · Account truth:** every seller order in Orders maps to one successful payment in Payments and to statement rows whose sum equals the amount paid. A failed attempt appears in Payments with a reason and nowhere in the statement.
 - **US-35 · Payment methods:** each enabled method completes a purchase with the same ledger result. A disabled method cannot be used by calling the API directly. Exceeding a method limit declines with no debit.
+- **US-49 · One account per phone and email:** a second account cannot be created with an already-verified phone number, or with an email that differs only by case, dots or a "+tag" from an existing Gmail address. Two simultaneous sign-ups with the same number produce one account. No grant, bank account or card exists until both email and phone are verified. "Already in use" is revealed only after the code is confirmed. Deleting an account and signing up again with the same phone or email within the retention period gives a working account and no second starting grant. The phone number appears in no seller view, analytics event, log or partner export.
 - **US-47 · Card number:** a new card has a unique 16-digit number with the fixed prefix that fails the standard card checksum. The same player and card always show the same number; a replacement card shows a different one. Given only a card number, the birthdate cannot be derived; given only a birthdate, the number cannot be predicted. The number alone cannot authorise a payment.
 - **US-48 · Delulu PIN:** a card payment without a PIN set returns `PIN_NOT_SET` and a link to set one. `123456`, `111111` and the player's birthdate digits are rejected. A correct PIN pays once; three wrong PINs fail the payment with no debit; five lock card payments for 15 minutes while other methods still work. Changing needs the current PIN; reset needs a fresh sign-in. The PIN appears in no log, event, export or staff screen.
 - **US-36 · Authentication step (net banking):** a correct code proceeds to payment; three wrong codes fail the attempt with no debit; an expired code cannot be used; a code cannot be reused or used on another attempt. No code is ever sent outside the app.
@@ -417,6 +450,10 @@ The console's moderation queue and kill switches are needed from phase 1; the re
 | Card number | 16 digits from a keyed one-way function of birthdate, account and card sequence; unused prefix; always checksum-invalid | User requirement (birthdate-based algorithm); construction proposed; engineering/security |
 | Card PIN | Six digits, owner-chosen, managed in the account hub, with reuse and weak-PIN safeguards | User requirement; length and safeguards proposed; security |
 | Date of birth | Collected once, encrypted, owner-only; doubles as the adult check | Follows from the card requirement; privacy/legal |
+| Phone number | Required, with country code, verified by SMS code; one account per phone and per email | User requirement; verification and reassignment rules proposed; engineering/privacy |
+| SMS provider | Needed for phone verification; small real cost per sign-up and, for Indian numbers, sender registration | Open; engineering. Until chosen, numbers are unverified claims |
+| Countries accepted | India (+91) at launch, others switchable | Proposed; product/legal (ties to launch jurisdictions, §8.4) |
+| Repeat-grant prevention after deletion | Keep phone/email fingerprints 12 months | Proposed; privacy/legal |
 | Delivery | Simulated; Standard 24 h, Express 2 h, Zap 10 min; fees to SINK | User requirement; times and fees proposed; product/economy |
 | Delivery addresses | Real address allowed, owner-only, encrypted, deletable; fictional spot offered as an alternative; no phone or location | User requirement (real address); protections and default option proposed; privacy/legal |
 | Membership name and price | "Delulu Plus", ₹2 lakh / 30 days, manual renewal | Name provisional (the requested "Prime" is another company's brand); product/legal |

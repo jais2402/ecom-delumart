@@ -297,6 +297,8 @@ Principles: deny by default; enforce on the server and again in the database; le
 |---|---|---|
 | Economic exploitation | Double grant, double spend, overdraw, replayed pay request, refund/rebuy farming, relief farming | Single-transaction writes, canonical lock order, unique constraints, idempotency records, non-negative wallet CHECK, daily reconciliation (§5) |
 | Broken access control (IDOR) | Changing a company, order, card or export id in a URL; a worker calling finance endpoints | Central policy layer, server-resolved company scope, Postgres row-level security on tenant tables, authorisation matrix in CI (§8.3) |
+| Duplicate accounts and grant farming | Many accounts per person, delete-and-recreate for a fresh grant | Verified phone and normalised email each unique by keyed fingerprint; grant only after both verified; tombstone fingerprints withhold repeat grants (§8.2) |
+| SMS abuse and number enumeration | Scripted code requests running up cost; probing which numbers are registered | Bot challenge, layered rate limits, daily SMS ceiling; "in use" disclosed only after verification; fingerprints keyed (§8.2) |
 | Account takeover | Stolen session, magic-link interception, OAuth account-linking abuse | Short-lived single-use links, session rotation, explicit linking only, re-authentication for sensitive actions, staff MFA (§8.2) |
 | Insider or compromised staff account | Arbitrary reversal, minting compensation, reading private wallets | Separate admin surface, MFA, least-privilege staff roles, two-person approval for minting actions, tamper-evident audit log (§8.5) |
 | Unsafe user-written content | Abusive, sexual, impersonating or scam text in listings, handles and store names | Rules pass, optional classifier, human review; nothing public before approval (§7.2) |
@@ -314,6 +316,16 @@ Controls regardless of provider: magic links are single-use, expire in 15 minute
 Functional requirements: magic link + OAuth; unverified accounts can do nothing economic; duplicate provider identities resolve through explicit linking, never automatically; immediate session revocation on deletion/suspension; staff MFA; provisioning must be idempotent under concurrent callbacks.
 
 Recommendation: the managed auth service bundled with the free database (Supabase Auth). It matches the PRD's "managed authentication" (§7.8), costs nothing, keeps identities in the same Mumbai-region database as the ledger, and removes credential handling from our code. The `identity` module hides the provider behind `auth_subject`, so it can be replaced later without touching the rest of the system. Automatic linking of identities that share an email must be switched off so linking stays explicit (US-01).
+
+**Phone and email uniqueness (R3.1).**
+
+- The phone number is parsed and normalised to E.164 with a standard phone-number library; the country code comes from a server-side allow-list.
+- Phone and birthdate are encrypted fields, so uniqueness cannot use the stored value. A separate column holds a keyed fingerprint, `HMAC-SHA-256(identity_key, e164)`, with a unique index. The same technique gives a unique fingerprint of the normalised email. The key is in the secret manager, so a stolen database does not let anyone test whether a given number is registered.
+- Verification uses the auth service's phone one-time-code flow through an SMS provider. Codes are short-lived, single use and attempt-limited. Sending is rate-limited per number, per account and per network, and gated by the bot challenge, because SMS endpoints are a classic target for abuse that costs the operator money (SMS pumping). A daily SMS spend ceiling stops sending and alerts.
+- Uniqueness is checked and the fingerprint written in the same transaction that marks the phone verified; the unique index settles simultaneous sign-ups. The "already in use" answer is returned only on that verified path.
+- Number reassignment moves the fingerprint to the newly verified account and clears it on the old one in one transaction; sign-in never depends on the phone, so this cannot be used for account takeover.
+- Deletion erases phone and email and writes their fingerprints to `identity_tombstone` with an expiry; provisioning consults it to decide whether a starting grant is due.
+- Onboarding order: verify email sign-in → verify phone → birthdate and adult check → provisioning.
 
 Provisioning (`POST /account/provision`) is one transaction keyed on `auth_subject`: user row, bank account, ledger account, wallet, starter grant journal, card. Unique constraints make a concurrent second callback return the existing records (US-01, US-14).
 
@@ -342,7 +354,7 @@ A single policy layer in `core` is called by every command and query — web rou
 
 **Data protection**
 - TLS everywhere, including app-to-database; encryption at rest with managed keys for database, backups and buckets.
-- Data minimisation as specified in §7.7: no real payment data, phone number or device location is collected at all. Revision 1.5 adds two personal fields, both owner-only and field-encrypted: an optional delivery address (§15.5) and the date of birth used for card issuance and the adult check (§15.4).
+- Data minimisation as specified in §7.7. No real payment data or device location is ever collected. Revision 1.5 adds three personal fields, all owner-only and field-encrypted: a verified phone number for one-account-per-person (§8.2), the date of birth used for card issuance and the adult check (§15.4), and an optional delivery address (§15.5).
 - Secrets live only in the secret manager, are distinct per environment and are rotated on a schedule and on any staff departure.
 - Retention jobs enforce the §7.7 schedule; logs and analytics are redacted at source (no email, token or full IP).
 
@@ -394,6 +406,7 @@ Free-tier limits below are from memory and change often; confirm each one on the
 | Backups and audit copies | Cloudflare R2 (free allowance, separate vendor from the database) | Encrypted dumps and audit-log exports, written with a write-only token. |
 | Bot protection | Cloudflare Turnstile | Signup, submissions, reports. |
 | Edge / DDoS / basic firewall | Vercel's built-in CDN and firewall rules | No managed WAF rule sets on the free plan. |
+| SMS (phone verification) | No dependable free tier; an SMS provider connected to Supabase Auth | The one service in this profile that costs money per use: roughly one message per sign-up. Indian numbers generally require sender registration with the provider. Confirm pricing before choosing. Until then phone numbers are stored unverified (R3.1). |
 | Email | Resend or Brevo free tier via custom SMTP in Supabase Auth | Supabase's built-in mailer is limited to a few emails per hour. Requires a domain. |
 | Text screening classifier (optional) | A free moderation endpoint | Only submitted text is sent; outage or quota exhaustion leaves items pending, never approved (§7.2). |
 | Errors / uptime | Sentry free plan, a free uptime monitor | |
@@ -685,7 +698,7 @@ Card number and PIN (R4.7):
 - **PIN attempts** are counted on the card row under the card lock (step 6 of the lock order), so parallel guesses cannot exceed the limit. Lockout affects card payments only and cannot be used to lock someone out of their account.
 - **PIN checks** happen in the web process only; the job runner and console have no code path or key for it. The PIN is redacted at the request-logging layer and excluded from error reports.
 - **Weak-PIN rejection** uses a fixed deny-list plus the owner's own birthdate permutations, evaluated server-side.
-- **Birthdate** is stored with the same field-level encryption and owner-only policy as addresses (15.5). Onboarding order becomes: verify sign-in → birthdate and adult check → provisioning (account, grant, card) in one transaction.
+- **Birthdate** is stored with the same field-level encryption and owner-only policy as addresses (15.5). Onboarding order is given in §8.2: email, phone, birthdate, then provisioning (account, grant, card) in one transaction.
 
 Security rules specific to the simulator (from R4.5), enforced in code and tests:
 - No input component for typing a card number, expiry, CVV or password exists in the codebase; a lint rule bans the corresponding `autocomplete` values and field names. The single exception is one shared Delulu PIN component (six digits, labelled as a game PIN, not saved by password managers).
