@@ -354,7 +354,7 @@ A single policy layer in `core` is called by every command and query — web rou
 
 **Data protection**
 - TLS everywhere, including app-to-database; encryption at rest with managed keys for database, backups and buckets.
-- Data minimisation as specified in §7.7. No real payment data or device location is ever collected. Revision 1.5 adds three personal fields, all owner-only and field-encrypted: a verified phone number for one-account-per-person (§8.2), the date of birth used for card issuance and the adult check (§15.4), and an optional delivery address (§15.5).
+- Data minimisation as specified in §7.7. No real payment data or precise or device location is ever collected; approximate connection-derived place is used only in aggregate analytics (§9.6). Revision 1.5 adds three personal fields, all owner-only and field-encrypted: a verified phone number for one-account-per-person (§8.2), the date of birth used for card issuance and the adult check (§15.4), and an optional delivery address (§15.5).
 - Secrets live only in the secret manager, are distinct per environment and are rotated on a schedule and on any staff departure.
 - Retention jobs enforce the §7.7 schedule; logs and analytics are redacted at source (no email, token or full IP).
 
@@ -510,6 +510,15 @@ Logs are structured and carry no email, token or full IP (§7.10).
 ### 9.6 Analytics pipeline
 
 First-party only. The browser batches events to `POST /api/events`; the server validates the envelope, pseudonymises, deduplicates on `event_id` and inserts into day-partitioned tables dropped after 90 days. Server-authoritative events (purchase, unlock, grant) come from the outbox, never from the client. Metric definitions are versioned rows so a dashboard number can always be traced to a definition and an as-of time (§7.15).
+
+**Usage by place (R7.1).** The hosting edge already attaches an approximate country, region and city to every request as headers, at no cost and without any third-party service. The event-intake endpoint and server-emitted events copy those three labels onto the event row and discard the connection address. Design points:
+
+- Place is a dimension of the existing daily rollups (`day × country × region × city × metric`), built by the same rollup job; the Console report reads only rollups, so it stays fast and never touches raw events.
+- Distinct-account counts per place are computed in the rollup, and the minimum-count rule (fewer than 10 → "Other") is applied in the query layer on the server, not in the browser, so suppressed rows are never sent.
+- There is no per-user location column anywhere. Place exists only on pseudonymous, expiring event rows and on aggregates.
+- Headers are trusted only when they come from the hosting edge; the application ignores any client-supplied copies, so a caller cannot inject fake places.
+- On the paid AWS profile the same labels come from the CDN's viewer-location headers; the event schema does not change.
+- The geo labels are separate from the fraud-review network signals in §8.4, which have their own shorter retention and stricter access.
 
 ### 9.7 Scaling path
 

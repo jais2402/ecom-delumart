@@ -316,6 +316,22 @@ A staff-only back office for running the mart, organised the way established com
 | Analytics | Player funnel, creator liquidity, mint/sink, delivery mix, coupon usage, payment-method mix |
 | Settings | Staff roles, kill switches, feature flags, audit log, policy pages |
 
+### R7.1 Usage by place
+
+The Console's Analytics area shows where DeluluMart is being used.
+
+- **Views:** a table and map by country, state/region and city, for a chosen period: visitors, sign-ups, active accounts, completed player orders, fictional sales value, payment-method mix, delivery-speed mix, and visitor-to-buyer conversion. Trend per place and top places by growth.
+- **How place is known:** the approximate location of the network connection (country, region, city), read by the hosting edge at the moment of each request. It is an estimate: it is wrong for VPN users and often resolves to a nearby larger city.
+- **What is not used:** device GPS or browser location permission, the saved delivery address, and the phone number. The country code of the phone is reported separately as "registered country" and never combined into a finer location.
+- **Privacy rules:**
+  - The connection address itself is not stored for analytics; only the resulting country, region and city labels are.
+  - Reports are aggregates. No screen shows where a particular player is or has been, and place is not shown on any account, order or seller view.
+  - Any place with fewer than 10 distinct accounts in the period is folded into "Other" at that level, so a small town cannot single someone out.
+  - Place labels follow the same 90-day raw-event retention as other analytics (§7.7); daily aggregates are kept.
+  - The privacy notice states that approximate location is derived from the connection for usage statistics.
+- **Audience:** staff with the analytics permission only. Merchants do not see buyer locations in this release; a region breakdown for merchants, under the same minimum-count rule, is a later option.
+- **Honesty:** show "Unknown" for requests with no resolvable place and state coverage, rather than distributing them across known places (same principle as §7.15 missing data).
+
 Rules:
 - Every change is attributed, reasoned and audit-logged. Economy-affecting settings (fees, delivery fees, membership price, platform coupon budgets, thresholds) create a new configuration version, apply only to future orders, and are announced in-app (§7.5). Orders keep the version they were placed under.
 - Anything that can mint currency needs a second staff approver.
@@ -354,6 +370,7 @@ Fulfilment is automatic in this release: merchants watch the timeline but do not
 | §7.5 limits | 100 completed purchases/day counts cart lines. Adds coupon-attempt and authentication-attempt limits. |
 | §7.13 "no SMS, email OTP or additional PIN"; "Do not fabricate OTP messages"; "deliberately nonnumeric alias … no real card-number" | Cards get a 16-digit game number derived with the player's birthdate and a six-digit Delulu PIN (R4.7); net banking gets an in-app code step (R4.4). The number is built so it cannot be a valid real card. The prohibition on real-world messages and real credentials is kept (R4.5). |
 | §7.2 J1, US-01, §7.5 "one account per human is not fully provable" | A verified phone number with country code is required in addition to email; one account per phone and per email (R3.1). This is a much stronger duplicate barrier, though still not proof of one human. |
+| §7.7 "no location data"; §7.10 "never log … full IP" | Approximate, connection-derived country/region/city is recorded on analytics events for aggregate usage-by-place reports (R7.1). Still no precise or device location, and the connection address is still not stored in analytics. |
 | §1.1, §7.9 User `age_attested_at` | Date of birth is collected once at onboarding for card issuance and the adult check (R4.7). |
 | §7.13 checkout types | Adds `MEMBERSHIP_PURCHASE`. `PRODUCT_PURCHASE` now covers an order group of one or more seller orders. |
 | §7.14 qualifying revenue | Defined on buyer-paid item amounts (R6.6). |
@@ -392,7 +409,7 @@ Unchanged and still binding: fictional, non-redeemable currency; one starting gr
 
 New stable error codes: `CART_CHANGED`, `COUPON_INVALID`, `COUPON_NOT_APPLICABLE`, `DELIVERY_UNAVAILABLE`, `METHOD_UNAVAILABLE`, `METHOD_LIMIT_EXCEEDED`, `CHALLENGE_FAILED`, `CHALLENGE_EXPIRED`, `CHALLENGE_LOCKED`, `PIN_NOT_SET`, `PIN_INCORRECT`, `PIN_LOCKED`, `PIN_WEAK`, `UNDERAGE`, `PHONE_REQUIRED`, `PHONE_INVALID`, `PHONE_IN_USE`, `PHONE_CODE_FAILED`, `MEMBERSHIP_ACTIVE`, `REFERENCE_PRICE_INELIGIBLE`.
 
-**New events:** `cart_updated`, `coupon_applied / coupon_rejected / coupon_redeemed`, `payment_method_selected`, `payment_challenge_issued / passed / failed`, `shipment_created / shipment_stage_changed / shipment_delivered`, `membership_purchased / membership_expired`, `sale_price_set`, `console_config_changed`. Purchase events gain discount, delivery-fee and speed fields. Delivery fees and membership are reported as sinks, never as sales.
+**New events:** `cart_updated`, `coupon_applied / coupon_rejected / coupon_redeemed`, `payment_method_selected`, `payment_challenge_issued / passed / failed`, `shipment_created / shipment_stage_changed / shipment_delivered`, `membership_purchased / membership_expired`, `sale_price_set`, `console_config_changed`. Purchase events gain discount, delivery-fee and speed fields. Every event envelope gains `geo_country`, `geo_region`, `geo_city` (approximate, nullable). Delivery fees and membership are reported as sinks, never as sales.
 
 ---
 
@@ -402,6 +419,7 @@ New stable error codes: `CART_CHANGED`, `COUPON_INVALID`, `COUPON_NOT_APPLICABLE
 - **US-34 · Account truth:** every seller order in Orders maps to one successful payment in Payments and to statement rows whose sum equals the amount paid. A failed attempt appears in Payments with a reason and nowhere in the statement.
 - **US-35 · Payment methods:** each enabled method completes a purchase with the same ledger result. A disabled method cannot be used by calling the API directly. Exceeding a method limit declines with no debit.
 - **US-49 · One account per phone and email:** a second account cannot be created with an already-verified phone number, or with an email that differs only by case, dots or a "+tag" from an existing Gmail address. Two simultaneous sign-ups with the same number produce one account. No grant, bank account or card exists until both email and phone are verified. "Already in use" is revealed only after the code is confirmed. Deleting an account and signing up again with the same phone or email within the retention period gives a working account and no second starting grant. The phone number appears in no seller view, analytics event, log or partner export.
+- **US-50 · Usage by place:** the Console shows sign-ups, active accounts and orders by country, region and city for a period, and the totals across places (including "Other" and "Unknown") equal the overall totals for the same filters. A city with nine accounts is not listed by name. No analytics table or log holds a connection address. No screen or API returns a location for an individual account. A user without the analytics permission cannot open the report.
 - **US-47 · Card number:** a new card has a unique 16-digit number with the fixed prefix that fails the standard card checksum. The same player and card always show the same number; a replacement card shows a different one. Given only a card number, the birthdate cannot be derived; given only a birthdate, the number cannot be predicted. The number alone cannot authorise a payment.
 - **US-48 · Delulu PIN:** a card payment without a PIN set returns `PIN_NOT_SET` and a link to set one. `123456`, `111111` and the player's birthdate digits are rejected. A correct PIN pays once; three wrong PINs fail the payment with no debit; five lock card payments for 15 minutes while other methods still work. Changing needs the current PIN; reset needs a fresh sign-in. The PIN appears in no log, event, export or staff screen.
 - **US-36 · Authentication step (net banking):** a correct code proceeds to payment; three wrong codes fail the attempt with no debit; an expired code cannot be used; a code cannot be reused or used on another attempt. No code is ever sent outside the app.
@@ -450,6 +468,7 @@ The console's moderation queue and kill switches are needed from phase 1; the re
 | Card number | 16 digits from a keyed one-way function of birthdate, account and card sequence; unused prefix; always checksum-invalid | User requirement (birthdate-based algorithm); construction proposed; engineering/security |
 | Card PIN | Six digits, owner-chosen, managed in the account hub, with reuse and weak-PIN safeguards | User requirement; length and safeguards proposed; security |
 | Date of birth | Collected once, encrypted, owner-only; doubles as the adult check | Follows from the card requirement; privacy/legal |
+| Usage-by-place analytics | Approximate connection-derived country/region/city; aggregates only; minimum 10 accounts per named place; staff only | User requirement; method and privacy rules proposed; analytics/privacy |
 | Phone number | Required, with country code, verified by SMS code; one account per phone and per email | User requirement; verification and reassignment rules proposed; engineering/privacy |
 | SMS provider | Needed for phone verification; small real cost per sign-up and, for Indian numbers, sender registration | Open; engineering. Until chosen, numbers are unverified claims |
 | Countries accepted | India (+91) at launch, others switchable | Proposed; product/legal (ties to launch jurisdictions, §8.4) |
