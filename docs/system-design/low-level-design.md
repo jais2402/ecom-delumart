@@ -4,6 +4,14 @@ Companion to `high-level-design.md`. This document is the build reference: conve
 
 SQL is PostgreSQL. TypeScript signatures are illustrative of shape, not final code.
 
+> **Where this document and the code differ, the code wins.** The SQL below was written before any of it had been run. The executed, tested schema is `packages/db/migrations/`. Building and reviewing it changed several things recorded here:
+> - Tables are created in dependency order, with grants after all tables.
+> - Row-level security is on every table, and policies treat an unset user id as "no rows".
+> - Money commands run under a separate database role (`app_pay`); the ordinary web role cannot write ledger, order, ownership, stock-counter or payment-state tables.
+> - The ledger has structural rules beyond zero-sum: postings only in the journal's own transaction, at least two postings, per-event rules on which accounts may be debited, wallets equal to their postings at commit, a fixed starter-grant amount.
+> - The pay transaction rebuilds coupon, delivery and price facts from locked rows instead of trusting the stored quote.
+> - Reconciliation query 2 uses a left join so wallets with no postings are checked.
+
 ---
 
 ## 1. Conventions
