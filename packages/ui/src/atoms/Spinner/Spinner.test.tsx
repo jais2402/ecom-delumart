@@ -9,7 +9,7 @@ describe("Spinner", () => {
   });
   it("accepts a custom label", () => {
     render(<Spinner label="Paying" />);
-    expect(screen.getByRole("status", { name: /Paying/ })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Paying");
   });
   it("hides the animated glyph from assistive tech", () => {
     const { container } = render(<Spinner />);

@@ -57,7 +57,9 @@ export function Button({
       aria-busy={loading || undefined}
       {...props}
     >
-      {loading ? <Loader2 aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" /> : null}
+      {loading ? (
+        <Loader2 aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" />
+      ) : null}
       {children}
     </button>
   );

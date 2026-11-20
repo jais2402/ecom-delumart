@@ -11,7 +11,10 @@ export function Radio({ label, className, ...props }: RadioProps) {
     <label className="inline-flex min-h-touch items-center gap-2 font-body text-base text-fg">
       <input
         type="radio"
-        className={cn("size-5 shrink-0 accent-action disabled:cursor-not-allowed disabled:opacity-50", className)}
+        className={cn(
+          "size-5 shrink-0 accent-action disabled:cursor-not-allowed disabled:opacity-50",
+          className,
+        )}
         {...props}
       />
       {label}

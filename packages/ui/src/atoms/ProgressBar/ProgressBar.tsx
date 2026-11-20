@@ -21,7 +21,10 @@ export function ProgressBar({ value, max = 100, label, className, ...props }: Pr
       className={cn("h-2 w-full overflow-hidden rounded-pill bg-surface-raised", className)}
       {...props}
     >
-      <div className="h-full rounded-pill bg-action transition-[width] duration-base" style={{ width: `${percent}%` }} />
+      <div
+        className="h-full rounded-pill bg-action transition-[width] duration-base"
+        style={{ width: `${percent}%` }}
+      />
     </div>
   );
 }

@@ -2,7 +2,12 @@ import type { ComponentPropsWithRef } from "react";
 import { cn } from "../../lib/cn";
 
 export type TextSize = "xs" | "sm" | "base" | "lg";
-const sizeClasses: Record<TextSize, string> = { xs: "text-xs", sm: "text-sm", base: "text-base", lg: "text-lg" };
+const sizeClasses: Record<TextSize, string> = {
+  xs: "text-xs",
+  sm: "text-sm",
+  base: "text-base",
+  lg: "text-lg",
+};
 
 export type TextProps = ComponentPropsWithRef<"p"> & {
   size?: TextSize;
