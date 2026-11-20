@@ -1,0 +1,58 @@
+export interface FictionalPlace {
+  id: number;
+  name: string;
+}
+
+export const FICTIONAL_LOCALITIES: readonly FictionalPlace[] = [
+  { id: 1, name: "Cloud Nine Heights" },
+  { id: 2, name: "Monsoon Jar Lane" },
+  { id: 3, name: "Teacup Terrace" },
+  { id: 4, name: "Second Helping Colony" },
+  { id: 5, name: "Tuesday Lane" },
+  { id: 6, name: "Biscuit Tin Bazaar" },
+  { id: 7, name: "Velvet Rope Enclave" },
+  { id: 8, name: "Pigeon Parade Nagar" },
+  { id: 9, name: "Ceiling Fan Crescent" },
+  { id: 10, name: "Kite String Colony" },
+  { id: 11, name: "Lamppost Winks Layout" },
+  { id: 12, name: "Upside-Down Umbrella Road" },
+  { id: 13, name: "Sunday Afternoon Square" },
+  { id: 14, name: "Mango Mist Gardens" },
+  { id: 15, name: "Half-Remembered Street" },
+  { id: 16, name: "Hiccup Hill" },
+  { id: 17, name: "Bicycle Bell Bylane" },
+  { id: 18, name: "Starlight Stop" },
+  { id: 19, name: "Chai Steam Circle" },
+  { id: 20, name: "Train Window Walk" },
+  { id: 21, name: "Laddoo Peak Heights" },
+  { id: 22, name: "Pocket Comet Court" },
+  { id: 23, name: "Thali Ridge" },
+  { id: 24, name: "Lost Sock Quarters" },
+];
+
+export const FICTIONAL_LANDMARKS: readonly FictionalPlace[] = [
+  { id: 1, name: "opposite the Clock That Runs Late" },
+  { id: 2, name: "behind the Lamppost That Winks" },
+  { id: 3, name: "next to the Tree That Gives Directions" },
+  { id: 4, name: "beside the Fountain Full of Umbrellas" },
+  { id: 5, name: "under the Bridge Made of Biscuits" },
+  { id: 6, name: "across from the Pigeon Post Office" },
+  { id: 7, name: "at the Roundabout That Goes Backwards" },
+  { id: 8, name: "near the Lighthouse in a Flowerpot" },
+  { id: 9, name: "past the Gate Nobody Remembers Building" },
+  { id: 10, name: "beside the Bench That Faces the Sunset" },
+  { id: 11, name: "above the Bakery on the Moon" },
+  { id: 12, name: "inside the Hall of Mirrors That Shows Tomorrow" },
+  { id: 13, name: "opposite the Shop That Sells Yesterday" },
+  { id: 14, name: "next to the Puddle That Reflects Clouds" },
+  { id: 15, name: "by the Staircase to Nowhere in Particular" },
+  { id: 16, name: "beside the Clock Tower With Two Minute Hands" },
+  { id: 17, name: "at the Sleepy Dragon Bus Stop" },
+  { id: 18, name: "near the Kite Shop With No Kites" },
+  { id: 19, name: "behind the Wall Covered in Doorbells" },
+  { id: 20, name: "under the Balloon That Never Lands" },
+  { id: 21, name: "beside the Railway Platform That Only Runs on Sundays" },
+  { id: 22, name: "opposite the Teashop That Serves Silence" },
+  { id: 23, name: "next to the Giant Teapot Water Tower" },
+  { id: 24, name: "past the Honest Signpost at the Crossroads" },
+];
