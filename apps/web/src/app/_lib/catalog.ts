@@ -2,18 +2,14 @@ import { rupees } from "@delulu/core";
 import type { ProductGridItem } from "@delulu/ui";
 import { CATEGORIES, type CategorySlug, SEED_PRODUCTS, type SeedProduct } from "../../data/seed-catalog";
 
-/** Pretend shop that sells each category's products. */
-const STORE_BY_CATEGORY: Record<CategorySlug, string> = {
-  "impossible-tech": "Cloud Nine Gadgetry",
-  "absurd-luxury": "Velvet Rope & Co",
-  "everyday-magic": "Teacup Terrace Supplies",
-  "imaginary-experiences": "Train Window Tours",
-  "food-fantasies": "Biscuit Tin Bazaar",
-  "cosmic-collectibles": "Pocket Comet Court",
-};
+/**
+ * Platform seed products are always labelled as DeluluMart Originals.
+ * They must never appear to come from an independent creator (PRD US-02).
+ */
+export const SEED_STORE_NAME = "DeluluMart Originals";
 
-export function storeNameOf(product: SeedProduct): string {
-  return STORE_BY_CATEGORY[product.category];
+export function storeNameOf(_product: SeedProduct): string {
+  return SEED_STORE_NAME;
 }
 
 export function categoryName(slug: CategorySlug): string {

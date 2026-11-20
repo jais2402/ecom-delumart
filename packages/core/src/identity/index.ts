@@ -115,5 +115,6 @@ export function isAdult(birthdate: string, today: string, adultAge = ADULT_AGE_Y
 }
 
 export function assertAdult(birthdate: string, today: string, adultAge = ADULT_AGE_YEARS): void {
-  if (!isAdult(birthdate, today, adultAge)) throw new DomainError("UNDERAGE", `players must be ${adultAge} or older`, { adultAge });
+  if (!isAdult(birthdate, today, adultAge))
+    throw new DomainError("UNDERAGE", `players must be ${adultAge} or older`, { adultAge });
 }

@@ -99,7 +99,14 @@ describe("normalizePhone (US-49)", () => {
   it("defaults to India (+91) only: 10 digits starting 6–9", () => {
     expect(normalizePhone("+91 98765 43210")).toBe("+919876543210");
     expect(normalizePhone("+916000000001")).toBe("+916000000001");
-    for (const v of ["+911234", "+9100000", "+910000000000", "+915876543210", "+14155550123", "+9198765432101"]) {
+    for (const v of [
+      "+911234",
+      "+9100000",
+      "+910000000000",
+      "+915876543210",
+      "+14155550123",
+      "+9198765432101",
+    ]) {
       expect(
         codeOf(() => normalizePhone(v)),
         v,

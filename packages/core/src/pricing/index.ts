@@ -29,6 +29,9 @@ export type PricingConfig = {
   deliveryFeePaise: Readonly<Record<Speed, Paise>>;
   /** Marketplace fee percent on the price after seller discount (whole percent). */
   feePercent: number;
+  /** Smallest and largest whole percent a PERCENT coupon may give. */
+  couponPercentMin: number;
+  couponPercentMax: number;
 };
 
 export const DEFAULT_PRICING_CONFIG: PricingConfig = {
@@ -38,6 +41,8 @@ export const DEFAULT_PRICING_CONFIG: PricingConfig = {
     ZAP: 50_000n * PAISE_PER_RUPEE,
   },
   feePercent: 5,
+  couponPercentMin: 1,
+  couponPercentMax: 90,
 };
 
 export type Quote = {
@@ -128,15 +133,30 @@ function validateConfig(cfg: PricingConfig): void {
   if (!Number.isInteger(cfg.feePercent) || cfg.feePercent < 0 || cfg.feePercent > 100) {
     throw new DomainError("VALIDATION_FAILED", "feePercent must be a whole percent 0–100");
   }
+  if (
+    !Number.isInteger(cfg.couponPercentMin) ||
+    !Number.isInteger(cfg.couponPercentMax) ||
+    cfg.couponPercentMin < 1 ||
+    cfg.couponPercentMax > 100 ||
+    cfg.couponPercentMin > cfg.couponPercentMax
+  ) {
+    throw new DomainError("VALIDATION_FAILED", "coupon percent range must be whole percents within 1–100");
+  }
   for (const fee of Object.values(cfg.deliveryFeePaise)) {
     if (fee < 0n) throw new DomainError("VALIDATION_FAILED", "delivery fees must be non-negative");
   }
 }
 
-function validateCoupon(c: Coupon): void {
+function validateCoupon(c: Coupon, cfg: PricingConfig): void {
   const d = c.discount;
-  if (d.kind === "PERCENT" && (!Number.isInteger(d.percent) || d.percent < 1 || d.percent > 90)) {
-    throw new DomainError("COUPON_INVALID", "percent coupon must be a whole percent 1–90");
+  if (
+    d.kind === "PERCENT" &&
+    (!Number.isInteger(d.percent) || d.percent < cfg.couponPercentMin || d.percent > cfg.couponPercentMax)
+  ) {
+    throw new DomainError(
+      "COUPON_INVALID",
+      `percent coupon must be a whole percent ${cfg.couponPercentMin}–${cfg.couponPercentMax}`,
+    );
   }
   if (d.kind === "FLAT" && d.amountPaise <= 0n) {
     throw new DomainError("COUPON_INVALID", "flat coupon amount must be positive");
@@ -145,17 +165,32 @@ function validateCoupon(c: Coupon): void {
 
 /**
  * Discount per eligible line on `bases`, capped so `base − discount ≥ ₹100` (MIN_PRICE_PAISE).
- * Returns one entry per base (in the same order).
+ * A PERCENT discount is per line. A FLAT amount is split in proportion to the bases; any share above a
+ * line's room is re-split (again by base) across lines that still have room, until the whole amount is
+ * given or every line is at ₹100. Returns one entry per base (in the same order).
  */
 function discountsOn(discount: CouponDiscount, bases: readonly bigint[]): bigint[] {
-  const raw =
-    discount.kind === "PERCENT"
-      ? bases.map((b) => (b * BigInt(discount.percent)) / 100n)
-      : allocateProportionally(discount.amountPaise, bases);
-  return raw.map((r, i) => {
-    const room = (bases[i] ?? 0n) - MIN_PRICE_PAISE;
-    return min(r, room > 0n ? room : 0n);
-  });
+  const rooms = bases.map((b) => (b > MIN_PRICE_PAISE ? b - MIN_PRICE_PAISE : 0n));
+  if (discount.kind === "PERCENT") {
+    return bases.map((b, i) => min((b * BigInt(discount.percent)) / 100n, rooms[i] ?? 0n));
+  }
+  const given = bases.map(() => 0n);
+  let remaining = discount.amountPaise;
+  // Each pass either gives all of `remaining` or fills at least one line, so it ends within n passes.
+  while (remaining > 0n) {
+    const open = bases.map((_, i) => i).filter((i) => (given[i] ?? 0n) < (rooms[i] ?? 0n));
+    if (open.length === 0) break;
+    const shares = allocateProportionally(
+      remaining,
+      open.map((i) => bases[i] ?? 0n),
+    );
+    open.forEach((i, k) => {
+      const take = min(shares[k] ?? 0n, (rooms[i] ?? 0n) - (given[i] ?? 0n));
+      given[i] = (given[i] ?? 0n) + take;
+      remaining -= take;
+    });
+  }
+  return given;
 }
 
 function deliveryFee(speed: Speed, isMember: boolean, cfg: PricingConfig): Paise {
@@ -180,7 +215,12 @@ export function price(q: Quote): Priced {
   // 1–2. Coupon discounts.
   const coupon = q.coupon;
   if (coupon) {
-    validateCoupon(coupon);
+    validateCoupon(coupon, q.cfg);
+    if (coupon.scope === "MERCHANT" && coupon.companyId === SEED_SELLER) {
+      throw new DomainError("COUPON_NOT_APPLICABLE", "merchant coupons cannot apply to seed stock", {
+        reason: "SEED_LINES",
+      });
+    }
     const eligible = lines
       .map((l, i) => ({ l, i }))
       .filter(({ l }) => (coupon.scope === "MERCHANT" ? l.sellerId === coupon.companyId : true));

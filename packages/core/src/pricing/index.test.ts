@@ -223,7 +223,9 @@ describe("pricing rules", () => {
         ]),
       }),
     );
-    expect(priced.lines.map((l) => l.platformDisc)).toEqual([0n, rupees(50n), rupees(950n)]);
+    // pass 1 by list price: [975, 1463, 97562] paise; line 1 has no room, so its 975 is re-split
+    // across the other two by list price: [14, 961].
+    expect(priced.lines.map((l) => l.platformDisc)).toEqual([0n, 1_477n, 98_523n]);
     expect(priced.mint).toBe(rupees(1_000n));
   });
 
@@ -386,7 +388,9 @@ const lineArb: fc.Arbitrary<LineIn> = fc.record({
 
 const discountArb = fc.oneof(
   fc.integer({ min: 1, max: 90 }).map((percent): CouponDiscount => ({ kind: "PERCENT", percent })),
-  fc.bigInt({ min: 1n, max: MAX_PRICE_PAISE }).map((amountPaise): CouponDiscount => ({ kind: "FLAT", amountPaise })),
+  fc
+    .bigInt({ min: 1n, max: MAX_PRICE_PAISE })
+    .map((amountPaise): CouponDiscount => ({ kind: "FLAT", amountPaise })),
 );
 
 /**
@@ -503,9 +507,10 @@ describe("pricing properties", () => {
           );
           const eligible = lines.filter((l) => scope === "PLATFORM" || l.sellerId === companyId);
           const headroom = eligible.reduce((a, l) => a + (l.listPaise - MIN_PRICE_PAISE), 0n);
-          const expected = amountPaise < headroom ? amountPaise : headroom;
           const given = priced.lines.reduce((a, l) => a + l.sellerDisc + l.platformDisc, 0n);
-          expect(given).toBe(expected);
+          // bigint: min(coupon value, headroom)
+          if (amountPaise <= headroom) expect(given).toBe(amountPaise);
+          else expect(given).toBe(headroom);
           for (const l of priced.lines) {
             expect(l.listPaise - l.sellerDisc - l.platformDisc).toBeGreaterThanOrEqual(MIN_PRICE_PAISE);
           }
