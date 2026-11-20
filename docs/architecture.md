@@ -320,7 +320,7 @@ Recommendation: the managed auth service bundled with the free database (Supabas
 **Phone and email uniqueness (R3.1).**
 
 - The phone number is parsed and normalised to E.164 with a standard phone-number library; the country code comes from a server-side allow-list.
-- Phone and birthdate are encrypted fields, so uniqueness cannot use the stored value. A separate column holds a keyed fingerprint, `HMAC-SHA-256(identity_key, e164)`, with a unique index. The same technique gives a unique fingerprint of the normalised email. The key is in the secret manager, so a stolen database does not let anyone test whether a given number is registered.
+- The phone number lives in the sign-in service's own tables (encrypted at rest, not field-encrypted; see §8.8) and is not copied elsewhere. A separate column holds a keyed fingerprint, `HMAC-SHA-256(identity_key, e164)`, with a unique index. The same technique gives a unique fingerprint of the normalised email. The key is in the secret manager, so a stolen database does not let anyone test whether a given number is registered.
 - Verification uses the auth service's phone one-time-code flow through an SMS provider. Codes are short-lived, single use and attempt-limited. Sending is rate-limited per number, per account and per network, and gated by the bot challenge, because SMS endpoints are a classic target for abuse that costs the operator money (SMS pumping). A daily SMS spend ceiling stops sending and alerts.
 - Uniqueness is checked and the fingerprint written in the same transaction that marks the phone verified; the unique index settles simultaneous sign-ups. The "already in use" answer is returned only on that verified path.
 - Number reassignment moves the fingerprint to the newly verified account and clears it on the old one in one transaction; sign-in never depends on the phone, so this cannot be used for account takeover.
@@ -354,7 +354,7 @@ A single policy layer in `core` is called by every command and query — web rou
 
 **Data protection**
 - TLS everywhere, including app-to-database; encryption at rest with managed keys for database, backups and buckets.
-- Data minimisation as specified in §7.7. No real payment data or precise or device location is ever collected; approximate connection-derived place is used only in aggregate analytics (§9.6). Revision 1.5 adds three personal fields, all owner-only and field-encrypted: a verified phone number for one-account-per-person (§8.2), the date of birth used for card issuance and the adult check (§15.4), and an optional delivery address (§15.5).
+- Data minimisation as specified in §7.7. No real payment data or precise or device location is ever collected; approximate connection-derived place is used only in aggregate analytics (§9.6). Revision 1.5 adds three owner-only personal fields: a verified phone number for one-account-per-person, held by the sign-in service (§8.2), and two field-encrypted ones, the date of birth used for card issuance and the adult check (§15.4) and an optional delivery address (§15.5).
 - Secrets live only in the secret manager, are distinct per environment and are rotated on a schedule and on any staff departure.
 - Retention jobs enforce the §7.7 schedule; logs and analytics are redacted at source (no email, token or full IP).
 
@@ -403,7 +403,7 @@ Security controls are spread across this document because each module has its ow
 | Bots and abuse that costs money | Mass sign-ups, scraping, SMS flooding | Bot challenge, layered rate limits, daily SMS ceiling, firewall rules (§8.2, §8.4) |
 | Overload | Flooding the site or one hot product | CDN-cached public pages, timeouts and per-product limits on payment, browse-only mode (§5.8, §14.2) |
 | Cache leaks | One user's page served to another | Public and private never share a response; logged-in routes are uncacheable, checked in the build (§5.8) |
-| Research data misuse | Using the research copy to identify players | Separate de-identified copy, separate role, consent filter (§17.2) |
+| Research data misuse | Using the research copy to identify players | Separate de-identified copy, separate role, opt-out filter (§17.2) |
 
 ### 8.8 Remaining weak points, most serious first
 
@@ -415,7 +415,8 @@ No design removes all risk. These are the known gaps in the current plan.
 4. **Code written largely with AI assistance.** Generated code can contain subtle permission or logic errors. The guarded-zone rules, database constraints and automated authorisation tests exist to catch them, but they only work if the tests are written and kept passing.
 5. **No independent penetration test** until there is budget (§8.6).
 6. **More personal data than the original PRD planned.** Phone, birthdate, optional address and approximate location raise the cost of any breach and the legal duties that follow one.
-7. **Third-party services.** Hosting, database, email, SMS and bot-protection providers can each fail or be breached; the exposure is limited by giving each only what it needs.
+7. **Research use without explicit consent.** By decision, players are not asked to consent separately; the notice and terms cover it. If a regulator or reviewer finds that insufficient, research datasets built so far could not lawfully be used. Mitigations: plain-language notice, opt-out, de-identification, and a one-line fallback ready (R15.2).
+8. **Third-party services.** Hosting, database, email, SMS and bot-protection providers can each fail or be breached; the exposure is limited by giving each only what it needs.
 
 ### 8.9 If a breach happens
 
@@ -889,12 +890,12 @@ Revision 1.5 (R15) makes research and experimentation an explicit purpose of the
 ### 17.2 Research data path
 
 ```
-production schemas ──(scheduled build job, consent filter)──▶ research schema (de-identified) ──(audited export)──▶ private bucket
+production schemas ──(scheduled build job, opt-out filter)──▶ research schema (de-identified) ──(audited export)──▶ private bucket
 ```
 
 - A separate `research` schema is rebuilt by a job from events, orders, payments, shipments, coupons, experiments and store statistics. Researchers get a `research_ro` database role with access to that schema only; it has no privileges on any other schema.
 - **De-identification happens in the build, not in the query.** Direct identifiers and free text are never copied. Account ids are replaced with `HMAC(research_key, account_id)`; the key is held in the secret manager, is unavailable to the research role, and can be rotated to cut all linkage for a new dataset release. Birthdate becomes an age band; place is reduced to country and region with the minimum-count rule.
-- **Consent filter.** The build includes only accounts whose current consent record allows research; withdrawal or deletion removes them from the next build. Past exports are immutable snapshots with their own retention date.
+- **Opt-out filter.** There is no consent record to check, because research use is covered by the notice and terms (R15.2). The build excludes accounts that have switched on the research opt-out and accounts that have been deleted; both drop out of the next build. Past exports are immutable snapshots with their own retention date. The filter is a single predicate, so if legal review later requires opt-in consent, only this predicate and the sign-up form change.
 - **NPC data** is built into separate, clearly named tables and is never unioned with player data (§5.6).
 - **Exports** are produced as files by an audited job and stored in the private bucket with expiry and an access log. For data beyond the free database's size limit, older de-identified events are archived as compressed files in object storage and removed from the database; analysis of archives is done offline.
 - **Re-identification risk** is treated as a threat: small-count suppression, coarse time and place where needed, no free text, and a rule that research outputs leaving the team are aggregates.
@@ -905,7 +906,7 @@ production schemas ──(scheduled build job, consent filter)──▶ research
 |---|---|
 | Research access becoming a back door to personal data | Separate schema and database role with no access elsewhere; build-time de-identification; researcher console role cannot open accounts |
 | Re-identifying players from the research dataset | Keyed, rotatable research ids; identifiers and free text never copied; age bands, region-level place, minimum counts |
-| Studying people without their knowledge | Disclosure at sign-up, recorded consent with notice version, opt-out that preserves play (R15.2) |
+| Studying people without their knowledge | Research and experiment use stated in the privacy notice and terms accepted at sign-up; opt-out in privacy settings; de-identified data only (R15.2). Residual legal risk: no explicit consent is collected, pending the privacy reviewer's confirmation. |
 | An experiment harming players or the economy | Never-allowed list enforced in code, guardrail auto-stop, versioned configuration, orders keep their terms |
 | Experiment state leaking between users through a shared cache | Variant in the cache key or in the private overlay only; never client-supplied |
 | Biased or misleading conclusions | Exposure-based analysis, default exclusions, sample sizes and uncertainty shown |
