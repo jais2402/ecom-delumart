@@ -1,6 +1,6 @@
 # DeluluMart — Architecture and Infrastructure Plan
 
-Source: DeluluMart PRD v1.4 (19 Oct 2026, build baseline) plus Revision 1.5 (`docs/prd-v1.5-revision.md`), which adds cart, payment methods, simulated delivery, coupons, the Commerce Console and portal additions. Section references (§) point at the PRD; "R" references point at Revision 1.5. The architecture for the 1.5 modules is in §15, and the approach to building with AI coding agents is in §16.
+Source: DeluluMart PRD v1.4 (19 Oct 2026, build baseline) plus Revision 1.5 (`docs/prd-v1.5-revision.md`), which adds cart, payment methods, simulated delivery, coupons, the Commerce Console and portal additions. Section references (§) point at the PRD; "R" references point at Revision 1.5. The architecture for the 1.5 modules is in §15, and the approach to building with AI coding agents is in §16. Research and experimentation (R15) is in §17.
 Scope change from the PRD: **V1 ships without AI-assisted creation ("Build with AI").** Creators write their own listing text and choose a template illustration. The PRD lists AI text/image as P0 (§7.1), so this needs a PRD revision; this plan already reflects it (§7).
 Status: proposal for kickoff. Items marked **Decision** need an owner's sign-off (collected in §13).
 
@@ -826,3 +826,52 @@ The design already limits the damage a wrong generated change can do: a mistake 
 | A different language or framework for the backend | — | Splits the codebase and the type system with no benefit at this scale. |
 
 App-builder and design-to-code tools remain a good way to prototype screens quickly; the output is then brought into the fast zone and held to the same checks.
+
+---
+
+## 17. Research and experimentation platform
+
+Revision 1.5 (R15) makes research and experimentation an explicit purpose of the system. This adds two capabilities, an experiment engine and a de-identified research data path, both built on parts that already exist: versioned configuration, the event pipeline and the Console.
+
+### 17.1 Experiment engine
+
+- **Definition.** `experiment` (owner, hypothesis, surface, audience rule, variants with weights, primary and guardrail metrics, schedule, status) and `experiment_variant` rows, managed from the Console and audit-logged like other configuration.
+- **Assignment.** Deterministic: `bucket = hash(experiment_salt, subject_id) mod 10000`, mapped to a variant by weight. The subject is the account id, or a first-party visitor id before sign-in that is merged into the account at sign-in so the variant does not flip. No assignment service or extra store is needed, and assignment works identically in web and job runner.
+- **Exposure.** The first time a subject actually encounters the experimental surface, an `experiment_exposed` event is written once (unique on experiment and subject). Analysis counts exposed subjects only.
+- **Variants are configuration, not code branches where money is involved.** A fee, delivery or membership variant is a row in `config_version`; the quote and the order snapshot that version (§5.2). The pricing function (§15.3) takes the version as an input, so there is exactly one code path and the ledger tests cover every variant.
+- **Presentation variants** are resolved on the server. Public cached pages must not vary per person (§5.8), so a page under experiment is either rendered per variant with the variant in the cache key (a small fixed number of cached copies) or has the experimental part loaded in the personal overlay. The variant is never taken from a client-supplied value.
+- **Guardrails.** A scheduled job evaluates guardrail metrics per running experiment; a breach sets the experiment to stopped, which the next request honours. Each experiment also has a manual stop in the Console. The global kill switches (§8.5) override everything.
+- **Exclusions** (staff, test, fraud-excluded, research opt-out) are applied in the analysis queries, and opt-outs are additionally never assigned to non-essential experiments.
+- **Limits enforced in code:** an experiment cannot target the security, moderation, authorisation or NPC-labelling paths; those modules do not read experiment state at all, and a boundary lint rule keeps it that way.
+
+### 17.2 Research data path
+
+```
+production schemas ──(scheduled build job, consent filter)──▶ research schema (de-identified) ──(audited export)──▶ private bucket
+```
+
+- A separate `research` schema is rebuilt by a job from events, orders, payments, shipments, coupons, experiments and store statistics. Researchers get a `research_ro` database role with access to that schema only; it has no privileges on any other schema.
+- **De-identification happens in the build, not in the query.** Direct identifiers and free text are never copied. Account ids are replaced with `HMAC(research_key, account_id)`; the key is held in the secret manager, is unavailable to the research role, and can be rotated to cut all linkage for a new dataset release. Birthdate becomes an age band; place is reduced to country and region with the minimum-count rule.
+- **Consent filter.** The build includes only accounts whose current consent record allows research; withdrawal or deletion removes them from the next build. Past exports are immutable snapshots with their own retention date.
+- **NPC data** is built into separate, clearly named tables and is never unioned with player data (§5.6).
+- **Exports** are produced as files by an audited job and stored in the private bucket with expiry and an access log. For data beyond the free database's size limit, older de-identified events are archived as compressed files in object storage and removed from the database; analysis of archives is done offline.
+- **Re-identification risk** is treated as a threat: small-count suppression, coarse time and place where needed, no free text, and a rule that research outputs leaving the team are aggregates.
+
+### 17.3 Security and privacy additions
+
+| Threat | Control |
+|---|---|
+| Research access becoming a back door to personal data | Separate schema and database role with no access elsewhere; build-time de-identification; researcher console role cannot open accounts |
+| Re-identifying players from the research dataset | Keyed, rotatable research ids; identifiers and free text never copied; age bands, region-level place, minimum counts |
+| Studying people without their knowledge | Disclosure at sign-up, recorded consent with notice version, opt-out that preserves play (R15.2) |
+| An experiment harming players or the economy | Never-allowed list enforced in code, guardrail auto-stop, versioned configuration, orders keep their terms |
+| Experiment state leaking between users through a shared cache | Variant in the cache key or in the private overlay only; never client-supplied |
+| Biased or misleading conclusions | Exposure-based analysis, default exclusions, sample sizes and uncertainty shown |
+
+### 17.4 Hosting note
+
+Research use changes one assumption in §9.1.1: the free web-hosting plan is for personal, non-commercial projects. If the research is carried out for or funded by an organisation, check whether that still qualifies, and budget for the paid plan if it does not.
+
+### 17.5 Verification additions
+
+Tests that: assignment is stable across sessions and devices and matches the configured weights within tolerance; exposure is recorded once; an order keeps its variant terms after the experiment stops; the research build contains no removed field (schema assertion) and no opted-out or deleted account; `research_ro` is denied on every non-research table; ledger reconciliation and the authorisation matrix pass with experiments active.

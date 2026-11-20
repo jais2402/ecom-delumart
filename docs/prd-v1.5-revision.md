@@ -371,6 +371,7 @@ Fulfilment is automatic in this release: merchants watch the timeline but do not
 | §7.13 "no SMS, email OTP or additional PIN"; "Do not fabricate OTP messages"; "deliberately nonnumeric alias … no real card-number" | Cards get a 16-digit game number derived with the player's birthdate and a six-digit Delulu PIN (R4.7); net banking gets an in-app code step (R4.4). The number is built so it cannot be a valid real card. The prohibition on real-world messages and real credentials is kept (R4.5). |
 | §7.2 J1, US-01, §7.5 "one account per human is not fully provable" | A verified phone number with country code is required in addition to email; one account per phone and per email (R3.1). This is a much stronger duplicate barrier, though still not proof of one human. |
 | §7.7 "no location data"; §7.10 "never log … full IP" | Approximate, connection-derived country/region/city is recorded on analytics events for aggregate usage-by-place reports (R7.1). Still no precise or device location, and the connection address is still not stored in analytics. |
+| §3.1, §7.10 (`experiment_id` in the event envelope), §7.7 retention | The product is explicitly also a research and experimentation platform: consent, experiment rules, a de-identified research dataset with longer retention, and Console tooling (R15). |
 | §1.1, §7.9 User `age_attested_at` | Date of birth is collected once at onboarding for card issuance and the adult check (R4.7). |
 | §7.13 checkout types | Adds `MEMBERSHIP_PURCHASE`. `PRODUCT_PURCHASE` now covers an order group of one or more seller orders. |
 | §7.14 qualifying revenue | Defined on buyer-paid item amounts (R6.6). |
@@ -468,6 +469,9 @@ The console's moderation queue and kill switches are needed from phase 1; the re
 | Card number | 16 digits from a keyed one-way function of birthdate, account and card sequence; unused prefix; always checksum-invalid | User requirement (birthdate-based algorithm); construction proposed; engineering/security |
 | Card PIN | Six digits, owner-chosen, managed in the account hub, with reuse and weak-PIN safeguards | User requirement; length and safeguards proposed; security |
 | Date of birth | Collected once, encrypted, owner-only; doubles as the adult check | Follows from the card requirement; privacy/legal |
+| Research purpose | Disclosed to players; explicit consent with opt-out that still allows play | User requirement (research use); consent model proposed; privacy/legal |
+| Experiment limits | Allowed and never-allowed lists in R15.3 | Proposed; product/safety |
+| Research dataset | De-identified, separate role, retained beyond 90 days | Proposed; privacy/analytics |
 | Usage-by-place analytics | Approximate connection-derived country/region/city; aggregates only; minimum 10 accounts per named place; staff only | User requirement; method and privacy rules proposed; analytics/privacy |
 | Phone number | Required, with country code, verified by SMS code; one account per phone and per email | User requirement; verification and reassignment rules proposed; engineering/privacy |
 | SMS provider | Needed for phone verification; small real cost per sign-up and, for Indian numbers, sender registration | Open; engineering. Until chosen, numbers are unverified claims |
@@ -479,6 +483,78 @@ The console's moderation queue and kill switches are needed from phase 1; the re
 | Cancellations and returns | None; staff reversal only | Carried from v1.4; product |
 | Coupons | One code per checkout; merchant coupons seller-funded; platform coupons MINT-funded with budget | User requirement; rules proposed; economy |
 | Back office | Commerce Console, role-separated | User requirement; scope proposed; product/engineering |
+
+---
+
+## R15. Research and experimentation
+
+### R15.1 Purpose
+
+Behind the player-facing game, DeluluMart serves as a research and experimentation platform: a realistic but consequence-free commerce environment in which to study how people shop, pay, choose delivery, respond to pricing and promotions, and run stores, and in which to trial product and engineering ideas. This section assumes that meaning of "research and experiment purpose". If the intent is narrower (an engineering sandbox only, with no study of player behaviour), R15.3 to R15.6 still describe the experiment tooling and R15.2 can be reduced accordingly.
+
+### R15.2 Transparency and consent
+
+Players are real people giving real personal data, so research use must be open, not hidden.
+
+- The landing page, sign-up and privacy notice state plainly that DeluluMart is also a research project and that activity is studied in de-identified form.
+- Sign-up records explicit consent to research use, with the notice version. Declining research use must still allow play; the account is then excluded from research datasets and from non-essential experiments.
+- A player can withdraw research consent at any time in Account → Privacy. Their data is excluded from datasets produced after that point.
+- Adults only, as already required (§1.1).
+- Publishing or sharing findings outside the team uses aggregates or de-identified data only, never anything that could identify a player.
+- The privacy reviewer confirms the consent wording and lawful basis before the first invite (§2).
+
+### R15.3 What may be experimented on
+
+| Allowed | Conditions |
+|---|---|
+| Page layout, navigation, copy, search and ranking presentation, onboarding order | Standard A/B assignment |
+| Checkout flow, payment-method order and presentation, delivery option presentation | Outcome integrity unchanged: same ledger result for the same purchase |
+| Delivery promises and fees, membership price and benefits, coupon mechanics | Variant is a versioned configuration; shown before payment; order keeps the variant it was placed under |
+| Economy parameters (fee rate, thresholds, relief) | New-cohort assignment only, never changed for an account mid-way; disclosed in the rules page as "rules may differ between cohorts" |
+| Back-office and portal tooling | Staff or merchant opt-in |
+| Engineering experiments (caching, query strategies, infrastructure) | No change to observable outcomes; kill switch |
+
+| Never, even as an experiment |
+|---|
+| Deceiving players about fictional money, simulated delivery, or NPC versus player activity (§1.1, §7.6) |
+| Fabricated scarcity, countdown pressure, shaming, random rewards, or other manipulative patterns excluded in §7.11 |
+| Randomly failing or delaying a player's payment or delivery to observe the reaction (test scenarios stay staff-only, R4.6) |
+| Weakening any security, privacy, moderation or accessibility control for a variant |
+| Different ledger integrity rules between variants |
+| Anything involving real money |
+
+### R15.4 Experiment framework
+
+- An experiment has an owner, hypothesis, variants, audience, primary metric, guardrail metrics (checkout success, ledger reconciliation, reports, opt-outs), start/stop dates and a status.
+- Assignment is per account (or per visitor before sign-in), stable for the experiment's life, and recorded when the player is first exposed.
+- Staff, test accounts, fraud-excluded accounts and research opt-outs are excluded from analysis by default.
+- A guardrail breach stops the experiment automatically and returns everyone to the control.
+- At most a small number of concurrent experiments touching the same surface, with conflicts declared.
+- Results show sample sizes, uncertainty and exclusions, and never claim a win from an underpowered test (same honesty standard as §4.1 and §7.15).
+- Every experiment, its changes and its outcome are kept as a permanent record.
+
+### R15.5 Research data
+
+- Researchers work from a **de-identified research dataset**, never from production tables.
+- Removed entirely: name, email, phone number, date of birth, delivery address, card number, handles, free-text content, connection address, internal ids.
+- Transformed: account id → a research-only random id that cannot be linked back without a key researchers do not hold; date of birth → age band; place → country and region only, with the minimum-count rule of R7.1; timestamps kept; amounts kept (they are fictional).
+- Included: events, orders, payments attempts and outcomes, delivery choices, coupon use, experiment assignments, store and listing statistics, NPC activity clearly labelled and in separate tables (§7.6).
+- Exports are created by an audited job, stored privately, and access-controlled by a research role distinct from support and administration.
+- The de-identified dataset may be retained beyond the 90-day raw analytics window for longitudinal study; the period is stated in the notice and confirmed by the privacy reviewer. Account deletion removes the person's rows from future dataset builds.
+
+### R15.6 Console additions
+
+- **Experiments:** create, schedule, monitor, stop; variant configuration; exposure and metric views; guardrail status; archive.
+- **Research data:** dataset builds, export history, access log, consent and opt-out counts.
+- New staff roles: experiment owner (create and run), researcher (read de-identified data only). Neither can see personal data or act on accounts.
+
+### R15.7 Acceptance criteria
+
+- **US-51 · Consent:** an account without research consent appears in no research dataset and in no experiment analysis; withdrawing consent removes it from subsequent builds; play is unaffected.
+- **US-52 · Stable, honest assignment:** a player sees the same variant on every device and session for the life of an experiment; exposure is recorded once; an order placed under a fee or delivery variant keeps that variant's terms after the experiment ends.
+- **US-53 · Integrity under experiment:** with any combination of active experiments, ledger reconciliation, NPC separation, and the authorisation matrix pass unchanged. A guardrail breach stops the experiment without a deploy.
+- **US-54 · De-identification:** the research dataset contains none of the removed fields; research ids differ from production ids and cannot be joined to them with researcher access; a region with fewer than 10 accounts is not named.
+- **US-55 · Separation of duties:** a researcher cannot open any account, order, address or console action; a support agent cannot export a research dataset.
 
 ---
 
