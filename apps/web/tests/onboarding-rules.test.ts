@@ -98,6 +98,36 @@ describe("onboarding and PIN rules through the API", () => {
     }
   });
 
+  it("US-01: a birthdate in the future or more than 120 years ago is VALIDATION_FAILED and nothing is stored", async () => {
+    const b = await signedIn();
+    await b.call(R.phone.POST, "POST", "/api/v1/onboarding/phone", { body: { phone: uniquePhone() } });
+    await b.call(R.phoneVerify.POST, "POST", "/api/v1/onboarding/phone/verify", { body: { code: "000000" } });
+    const [y, m, d] = todayIn().split("-").map(Number) as [number, number, number];
+    const iso = (date: Date) => date.toISOString().slice(0, 10);
+    const tomorrow = iso(new Date(Date.UTC(y, m - 1, d + 1)));
+    const nextYear = iso(new Date(Date.UTC(y + 1, m - 1, d)));
+    const tooOld = iso(new Date(Date.UTC(y - 120, m - 1, d - 1)));
+    for (const birthdate of [tomorrow, nextYear, "9999-12-31", tooOld, "1800-01-01", "0001-01-01"]) {
+      const res = await b.call(R.birthdate.POST, "POST", "/api/v1/onboarding/birthdate", {
+        body: { birthdate },
+      });
+      expect(res.status, birthdate).toBe(422);
+      expect(res.json.error?.code, birthdate).toBe("VALIDATION_FAILED");
+    }
+    const me = await b.call(R.me.GET, "GET", "/api/v1/me");
+    expect(me.json.onboarding?.hasBirthdate).toBe(false);
+    // the limits themselves: born today is a (recorded) minor; exactly 120 years ago is an adult
+    const born120 = iso(new Date(Date.UTC(y - 120, m - 1, d)));
+    const ok = await b.call(R.birthdate.POST, "POST", "/api/v1/onboarding/birthdate", {
+      body: { birthdate: born120 },
+    });
+    expect(ok.status).toBe(200);
+    const baby = await signedIn();
+    const minor = await onboard(baby, todayIn());
+    expect(minor.status).toBe(403);
+    expect(minor.json.error?.code).toBe("UNDERAGE");
+  });
+
   it("US-01: repeating the same birthdate is answered from the stored one", async () => {
     const b = await signedIn();
     expect((await onboard(b, "1991-03-03")).status).toBe(200);

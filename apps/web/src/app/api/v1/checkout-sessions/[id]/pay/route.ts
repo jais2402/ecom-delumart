@@ -3,6 +3,7 @@ import { cartIssues, PayFailure, pay } from "@delulu/db/runtime";
 import { z } from "zod";
 import { payPool, webPool } from "@/server/db";
 import { pathId, route } from "@/server/http";
+import { RATE_RULES } from "@/server/rate-limit";
 import { receiptView } from "@/server/views";
 
 /** Refusals caused by a line that can no longer be bought: the response names the cart's issues. */
@@ -15,7 +16,12 @@ const LINE_REFUSALS = new Set(["SOLD_OUT", "PRODUCT_UNAVAILABLE", "ALREADY_OWNED
  * `details.issues` lists the cart lines that can no longer be bought.
  */
 export const POST = route(
-  { auth: "session", body: z.strictObject({ attemptId: z.uuid() }), idempotencyKey: true },
+  {
+    auth: "session",
+    body: z.strictObject({ attemptId: z.uuid() }),
+    idempotencyKey: true,
+    rateLimits: [{ rule: RATE_RULES.payActor }],
+  },
   async ({ body, session, params, idempotencyKey }) => {
     try {
       const receipt = await pay(payPool(), {

@@ -8,9 +8,7 @@ import { loadCatalog } from "./_lib/catalog-server";
 
 export const metadata: Metadata = { title: "Buy things that don't exist" };
 
-/** Public page, rebuilt at most once a minute; it never contains anything about a signed-in person. */
-export const revalidate = 60;
-
+/** Public page; it never contains anything about a signed-in person (rendered per request for the CSP nonce). */
 export default async function HomePage() {
   const featured = featuredAcrossPrices(
     await loadCatalog(),

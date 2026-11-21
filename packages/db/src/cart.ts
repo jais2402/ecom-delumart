@@ -74,6 +74,11 @@ export interface CartPreviewSeller {
   deliveryFeePaise: bigint;
   /** What the buyer pays for this seller order. */
   totalPaise: bigint;
+  /**
+   * Every speed offered that can be priced, with the delivery fee the buyer would pay for this
+   * seller with it (the other sellers' speeds and the coupon unchanged), from the same pricing path.
+   */
+  speedOptions: { speed: Speed; deliveryFeePaise: bigint }[];
 }
 
 export interface CartPreview {
@@ -337,9 +342,28 @@ export async function cartWithPreview(pool: Pool, input: CartPreviewInput): Prom
         if ("ok" in pricing) {
           const priced = pricing.ok;
           const groups = sellersOf(purchasable);
+          const options = new Map<string, { speed: Speed; deliveryFeePaise: bigint }[]>();
+          for (const s of priced.perSeller) {
+            const list: { speed: Speed; deliveryFeePaise: bigint }[] = [];
+            for (const speed of speedsOffered(groups.get(s.sellerId)?.lines ?? [])) {
+              if (speed === s.speed) {
+                list.push({ speed, deliveryFeePaise: s.deliveryBuyer });
+                continue;
+              }
+              const inputs = resolved.inputs;
+              const alt = await priceInputs(c, {
+                ...inputs,
+                speedBySeller: { ...inputs.speedBySeller, [s.sellerId]: speed },
+              });
+              const mine = "ok" in alt ? alt.ok.perSeller.find((x) => x.sellerId === s.sellerId) : undefined;
+              if (mine) list.push({ speed, deliveryFeePaise: mine.deliveryBuyer });
+            }
+            options.set(s.sellerId, list);
+          }
           const sellers = priced.perSeller.map((s): CartPreviewSeller => {
             const g = groups.get(s.sellerId);
             return {
+              speedOptions: options.get(s.sellerId) ?? [],
               sellerKey: s.sellerId,
               sellerName: g?.name ?? "",
               speed: s.speed,

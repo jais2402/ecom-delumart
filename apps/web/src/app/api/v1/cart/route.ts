@@ -2,6 +2,7 @@ import { cartClear } from "@delulu/db/runtime";
 import { cartResponse } from "@/server/cart";
 import { webPool } from "@/server/db";
 import { route } from "@/server/http";
+import { RATE_RULES } from "@/server/rate-limit";
 
 /**
  * GET /api/v1/cart: the caller's cart grouped by seller, each line with its issue (if it can no
@@ -13,7 +14,10 @@ export const GET = route({ auth: "session" }, async ({ session }) => ({
 }));
 
 /** DELETE /api/v1/cart: empties the cart. */
-export const DELETE = route({ auth: "session" }, async ({ session }) => {
-  await cartClear(webPool(), { authSessionId: session.id });
-  return { json: await cartResponse(session.id) };
-});
+export const DELETE = route(
+  { auth: "session", rateLimits: [{ rule: RATE_RULES.cartWriteActor }] },
+  async ({ session }) => {
+    await cartClear(webPool(), { authSessionId: session.id });
+    return { json: await cartResponse(session.id) };
+  },
+);

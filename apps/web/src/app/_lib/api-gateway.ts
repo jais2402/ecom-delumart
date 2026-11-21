@@ -1,4 +1,4 @@
-import { api, type MeResponse, type WalletResponse } from "./api";
+import { api, type MeResponse, resetCsrf, type WalletResponse } from "./api";
 import { markDevProvider } from "./dev-mode";
 import type { OnboardingGateway } from "./onboarding-gateway";
 import { nextOnboardingPath, refreshSession } from "./session-store";
@@ -31,6 +31,7 @@ export function createApiGateway(): OnboardingGateway {
     },
     async requestEmailLink(email) {
       await api("/api/v1/auth/dev/sign-in", { method: "POST", body: { email } });
+      resetCsrf(); // the CSRF token is now bound to the new session
       await refreshSession();
     },
     async submitPhone(e164) {

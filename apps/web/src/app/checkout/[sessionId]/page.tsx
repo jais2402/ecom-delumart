@@ -3,6 +3,9 @@ import { CheckoutFlow } from "./CheckoutFlow";
 
 export const metadata: Metadata = { title: "Checkout", robots: { index: false } };
 
+/** Private: rendered per request and sent `Cache-Control: private, no-store` (src/proxy.ts). */
+export const dynamic = "force-dynamic";
+
 /** Private: the page is an empty client shell; everything personal is loaded in the browser. */
 export default async function CheckoutPage({ params }: { params: Promise<{ sessionId: string }> }) {
   const { sessionId } = await params;

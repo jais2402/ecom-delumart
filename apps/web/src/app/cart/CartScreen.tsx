@@ -40,8 +40,6 @@ import { nextOnboardingPath, useSession } from "../_lib/session-store";
 import { isSpeed, SPEED_COPY } from "../_lib/speeds";
 import { useProducts } from "../_lib/use-products";
 
-const ALTERNATIVES: readonly Speed[] = ["EXPRESS", "ZAP"];
-
 export function CartScreen() {
   const session = useSession();
   const cart = useCart();
@@ -181,7 +179,6 @@ function AccountCart() {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [speedError, setSpeedError] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
-  const [hints, setHints] = useState<Record<string, bigint>>({});
   const [status, setStatus] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
@@ -232,7 +229,7 @@ function AccountCart() {
       });
   }, [server, chosenKey, couponCode]);
 
-  // Fees of the speeds that are not selected: one preview per speed, asked once per set of lines.
+  // the cart's lines, for the checkout's idempotency key: one key per set of lines and options
   const sig = useMemo(
     () =>
       server
@@ -242,35 +239,6 @@ function AccountCart() {
         : "",
     [server],
   );
-  // biome-ignore lint/correctness/useExhaustiveDependencies: sig stands for the cart's lines
-  useEffect(() => {
-    setHints({});
-    const sellers = server?.preview?.sellers ?? [];
-    let cancelled = false;
-    for (const speed of ALTERNATIVES) {
-      const offering = sellers.filter((s) => s.speedsOffered.includes(speed));
-      if (offering.length === 0) continue;
-      api<PreviewResponse>("/api/v1/cart/preview", {
-        method: "POST",
-        body: { speedBySeller: Object.fromEntries(offering.map((s) => [s.sellerKey, speed])) },
-      })
-        .then((result) => {
-          if (cancelled) return;
-          setHints((h) => {
-            const next = { ...h };
-            for (const s of result.sellers)
-              next[`${s.sellerKey}:${s.speed}`] = parsePaise(s.deliveryFeePaise);
-            return next;
-          });
-        })
-        .catch(() => {
-          // the fee simply stays "shown once chosen"
-        });
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [sig]);
 
   if (cart.loadError && !server) {
     return (
@@ -289,8 +257,12 @@ function AccountCart() {
 
   const issueLines = server.groups.flatMap((g) => g.lines.filter((l) => l.issue !== null));
   const speeds = effectiveSpeeds(preview, chosen);
-  const fees: Record<string, bigint> = { ...hints };
-  for (const s of preview?.sellers ?? []) fees[`${s.sellerKey}:${s.speed}`] = parsePaise(s.deliveryFeePaise);
+  // every offered speed's fee comes with the preview (POST /cart/preview speedOptions)
+  const fees: Record<string, bigint> = {};
+  for (const s of preview?.sellers ?? []) {
+    for (const o of s.speedOptions ?? []) fees[`${s.sellerKey}:${o.speed}`] = parsePaise(o.deliveryFeePaise);
+    fees[`${s.sellerKey}:${s.speed}`] = parsePaise(s.deliveryFeePaise);
+  }
   const previewSellers = new Map((preview?.sellers ?? []).map((s) => [s.sellerKey, s]));
 
   const groups: CartSellerGroup[] = server.groups.map((g) => {

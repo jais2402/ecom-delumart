@@ -3,7 +3,7 @@ import { z } from "zod";
 import { pinMac } from "@/server/crypto";
 import { payPool } from "@/server/db";
 import { pathId, route } from "@/server/http";
-import { LIMITERS } from "@/server/rate-limit";
+import { RATE_RULES } from "@/server/rate-limit";
 
 /**
  * POST /api/v1/attempts/{id}/pin {pin}: the PIN step of a CARD payment. The database counts wrong
@@ -13,7 +13,7 @@ export const POST = route(
   {
     auth: "session",
     body: z.strictObject({ pin: z.string().regex(/^\d{6}$/) }),
-    rateLimit: { limiter: LIMITERS.pin, by: "session" },
+    rateLimits: [{ rule: RATE_RULES.pinActor }],
   },
   async ({ body, session, params }) => {
     await verifyCardPin(payPool(), {

@@ -4,6 +4,7 @@ import { couponCodeSchema, speedBySellerSchema } from "@/server/cart";
 import { SERVER_CONFIG } from "@/server/config";
 import { payPool } from "@/server/db";
 import { route } from "@/server/http";
+import { RATE_RULES } from "@/server/rate-limit";
 import { checkoutSessionView } from "@/server/views";
 
 const explicitLines = z.strictObject({
@@ -31,7 +32,15 @@ const body = z.union([explicitLines, fromCart]);
  * bought). Every amount comes from price() in @delulu/core and is re-derived by the database.
  */
 export const POST = route(
-  { auth: "session", body, idempotencyKey: true },
+  {
+    auth: "session",
+    body,
+    idempotencyKey: true,
+    rateLimits: [
+      { rule: RATE_RULES.checkoutActor },
+      { rule: RATE_RULES.couponActor, when: (b) => b.couponCode !== undefined },
+    ],
+  },
   async ({ body: b, session, idempotencyKey }) => {
     const coupon = b.couponCode === undefined ? {} : { couponCode: b.couponCode };
     const result =

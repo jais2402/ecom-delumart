@@ -5,7 +5,7 @@ import { pinMac } from "@/server/crypto";
 import { payPool } from "@/server/db";
 import { pathId, route } from "@/server/http";
 import { birthdateOf } from "@/server/identity";
-import { LIMITERS } from "@/server/rate-limit";
+import { RATE_RULES } from "@/server/rate-limit";
 
 /**
  * POST /api/v1/cards/{id}/pin {pin, currentPin?}: sets the first PIN or changes it (the current PIN
@@ -16,7 +16,7 @@ export const POST = route(
   {
     auth: "session",
     body: z.strictObject({ pin: z.string().max(16), currentPin: z.string().max(16).optional() }),
-    rateLimit: { limiter: LIMITERS.pin, by: "session" },
+    rateLimits: [{ rule: RATE_RULES.pinActor }],
   },
   async ({ body, session, params }) => {
     const cardId = pathId(params);

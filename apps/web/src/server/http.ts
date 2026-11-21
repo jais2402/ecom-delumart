@@ -3,17 +3,22 @@ import { timingSafeEqual } from "node:crypto";
 import { DomainError, type ErrorCode } from "@delulu/core";
 import { type SessionActor, sessionActor } from "@delulu/db/runtime";
 import { z } from "zod";
+import { clientAddress } from "./client-address";
 import { SERVER_CONFIG } from "./config";
+import { sessionCsrfToken } from "./crypto";
 import { webPool } from "./db";
 import { env } from "./env";
-import { type FixedWindowLimiter, limiterKey } from "./rate-limit";
+import { enforceRate, type RateRule } from "./rate-limit";
 import { cookieNames, readCookie, readSessionId } from "./session";
 
 /**
  * The route-handler wrapper (LLD §8.1, §8.3, §11.1). Every API route is `route(options, fn)`:
  *  1. state-changing methods need Origin === APP_ORIGIN and the double-submit CSRF token
- *     (cookie dm_csrf and header x-csrf-token);
- *  2. optional fixed-window rate limit by client IP (before auth) or by session (after auth);
+ *     (cookie dm_csrf and header x-csrf-token); for a signed-in request the token must also be
+ *     HMAC(server key, session id), so a token minted for one session fails for another (only the
+ *     sign-in route accepts a pre-session random token);
+ *  2. database rate limits (rate-limit.ts): per client address before authentication, per user
+ *     after it (each hit committed on its own before the business call);
  *  3. an Idempotency-Key header (UUID) where the route declares one;
  *  4. auth "session": a live sign-in session from the cookie, checked against the database, or
  *     401 AUTH_REQUIRED; "anonymous": no session needed; "public": the cookie is never read;
@@ -175,22 +180,11 @@ function checkCsrf(request: Request, appOrigin: string): void {
   }
 }
 
-/**
- * The client address for per-IP limits. x-forwarded-for is client-controlled unless a trusted
- * proxy overwrites it; production must take the address its edge sets (and keep counters in a
- * shared store, see rate-limit.ts).
- */
-export function clientIp(request: Request): string {
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return forwarded || request.headers.get("x-real-ip") || "unknown";
-}
-
-function enforce(limiter: FixedWindowLimiter, key: string): void {
-  const decision = limiter.hit(key);
-  if (!decision.allowed) {
-    throw new DomainError("RATE_LIMITED", "Too many tries. Wait a moment and try again.", {
-      retryAfterSeconds: Math.ceil(decision.retryAfterMs / 1000),
-    });
+/** A signed-in request's token must be the one bound to its session (constant-time compare). */
+function checkSessionCsrf(request: Request, sessionId: string): void {
+  const header = request.headers.get("x-csrf-token") ?? "";
+  if (!sameToken(header, sessionCsrfToken(sessionId))) {
+    throw new DomainError("FORBIDDEN", "Missing or invalid CSRF token. Fetch /api/v1/auth/csrf and retry.");
   }
 }
 
@@ -249,7 +243,15 @@ export interface RouteOptions<B, Q> {
   body?: z.ZodType<B>;
   query?: z.ZodType<Q>;
   idempotencyKey?: boolean;
-  rateLimit?: { limiter: FixedWindowLimiter; by: "ip" | "session" };
+  /** Database rate limits; an "actor" rule may apply only when `when(body)` holds. */
+  rateLimits?: readonly RouteRateLimit<B>[];
+  /** The sign-in route only: a pre-session (random) CSRF token is accepted. */
+  preSessionCsrf?: boolean;
+}
+
+export interface RouteRateLimit<B> {
+  rule: RateRule;
+  when?: (body: B) => boolean;
 }
 
 export type RouteHandler = (
@@ -267,11 +269,13 @@ export function route<B = Record<string, never>, Q = Record<string, never>>(
     const publicRoute = options.auth === "public";
     const errorCache = publicRoute ? "no-store" : PRIVATE_CACHE;
     try {
-      const { appOrigin } = env();
+      const { appOrigin, trustedProxyHops } = env();
       const unsafe = UNSAFE.has(request.method.toUpperCase());
       if (unsafe) checkCsrf(request, appOrigin);
-      if (options.rateLimit?.by === "ip")
-        enforce(options.rateLimit.limiter, limiterKey("ip", clientIp(request)));
+      const limits = options.rateLimits ?? [];
+      for (const { rule } of limits.filter((l) => l.rule.by === "address")) {
+        await enforceRate(rule, clientAddress(request, trustedProxyHops));
+      }
 
       const cookieSessionId = publicRoute ? null : readSessionId(request, appOrigin);
       let session: SessionContext | null = null;
@@ -280,9 +284,10 @@ export function route<B = Record<string, never>, Q = Record<string, never>>(
         const actor = await sessionActor(webPool(), { authSessionId: cookieSessionId });
         if (actor === null) throw new DomainError("AUTH_REQUIRED", "Sign in to continue.");
         session = { id: cookieSessionId, actor };
-        if (options.rateLimit?.by === "session") {
-          enforce(options.rateLimit.limiter, limiterKey("session", cookieSessionId));
-        }
+      }
+      if (unsafe && !options.preSessionCsrf) {
+        const bound = session?.id ?? (options.auth === "anonymous" ? cookieSessionId : null);
+        if (bound !== null) checkSessionCsrf(request, bound);
       }
 
       let idempotencyKey = "";
@@ -301,6 +306,12 @@ export function route<B = Record<string, never>, Q = Record<string, never>>(
         const parsed = (options.body ?? EMPTY).safeParse(await readJson(request));
         if (!parsed.success) throw validationError(parsed.error);
         body = parsed.data;
+      }
+      if (session !== null) {
+        for (const limit of limits.filter((l) => l.rule.by === "actor")) {
+          if (limit.when === undefined || limit.when(body as B))
+            await enforceRate(limit.rule, session.actor.userId);
+        }
       }
       const url = new URL(request.url);
       const parsedQuery = (options.query ?? z.object({})).safeParse(Object.fromEntries(url.searchParams));

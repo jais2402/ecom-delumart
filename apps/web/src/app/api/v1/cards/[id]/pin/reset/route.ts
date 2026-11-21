@@ -5,14 +5,14 @@ import { pinMac } from "@/server/crypto";
 import { payPool } from "@/server/db";
 import { pathId, route } from "@/server/http";
 import { birthdateOf } from "@/server/identity";
-import { LIMITERS } from "@/server/rate-limit";
+import { RATE_RULES } from "@/server/rate-limit";
 
 /** POST /api/v1/cards/{id}/pin/reset {pin}: a new PIN without the current one; needs a recent sign-in. */
 export const POST = route(
   {
     auth: "session",
     body: z.strictObject({ pin: z.string().max(16) }),
-    rateLimit: { limiter: LIMITERS.pin, by: "session" },
+    rateLimits: [{ rule: RATE_RULES.pinActor }],
   },
   async ({ body, session, params }) => {
     const cardId = pathId(params);

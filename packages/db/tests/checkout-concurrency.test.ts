@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import type { PayReceipt } from "../src/checkout";
+import { PayFailure, type PayReceipt } from "../src/checkout";
 import {
   CLEAN,
   CRORE,
@@ -198,5 +198,25 @@ describe("checkout concurrency (separate connections)", () => {
     const { codes } = await settle(plans.map(([buyer, co]) => payFor(pool, buyer, co)));
 
     expect(codes).toEqual(["ok", "ok", "ok", "ok"]);
+  });
+
+  it("US-14: fifth review — two pays with different keys for the same product by one buyer, in parallel (20 rounds): one order and one ALREADY_OWNED, never a raw unique violation", async () => {
+    for (let round = 0; round < 20; round++) {
+      const buyer = await user(pool);
+      const p = await product(pool, { mode: "UNLIMITED_SEED", pricePaise: 100n * RUPEE });
+      const first = await checkout(pool, buyer, [p], standard("SEED"));
+      const second = await checkout(pool, buyer, [p], standard("SEED"));
+      const results = await Promise.allSettled([payFor(pool, buyer, first), payFor(pool, buyer, second)]);
+      const codes = await Promise.all(
+        results.map((r) => codeOf(r.status === "fulfilled" ? Promise.resolve() : Promise.reject(r.reason))),
+      );
+      expect(codes.sort(), `round ${round}`).toEqual(["ALREADY_OWNED", "ok"]);
+      const loser = results.find((r) => r.status === "rejected");
+      expect(loser?.status === "rejected" && loser.reason instanceof PayFailure, `round ${round}`).toBe(true);
+      expect(
+        await count(pool, "SELECT count(*) AS n FROM core.ownership WHERE product_id = $1", [p.id]),
+        `round ${round}`,
+      ).toBe(1);
+    }
   });
 });

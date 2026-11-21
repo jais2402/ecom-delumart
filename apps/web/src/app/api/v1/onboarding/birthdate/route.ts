@@ -1,23 +1,24 @@
-import { DomainError, isAdult } from "@delulu/core";
+import { DomainError } from "@delulu/core";
 import { onboardingStatus, recordBirthdate } from "@delulu/db/runtime";
 import { z } from "zod";
 import { birthdateBinding, encryptField } from "@/server/crypto";
 import { payPool } from "@/server/db";
 import { route } from "@/server/http";
-import { birthdateOf, todayIn } from "@/server/identity";
+import { birthdateOf, checkBirthdate, todayIn } from "@/server/identity";
 import { onboardingView } from "@/server/views";
 
 /**
  * POST /api/v1/onboarding/birthdate {birthdate: "YYYY-MM-DD"}: the adult check runs here on the
  * plain date; only the AES-256-GCM ciphertext (bound to the user) reaches the database. A minor is
- * recorded and refused with UNDERAGE. Repeating the same date is answered from the stored one.
+ * recorded and refused with UNDERAGE; a future or absurdly old date is VALIDATION_FAILED. Repeating the same date is answered from the stored one.
  */
 export const POST = route(
   { auth: "session", body: z.strictObject({ birthdate: z.string().max(10) }) },
   async ({ body, session }) => {
     if (session.actor.profile === null)
       throw new DomainError("PHONE_REQUIRED", "Verify your phone number first.");
-    const adult = isAdult(body.birthdate, todayIn()); // VALIDATION_FAILED for a non-date
+    // VALIDATION_FAILED for a non-date, a future date or one over 120 years ago: nothing is stored
+    const adult = checkBirthdate(body.birthdate, todayIn());
     const authSessionId = session.id;
     if (session.actor.birthdateEnc !== null) {
       if (birthdateOf(session) !== body.birthdate) {

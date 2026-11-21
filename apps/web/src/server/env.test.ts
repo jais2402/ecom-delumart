@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseEnv } from "./env";
 
@@ -74,5 +76,89 @@ describe("server configuration", () => {
       valid({ NODE_ENV: "production", AUTH_PROVIDER: "supabase", DATABASE_URL_OWNER: "" }),
     );
     expect(empty.databaseUrlOwner).toBeNull();
+  });
+
+  describe("fifth security review: placeholder keys are refused in production", () => {
+    const production = (overrides: Record<string, string | undefined> = {}) =>
+      valid({
+        NODE_ENV: "production",
+        AUTH_PROVIDER: "supabase",
+        DATABASE_URL_OWNER: undefined,
+        ...overrides,
+      });
+
+    it("a complete production environment with random keys parses", () => {
+      expect(parseEnv(production()).nodeEnv).toBe("production");
+    });
+
+    it.each(["IDENTITY_KEY", "CARD_KEY", "PIN_PEPPER", "FIELD_KEY"])(
+      "%s made of one repeated byte is refused, never echoed",
+      (name) => {
+        for (const byte of ["00", "ff", "41", "a5"]) {
+          const value = byte.repeat(32);
+          let message = "";
+          try {
+            parseEnv(production({ [name]: value }));
+          } catch (error) {
+            message = (error as Error).message;
+          }
+          expect(message, byte).toContain(name);
+          expect(message).not.toContain(value);
+        }
+      },
+    );
+
+    it("the documented example values (apps/web/.env.example) are refused", () => {
+      const example = readFileSync(fileURLToPath(new URL("../../.env.example", import.meta.url)), "utf8");
+      const values: Record<string, string> = {};
+      for (const m of example.matchAll(
+        /^(IDENTITY_KEY|CARD_KEY|PIN_PEPPER|FIELD_KEY)=([0-9a-fA-F]{64})$/gm,
+      )) {
+        if (m[1] && m[2]) values[m[1]] = m[2];
+      }
+      expect(Object.keys(values).sort()).toEqual(["CARD_KEY", "FIELD_KEY", "IDENTITY_KEY", "PIN_PEPPER"]);
+      for (const [name, value] of Object.entries(values)) {
+        expect(() => parseEnv(production({ [name]: value })), name).toThrow(new RegExp(name));
+      }
+    });
+
+    it("two equal keys, keys shorter than 32 bytes, AUTH_PROVIDER=dev and an owner URL are refused", () => {
+      const shared = key();
+      expect(() => parseEnv(production({ IDENTITY_KEY: shared, PIN_PEPPER: shared }))).toThrow(/distinct/);
+      expect(() => parseEnv(production({ FIELD_KEY: randomBytes(31).toString("hex") }))).toThrow(/FIELD_KEY/);
+      expect(() => parseEnv(production({ AUTH_PROVIDER: "dev" }))).toThrow(/AUTH_PROVIDER/);
+      expect(() =>
+        parseEnv(production({ DATABASE_URL_OWNER: "postgres://migrator:pw@127.0.0.1:5432/delulu" })),
+      ).toThrow(/DATABASE_URL_OWNER/);
+    });
+
+    it("development still accepts the example values (local setup only)", () => {
+      expect(() => parseEnv(valid({ IDENTITY_KEY: "00".repeat(32) }))).not.toThrow();
+    });
+  });
+
+  describe("fifth security review: trusted proxy hops and test-only rate limit scaling", () => {
+    it("TRUSTED_PROXY_HOPS defaults to 0 and accepts small non-negative integers", () => {
+      expect(parseEnv(valid()).trustedProxyHops).toBe(0);
+      expect(parseEnv(valid({ TRUSTED_PROXY_HOPS: "2" })).trustedProxyHops).toBe(2);
+      for (const bad of ["-1", "1.5", "x", "100"]) {
+        expect(() => parseEnv(valid({ TRUSTED_PROXY_HOPS: bad })), bad).toThrow(/TRUSTED_PROXY_HOPS/);
+      }
+    });
+
+    it("RATE_LIMIT_MULTIPLIER is for tests and development only: refused in production", () => {
+      expect(parseEnv(valid()).rateLimitMultiplier).toBe(1);
+      expect(parseEnv(valid({ RATE_LIMIT_MULTIPLIER: "50" })).rateLimitMultiplier).toBe(50);
+      expect(() =>
+        parseEnv(
+          valid({
+            NODE_ENV: "production",
+            AUTH_PROVIDER: "supabase",
+            DATABASE_URL_OWNER: undefined,
+            RATE_LIMIT_MULTIPLIER: "50",
+          }),
+        ),
+      ).toThrow(/RATE_LIMIT_MULTIPLIER/);
+    });
   });
 });

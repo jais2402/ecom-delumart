@@ -13,6 +13,10 @@ const seller = (key: string, over: Partial<PreviewResponse["sellers"][number]> =
   platformDiscountPaise: "0",
   deliveryFeePaise: "0",
   totalPaise: "100000",
+  speedOptions: [
+    { speed: "STANDARD" as const, deliveryFeePaise: "0" },
+    { speed: "EXPRESS" as const, deliveryFeePaise: "20000" },
+  ],
   ...over,
 });
 const preview = (over: Partial<PreviewResponse> = {}): PreviewResponse => ({

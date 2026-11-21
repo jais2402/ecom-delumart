@@ -105,12 +105,13 @@ async function signInAndOnboard(page) {
       return r.json();
     };
     const token = (await (await fetch('/api/v1/auth/csrf', { credentials: 'same-origin' })).json()).csrfToken;
-    await post('/api/v1/auth/dev/sign-in', { email }, token);
-    await post('/api/v1/onboarding/phone', { phone }, token);
-    await post('/api/v1/onboarding/phone/verify', { code: '000000' }, token);
-    await post('/api/v1/onboarding/birthdate', { birthdate: '1995-06-15' }, token);
-    const created = await post('/api/v1/onboarding/provision', {}, token);
-    await post('/api/v1/cards/' + created.card.id + '/pin', { pin: '482915' }, token);
+    // signing in answers the CSRF token bound to the new session; later calls use that one
+    const session = (await post('/api/v1/auth/dev/sign-in', { email }, token)).csrfToken;
+    await post('/api/v1/onboarding/phone', { phone }, session);
+    await post('/api/v1/onboarding/phone/verify', { code: '000000' }, session);
+    await post('/api/v1/onboarding/birthdate', { birthdate: '1995-06-15' }, session);
+    const created = await post('/api/v1/onboarding/provision', {}, session);
+    await post('/api/v1/cards/' + created.card.id + '/pin', { pin: '482915' }, session);
   }, { email: `audit-${rand()}@example.com`, phone: `+91 9${String(Math.floor(Math.random() * 1e9)).padStart(9, '0')}` });
 }
 

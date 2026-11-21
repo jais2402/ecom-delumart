@@ -1,11 +1,17 @@
 # Build status
 
-What exists in the codebase, what has been verified, and what is not built. Updated 20 November 2026 after the first build session.
+What exists in the codebase, what has been verified, and what is not built. Updated 21 November 2026.
 
 ## How to check it yourself
 
+PostgreSQL 16 must be running locally and reachable as in `.env.example`.
+
 ```bash
 pnpm install
+```
+
+```bash
+pnpm dev:setup
 ```
 
 ```bash
@@ -16,48 +22,76 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm build
 pnpm dev
 ```
 
-Database tests need PostgreSQL 16 reachable at `DATABASE_URL` (see `.env.example`). Then open `http://localhost:3000` and `http://localhost:3000/design-system`.
+`pnpm dev:setup` migrates and seeds a local database and prints the lines for `apps/web/.env.local`. Run it again after `pnpm --filter @delulu/db test`. Then open `http://localhost:3000`. Sign-in in local development needs no email: enter any address; the phone code is `000000`.
+
+Browser journeys (with the dev server running):
+
+```bash
+node tests/e2e/journey.spec.mjs
+```
+
+```bash
+node tests/e2e/cart.spec.mjs
+```
+
+```bash
+node tests/a11y/audit.js
+```
+
+## What works end to end, locally
+
+A person can sign in, verify a phone number, enter a date of birth, receive ₹100 crore, set a card PIN, browse and search 60 products, add several to a cart (signed out or in), choose delivery per seller, pay by card with PIN or from bank balance, see a receipt and delivery timeline, and find the order, the statement entry and the item in their account. They can freeze the card, change the PIN and edit their profile.
 
 ## Built and verified
 
 | Area | What exists | Evidence |
 |---|---|---|
-| Workspace | pnpm monorepo: `apps/web`, `packages/ui`, `packages/core`, `packages/db`; Biome, Vitest, CI workflow | Lint, typecheck and build pass |
-| Design system (Daydream) | Tokens for light and dark; 24 atoms, 20 molecules, 17 organisms, 6 layout templates, atomic import direction | 209 component tests; scripted accessibility audit clean on five pages at two widths in both themes |
-| Storefront pages | Home, six category pages, 60 product pages, search, design-system showcase, on seed data | 71 pages build; rendered and looked at on desktop and phone |
-| Seed content | 60 imaginary products in six categories; 24 fictional localities and landmarks | Counts, unique ids and price range checked |
-| Domain logic (`core`) | Money formatting, pricing function, card numbers, PIN rules and attempt counters, identity normalisation and fingerprints, adult check, delivery schedule, creator/brand/collector rules, experiment assignment | 111 unit and property tests; independent review, findings fixed |
-| Database (`db`) | 17 migrations: roles, schemas, all core tables, ledger with zero-sum and append-only enforcement, row-level security on every table, per-role grants, structural money rules | 288 tests against PostgreSQL, including privilege, row-level-security and attack-replay suites |
-| Account provisioning | One transaction: profile, bank account, wallet, ₹100 crore starter grant, card; idempotent under concurrency; no repeat grant for a deleted identity | Concurrency tests (ten and twenty simultaneous calls) |
-| Checkout and payment | Quote, payment attempt, all-or-nothing pay for multi-seller carts with merchant coupons, stock units, ownership, shipments, creator unlock, idempotency, canonical lock order | Functional tests for the PRD examples; race tests (last unit, overspend, same key ×10, coupon cap); two rounds of independent security review with three rounds of fixes. **The third round of fixes has not itself been independently reviewed.** |
-| Engineering process | Standards, test catalogue, review mechanism, five project agents with explicit model tiers, agent instruction file | `docs/engineering-standards.md`, `CLAUDE.md`, `.claude/agents/` |
+| Design system (Daydream) | Tokens for light and dark; atoms, molecules, organisms and page layouts following atomic design | 251 component tests; scripted accessibility audit with 0 issues |
+| Domain logic (`core`) | Money formatting, the pricing function, card numbers, PIN rules, identity normalisation, adult check, delivery schedule, progression rules, experiment assignment | 111 unit and property tests |
+| Database (`db`) | 31 migrations. Ledger with zero-sum, append-only and sealing rules; row-level security on every table; application roles with no direct writes to money, order, stock or identity tables; all commands as owner-defined functions; acting user derived from a live sign-in session | 496 tests on PostgreSQL, including attack-replay suites from five review rounds |
+| Money path | Provisioning with the starter grant, checkout and all-or-nothing pay for multi-seller carts with merchant coupons, stock units, ownership, shipments, creator unlock, idempotency, per-actor limits | Race tests (last unit, overspend, same key ×10, coupon cap); reconciliation clean after review runs |
+| Card PIN | Set, change, reset and verify inside the database with per-attempt and per-card limits and lockout; the database never sees a PIN | PIN suite including parallel guesses |
+| Cart | Storage, add, remove, clear, sign-in merge, per-line status, priced preview sharing one pricing path with checkout | 50-random-cart preview-equals-checkout test; 30 concurrent adds never exceed 20 lines |
+| Web server | Typed configuration with server-only secrets, separate database pools per role, opaque session cookie, session-bound CSRF token and origin check, uniform error envelope, database-backed rate limits, content security policy with per-request nonce, private pages uncacheable | 240 web tests against PostgreSQL; production build checked for secrets in browser code |
+| Screens | Storefront, sign-in and onboarding, cart, checkout, order receipt and tracking, account (overview, orders, wallet, cards, collection, profile) | Two browser journeys (21 and 19 steps) at phone width |
+| Process | Standards, test catalogue, review mechanism, project agents with model tiers | `docs/engineering-standards.md`, `CLAUDE.md`, `.claude/agents/` |
+
+Total: 1,098 automated tests passing; lint, typecheck and production build clean.
+
+## Security review history
+
+Five independent adversarial reviews, each followed by a fix round with tests that replay the attacks.
+
+| Round | Outcome |
+|---|---|
+| 1 | Blockers: minting, seller-to-self transfers, forged quotes, direct order writes |
+| 2 | Blocker: self-declared company scope; stale-price purchases; relief re-dating |
+| 3 | Blocker: early-firing checks then extra rows; second grant via planted profile |
+| 4 | No blocker. Majors: lock-holding denial of service, coupon guessing, unbounded attempts, over-powerful jobs role |
+| 5 | No blocker. Majors: open redirect after sign-in, advisory-lock denial of service, no content security policy, rate-limit bypass |
+
+**The sixth fix round (after review 5) has not itself been independently reviewed.**
 
 ## Not built
 
-Nothing below exists yet. The order follows `docs/execution-plan.md`.
-
 | Area | Missing |
 |---|---|
-| Wiring | The web app is not connected to the database or to sign-in. Pages show seed data; "Add to cart" is disabled. There are no API routes. |
-| Identity | Sign-in (email link, Google), phone verification, birthdate capture, sessions, encrypted personal fields |
-| Payments | PIN and bank-code verification wired into the card and net-banking paths; DeluluPay ID and net-banking methods; platform coupons; company registration, warehouse and membership checkouts |
-| Shopping | Cart storage, addresses, tracking page, collection, saves, receipts, share cards, caching layer |
-| Selling | Unlock by passport, relief claim command, company registration, studio, publishing with stock allocation, moderation queue, reports, appeals |
-| Merchant portal | All of it |
-| Back office and analytics | All of it: Super Admin, dashboards, metric engine, place analytics, delayed actions |
-| Later phases | Brand teams, extra warehouses, collector UI, NPC sandbox, experiments, research dataset |
-| Operations | Job runner, outbox consumers, reconciliation job, backups, deployment, monitoring |
+| Real sign-in | The Supabase provider is a stub that throws. Local development uses a dev-only provider that refuses to load in production. Google sign-in, real email links and SMS verification are not connected. |
+| Deployment | Nothing is hosted. No job runner is scheduled, so the stuck-session watchdog, rate-counter purge, reconciliation and notifications do not run on their own. |
+| Selling | Unlock by passport, relief claim, company registration, studio, publishing, moderation queue, reports, appeals. No screen creates a shop or a coupon. |
+| Merchant portal, back office, analytics | All of it, including Super Admin and dashboards |
+| Payments | DeluluPay ID and net banking methods, platform coupons, membership, company and warehouse purchases, reversals |
+| Shopping extras | Saves, public shelf, share cards, real addresses (checkout uses no address yet), Express on seed products |
+| Later phases | Brand teams, extra warehouses, collector screens, NPC sandbox, experiments, research dataset |
 | Legal | Privacy notice, terms, research wording |
 
-Against the nine-phase plan, this session completed Phase 0 and the guarded core of Phases 1 and 2 (ledger, provisioning, pricing, pay), plus the design system and public storefront pages. It did not complete any phase end to end, because every phase needs sign-in and the web-to-database wiring.
+## Known limits
 
-## Known limits of what was built
-
-- **Acting-user trust (must be closed before any real user).** Every "who is acting" check in the database reads a setting the application supplies. With the payment credential stolen, an attacker could name any user as the actor and spend their balance, or provision invented users and collect starting grants. The planned fix needs sign-in: the database verifies a session token signed by the sign-in service (the web process holds only the public key), and profiles reference the sign-in service's user table. It is documented at the top of `packages/db/migrations/0011_grants.sql` and appears as three `todo` tests in every run.
-- **Trust boundary.** The web application holds both the ordinary and the payment database credentials. The role split stops injected queries from touching money tables; the structural rules bound what a stolen payment credential can do (no minting outside fixed grants, no underpricing, no redirecting proceeds), subject to the point above.
-- **Timeouts** set on database roles can be overridden by a session that holds the credential, so they limit accidents and casual abuse of locks, not a determined attacker.
-- **Card PIN.** The function that marks a card payment as authenticated trusts its caller; PIN verification is implemented as pure logic in `core` but not connected.
-- **Not database-enforced:** PIN checks, address ownership, cart line limits, the configured coupon percent range, and idempotency. Company registration, warehouse and membership payments are blocked entirely until their backing tables and checks are built.
-- **Design document drift.** The SQL in `system-design/low-level-design.md` predates the migrations; the migrations are the source of truth.
-- **Product art** is generated geometric illustration, a placeholder for real artwork.
-- **Not exercised:** load testing, end-to-end browser journeys through a live backend, a restore drill, and deployment. None of these is possible until the app is wired and hosted.
+- **Trust in the web server.** The database derives the acting user from a live session id, so a stolen database credential alone cannot act as another user. A fully compromised web server still sees the session ids of users active through it.
+- **Phone and age facts** are asserted by the web server until the real sign-in service confirms phone numbers itself.
+- **Public pages are rendered per request** since the content security policy was added, so they are no longer cached at the edge for 60 seconds; the public catalog API still is. Page-level caching needs revisiting before real traffic.
+- **Lock-holding denial of service** by someone with the payment database credential is bounded by a watchdog, not eliminated, and the watchdog needs scheduling in production.
+- **Role-level timeouts and the advisory-lock revoke** depend on the production database owner's privileges; the row locks and watchdog cover the case where they do not apply.
+- **Not exercised:** load testing, a restore drill, deployment, real Supabase, coupons and self-purchase through the web app, two-seller carts in the browser.
+- **Design document drift.** `system-design/low-level-design.md` predates much of the code; the migrations and tests are the source of truth.
+- **Product art** is generated illustration, a placeholder.

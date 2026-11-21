@@ -22,15 +22,31 @@ export const SERVER_CONFIG = {
   csrf: {
     tokenBytes: 32,
   },
+  /**
+   * Database fixed-window limits (LLD §11.2, migration 0031), each `limit` hits per `windowSeconds`
+   * per subject: the client address ("address", see client-address.ts) or the signed-in user
+   * ("actor"). Tests and local development may scale every limit with RATE_LIMIT_MULTIPLIER
+   * (refused in production); these defaults are the production values.
+   */
   rateLimit: {
-    /** Per client IP. */
-    devSignIn: { limit: 20, windowMs: 60_000 },
-    /** Per session: PIN set, change, reset and payment PIN entry. */
-    pin: { limit: 10, windowMs: 60_000 },
-    /** Per session: dev phone codes requested. */
-    phoneCode: { limit: 5, windowMs: 10 * 60_000 },
-    /** Entries kept before expired windows are swept. */
-    sweepAbove: 10_000,
+    /** Sign-in attempts per client address. */
+    signInAddress: { scope: "auth.sign_in.address", by: "address", limit: 20, windowSeconds: 60 },
+    /** Phone codes requested: per account (LLD: 5 / day / account) and per address. */
+    phoneCodeActor: { scope: "phone.code.actor", by: "actor", limit: 5, windowSeconds: 86_400 },
+    phoneCodeAddress: { scope: "phone.code.address", by: "address", limit: 30, windowSeconds: 3_600 },
+    /** Phone code verifications: per account and per address. */
+    phoneVerifyActor: { scope: "phone.verify.actor", by: "actor", limit: 10, windowSeconds: 3_600 },
+    phoneVerifyAddress: { scope: "phone.verify.address", by: "address", limit: 60, windowSeconds: 3_600 },
+    /** PIN set, change, reset and payment PIN entry per account (the database also counts per card). */
+    pinActor: { scope: "pin.actor", by: "actor", limit: 10, windowSeconds: 60 },
+    /** Coupon code previews and applications per account (LLD: 10 / hour / account). */
+    couponActor: { scope: "coupon.actor", by: "actor", limit: 10, windowSeconds: 3_600 },
+    /** Cart additions, removals, clears and merges per account. */
+    cartWriteActor: { scope: "cart.write.actor", by: "actor", limit: 60, windowSeconds: 60 },
+    /** Checkout sessions created per account (LLD: purchase attempts 10 / minute / account). */
+    checkoutActor: { scope: "checkout.create.actor", by: "actor", limit: 10, windowSeconds: 60 },
+    /** Pay calls per account (LLD: purchase attempts 10 / minute / account). */
+    payActor: { scope: "checkout.pay.actor", by: "actor", limit: 10, windowSeconds: 60 },
   },
   phone: {
     /** The only code the dev provider accepts (there is no SMS in development). */
@@ -41,6 +57,8 @@ export const SERVER_CONFIG = {
   identity: {
     /** "Today" for the adult check is the date in this zone. */
     timeZone: "Asia/Kolkata",
+    /** Birthdates more than this many years ago are refused as mistyped. */
+    maxAgeYears: 120,
   },
   card: {
     /** Six digits beginning with 0 (LLD §5.4). */

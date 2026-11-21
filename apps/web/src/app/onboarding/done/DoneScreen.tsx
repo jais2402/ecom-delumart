@@ -4,7 +4,7 @@ import { formatInrCompact } from "@delulu/core";
 import { Button, FictionLabel, Heading, Text, WelcomePanel } from "@delulu/ui";
 import { useEffect, useState } from "react";
 import { useGateway } from "../../_lib/gateway-context";
-import { getReturnTo } from "../../_lib/onboarding-flow";
+import { getReturnTo, safeReturnPath } from "../../_lib/onboarding-flow";
 import { useSession } from "../../_lib/session-store";
 import { useArrival } from "../../_lib/use-arrival";
 
@@ -40,7 +40,8 @@ export function DoneScreen() {
   if (!ready || session.status === "loading" || !cardChecked)
     return <p role="status">Loading your account…</p>;
   const balance = session.status === "signedIn" ? session.balancePaise : null;
-  const shopHref = getReturnTo() ?? "/";
+  const stored = getReturnTo();
+  const shopHref = stored === null ? "/" : safeReturnPath(stored, window.location.origin);
 
   if (cardNumber && balance !== null) {
     return (

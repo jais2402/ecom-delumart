@@ -86,6 +86,7 @@ export {
   SINK_ACCOUNT_ID,
   STARTER_GRANT_PAISE,
 } from "./provision";
+export { type RateHitInput, rateHit } from "./rate";
 export {
   SEED_PRODUCT_NAMESPACE,
   type SeedCategoryInput,

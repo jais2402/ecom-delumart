@@ -192,6 +192,10 @@ export function cartPreviewView(p: CartPreview) {
       platformDiscountPaise: paise(s.platformDiscountPaise),
       deliveryFeePaise: paise(s.deliveryFeePaise),
       totalPaise: paise(s.totalPaise),
+      speedOptions: s.speedOptions.map((o) => ({
+        speed: o.speed,
+        deliveryFeePaise: paise(o.deliveryFeePaise),
+      })),
     })),
     totalPaise: paise(p.totalPaise),
     balancePaise: p.balancePaise === null ? null : paise(p.balancePaise),

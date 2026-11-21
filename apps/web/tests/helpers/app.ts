@@ -11,7 +11,6 @@ import { createTestDatabase, type TestDatabase } from "../../../../packages/db/t
 import { CATEGORIES, SEED_PRODUCTS, type SeedProduct } from "../../src/data/seed-catalog";
 import { closePools } from "../../src/server/db";
 import { resetEnvCache } from "../../src/server/env";
-import { resetRateLimits } from "../../src/server/rate-limit";
 
 export const APP_ORIGIN = "https://app.delulu.test";
 export const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@127.0.0.1:5432/postgres";
@@ -81,6 +80,8 @@ export function setTestEnv(dbUrl: string, overrides: Record<string, string | und
     FIELD_KEY: randomBytes(32).toString("hex"),
     AUTH_PROVIDER: "dev",
     APP_ORIGIN,
+    TRUSTED_PROXY_HOPS: undefined,
+    RATE_LIMIT_MULTIPLIER: undefined,
     ...overrides,
   };
   for (const [k, v] of Object.entries(values)) {
@@ -97,16 +98,22 @@ async function closeDevAuth(): Promise<void> {
   await dev.closeDevAuth();
 }
 
-export async function startTestApp(): Promise<TestApp> {
+/**
+ * `env` overrides the server environment for this test file only, e.g. RATE_LIMIT_MULTIPLIER for a
+ * property test that makes more calls per minute than one real player may (the production limits
+ * themselves are never changed; the server refuses the multiplier in production).
+ */
+export async function startTestApp(
+  options: { env?: Record<string, string | undefined> } = {},
+): Promise<TestApp> {
   await ensureTestLogins();
   const db = await createTestDatabase();
   try {
     const seeds = cheapestSeedProducts();
     await seedCatalog(db.pool, seeds, CATEGORIES);
-    setTestEnv(db.url);
+    setTestEnv(db.url, options.env);
     await closePools();
     await closeDevAuth();
-    resetRateLimits();
     return {
       db,
       products: seeds.map((seed) => ({

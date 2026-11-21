@@ -31,7 +31,9 @@ let percentCoupon: string;
 const FLAT_MIN_SPEND_CODE = "BIGSPENDER";
 
 beforeAll(async () => {
-  app = await startTestApp();
+  // the property test below makes ~100 checkout and coupon calls per minute as one player: far
+  // beyond the per-account production limits, which other test files assert at their real values
+  app = await startTestApp({ env: { RATE_LIMIT_MULTIPLIER: "100" } });
   const pool = app.db.pool;
   s = await seller(pool);
   sellerProducts = [];
@@ -496,5 +498,28 @@ describe("US-33 cart checkout", () => {
     const zap = await preview(b, { speedBySeller: { SEED: "ZAP" } });
     const offered = arr(arr((await getCart(b)).json.preview?.sellers)[0]?.speedsOffered).map(str);
     expect(zap.status).toBe(offered.includes("ZAP") ? 200 : 422);
+  });
+
+  it("US-33 (fifth review): the preview names every offered speed's delivery fee, each equal to the fee when that speed is chosen", async () => {
+    const { b } = await player({ pin: false });
+    await addLine(b, str(seedIds()[0]));
+    await addLine(b, (sellerProducts[0] as ProductFixture).id); // offers Express
+    const res = await preview(b);
+    expect(res.status).toBe(200);
+    for (const seller of arr(res.json.sellers)) {
+      const options = arr(seller.speedOptions);
+      expect(options.map((o) => str(o.speed))).toEqual(arr(seller.speedsOffered).map(str));
+      for (const option of options) {
+        expect(str(option.deliveryFeePaise)).toMatch(/^\d+$/);
+        const chosen = await preview(b, { speedBySeller: { [str(seller.sellerKey)]: str(option.speed) } });
+        const mine = arr(chosen.json.sellers).find((x) => x.sellerKey === seller.sellerKey);
+        expect(str(mine?.deliveryFeePaise)).toBe(str(option.deliveryFeePaise));
+      }
+    }
+    const express = arr(res.json.sellers).find((x) => String(x.sellerKey) === s.companyId);
+    expect(arr(express?.speedOptions).map((o) => str(o.speed))).toEqual(["STANDARD", "EXPRESS"]);
+    // GET /cart carries them too
+    const cart = await getCart(b);
+    expect(arr(arr(cart.json.preview?.sellers)[1]?.speedOptions).length).toBe(2);
   });
 });

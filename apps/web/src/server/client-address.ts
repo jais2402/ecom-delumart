@@ -1,0 +1,70 @@
+import "./server-only";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+
+/**
+ * The client address for per-address rate limits (fifth security review).
+ *
+ * X-Forwarded-For is whatever the client sent unless a proxy we trust rewrote it, and Next.js only
+ * fills it from the socket when it is absent. So:
+ *  - TRUSTED_PROXY_HOPS = 0 (default): the header is ignored entirely. The address is the TCP peer,
+ *    stamped onto every incoming request by the server process itself (instrumentation.ts) in the
+ *    PEER_HEADER, together with a random per-process token a client cannot know; a request without
+ *    a valid stamp has the address "unknown" (one shared, strictly limited bucket).
+ *  - TRUSTED_PROXY_HOPS = n > 0: n proxies we run each append the address they saw, so the client is
+ *    the n-th entry from the right; anything to the left of it is client-supplied and ignored.
+ */
+export const PEER_HEADER = "x-delulu-peer";
+export const UNKNOWN_ADDRESS = "unknown";
+
+const STAMP_KEY = Symbol.for("delulu.peerStampToken");
+
+/** The per-process token of the peer stamp (created on first use, shared through globalThis). */
+export function peerStampToken(): string {
+  const holder = globalThis as unknown as Record<symbol, string | undefined>;
+  holder[STAMP_KEY] ??= randomBytes(24).toString("base64url");
+  return holder[STAMP_KEY];
+}
+
+/** The PEER_HEADER value for a socket's remote address (the server stamps it; tests imitate it). */
+export function peerStampValue(remoteAddress: string): string {
+  return `${peerStampToken()} ${remoteAddress}`;
+}
+
+const ADDRESS = /^[0-9A-Fa-f:.]{2,45}$/;
+
+function plausible(address: string | undefined): string | null {
+  if (address === undefined) return null;
+  const trimmed = address.trim();
+  return ADDRESS.test(trimmed) ? trimmed.toLowerCase() : null;
+}
+
+function stampedPeer(headers: Headers): string | null {
+  const value = headers.get(PEER_HEADER);
+  if (value === null) return null;
+  const space = value.indexOf(" ");
+  if (space < 0) return null;
+  const token = Buffer.from(value.slice(0, space));
+  const expected = Buffer.from(peerStampToken());
+  if (token.length !== expected.length || !timingSafeEqual(token, expected)) return null;
+  return plausible(value.slice(space + 1));
+}
+
+export function clientAddress(request: Request, trustedProxyHops: number): string {
+  const peer = stampedPeer(request.headers) ?? UNKNOWN_ADDRESS;
+  if (trustedProxyHops <= 0) return peer;
+  const hops = (request.headers.get("x-forwarded-for") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
+  if (hops.length < trustedProxyHops) return peer;
+  return plausible(hops[hops.length - trustedProxyHops]) ?? peer;
+}
+
+/** Mutable view of Node's IncomingMessage headers (node:http), without importing node:http types here. */
+type NodeHeaders = Record<string, string | string[] | undefined>;
+
+/** Called by the server for every incoming request: replaces any client-sent PEER_HEADER. */
+export function stampPeerHeader(headers: NodeHeaders, remoteAddress: string | undefined): void {
+  if (remoteAddress === undefined) delete headers[PEER_HEADER];
+  else headers[PEER_HEADER] = peerStampValue(remoteAddress);
+}

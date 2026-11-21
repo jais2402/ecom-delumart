@@ -6,7 +6,13 @@ import { useState } from "react";
 import { describeError } from "../../_lib/api";
 import { useDevProvider } from "../../_lib/dev-mode";
 import { useGateway } from "../../_lib/gateway-context";
-import { getReturnTo, messageOf, safeReturnPath, setReturnTo } from "../../_lib/onboarding-flow";
+import {
+  DEFAULT_RETURN_PATH,
+  getReturnTo,
+  messageOf,
+  safeReturnPath,
+  setReturnTo,
+} from "../../_lib/onboarding-flow";
 import { useArrival } from "../../_lib/use-arrival";
 
 export function SignInScreen({ devProvider = false }: { devProvider?: boolean }) {
@@ -24,11 +30,15 @@ export function SignInScreen({ devProvider = false }: { devProvider?: boolean })
     setError(null);
     try {
       // where to come back to, e.g. the product the person wanted to buy
-      const next = safeReturnPath(new URLSearchParams(window.location.search).get("next"));
-      if (next) setReturnTo(next);
+      const next = new URLSearchParams(window.location.search).get("next");
+      if (next !== null) setReturnTo(next, window.location.origin);
       await gateway.requestEmailLink(email);
       const path = await gateway.resolveStep();
-      router.push(path === "/account" ? (getReturnTo() ?? "/account") : path);
+      router.push(
+        path === "/account"
+          ? safeReturnPath(getReturnTo() ?? DEFAULT_RETURN_PATH, window.location.origin)
+          : path,
+      );
     } catch (err) {
       setError(describeError(err) || messageOf(err));
     } finally {

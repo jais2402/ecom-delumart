@@ -19,6 +19,31 @@ export interface Env {
   authProvider: "dev" | "supabase";
   /** Scheme, host and port only, e.g. "https://delulumart.example". */
   appOrigin: string;
+  /**
+   * Reverse proxies in front of the server that append to X-Forwarded-For. 0 (the default): the
+   * header is ignored and the client address is the connection's peer address.
+   */
+  trustedProxyHops: number;
+  /** Tests and local development only (refused in production): multiplies every rate limit. */
+  rateLimitMultiplier: number;
+}
+
+/**
+ * The example key values of apps/web/.env.example. They are public, so a server holding one has no
+ * secret at all; production refuses them (as it refuses any key that is one repeated byte).
+ */
+const EXAMPLE_KEYS: ReadonlySet<string> = new Set([
+  "0000000000000000000000000000000000000000000000000000000000000000",
+  "0000000000000000000000000000000000000000000000000000000000000001",
+  "0000000000000000000000000000000000000000000000000000000000000002",
+  "0000000000000000000000000000000000000000000000000000000000000003",
+]);
+
+const KEY_NAMES = ["IDENTITY_KEY", "CARD_KEY", "PIN_PEPPER", "FIELD_KEY"] as const;
+
+function placeholderKey(hex: string): boolean {
+  const lower = hex.toLowerCase();
+  return EXAMPLE_KEYS.has(lower) || lower === lower.slice(0, 2).repeat(lower.length / 2);
 }
 
 const hexKey = z
@@ -52,6 +77,15 @@ const schema = z.object({
   FIELD_KEY: hexKey,
   AUTH_PROVIDER: z.enum(["dev", "supabase"], { error: "must be 'dev' or 'supabase'" }),
   APP_ORIGIN: origin,
+  TRUSTED_PROXY_HOPS: z
+    .string()
+    .regex(/^\d{1,2}$/, { error: "must be a whole number from 0 to 10" })
+    .refine((v) => Number(v) <= 10, { error: "must be a whole number from 0 to 10" })
+    .optional(),
+  RATE_LIMIT_MULTIPLIER: z
+    .string()
+    .regex(/^[1-9]\d{0,3}$/, { error: "must be a whole number from 1 to 9999" })
+    .optional(),
 });
 
 function loginOf(url: string): string {
@@ -89,6 +123,18 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     if (production && v.DATABASE_URL_OWNER) {
       problems.push("DATABASE_URL_OWNER must not be set when NODE_ENV is production");
     }
+    if (production) {
+      for (const name of KEY_NAMES) {
+        if (placeholderKey(v[name])) {
+          problems.push(
+            `${name} is a placeholder (an example value or one repeated byte); generate a random key`,
+          );
+        }
+      }
+      if (v.RATE_LIMIT_MULTIPLIER !== undefined) {
+        problems.push("RATE_LIMIT_MULTIPLIER must not be set when NODE_ENV is production");
+      }
+    }
     if (problems.length === 0) {
       return {
         nodeEnv: v.NODE_ENV ?? "development",
@@ -101,6 +147,8 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
         fieldKey: Buffer.from(v.FIELD_KEY, "hex"),
         authProvider: v.AUTH_PROVIDER,
         appOrigin: v.APP_ORIGIN.replace(/\/$/, ""),
+        trustedProxyHops: Number(v.TRUSTED_PROXY_HOPS ?? "0"),
+        rateLimitMultiplier: Number(v.RATE_LIMIT_MULTIPLIER ?? "1"),
       };
     }
   }

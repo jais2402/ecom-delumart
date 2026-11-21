@@ -1,70 +1,45 @@
 import "./server-only";
-import { createHash } from "node:crypto";
+import { DomainError } from "@delulu/core";
+import { rateHit } from "@delulu/db/runtime";
 import { SERVER_CONFIG } from "./config";
+import { rateSubject } from "./crypto";
+import { webPool } from "./db";
+import { env } from "./env";
 
 /**
- * In-memory fixed-window counters for the dev sign-in and PIN routes.
- *
- * PRODUCTION NEEDS A SHARED STORE: this map lives in one server process, so several instances
- * (or a restart) each get a fresh budget. LLD §11.2 keeps these counters in Postgres; the database
- * also enforces the PIN attempt and lockout limits itself (migration 0025), which this does not
- * replace.
+ * Rate limits kept in the database (LLD §11.2; fifth security review): they survive restarts, are
+ * shared by every server instance and cannot be reset by signing in again. Each hit is committed
+ * in its own short transaction BEFORE the business call, so a call that then fails and rolls back
+ * still counts.
  */
-export interface RateLimit {
+export interface RateRule {
+  /** The counter's name in core.rate_counter. */
+  scope: string;
+  /** "address": the client address (before authentication); "actor": the signed-in user. */
+  by: "address" | "actor";
   limit: number;
-  windowMs: number;
+  windowSeconds: number;
 }
 
-export interface RateDecision {
-  allowed: boolean;
-  /** Time until the current window ends. */
-  retryAfterMs: number;
+export const RATE_RULES = SERVER_CONFIG.rateLimit satisfies Record<string, RateRule>;
+
+/** Seconds until the fixed window containing `nowMs` ends (the database aligns windows the same way). */
+export function retryAfterSeconds(windowSeconds: number, nowMs: number = Date.now()): number {
+  const windowMs = windowSeconds * 1000;
+  return Math.max(1, Math.ceil((windowMs - (nowMs % windowMs)) / 1000));
 }
 
-export class FixedWindowLimiter {
-  private readonly windows = new Map<string, { start: number; count: number }>();
-
-  constructor(
-    private readonly rule: RateLimit,
-    private readonly now: () => number = Date.now,
-    private readonly sweepAbove: number = SERVER_CONFIG.rateLimit.sweepAbove,
-  ) {}
-
-  get size(): number {
-    return this.windows.size;
+/** Counts one hit of `rule` for `value` (an address or a user id); RATE_LIMITED beyond the limit. */
+export async function enforceRate(rule: RateRule, value: string): Promise<void> {
+  const allowed = await rateHit(webPool(), "app_web", {
+    scope: rule.scope,
+    subject: rateSubject(rule.by, value),
+    windowSeconds: rule.windowSeconds,
+    maxHits: rule.limit * env().rateLimitMultiplier,
+  });
+  if (!allowed) {
+    throw new DomainError("RATE_LIMITED", "Too many tries. Wait a moment and try again.", {
+      retryAfterSeconds: retryAfterSeconds(rule.windowSeconds),
+    });
   }
-
-  hit(key: string): RateDecision {
-    const now = this.now();
-    if (this.windows.size > this.sweepAbove) this.sweep(now);
-    const start = now - (now % this.rule.windowMs);
-    const current = this.windows.get(key);
-    const window = current && current.start === start ? current : { start, count: 0 };
-    window.count += 1;
-    this.windows.set(key, window);
-    return { allowed: window.count <= this.rule.limit, retryAfterMs: start + this.rule.windowMs - now };
-  }
-
-  reset(): void {
-    this.windows.clear();
-  }
-
-  private sweep(now: number): void {
-    for (const [key, w] of this.windows) if (w.start + this.rule.windowMs <= now) this.windows.delete(key);
-  }
-}
-
-/** Keys are hashed so no session id is held as a map key in clear. */
-export function limiterKey(kind: string, value: string): string {
-  return `${kind}:${createHash("sha256").update(value).digest("base64url")}`;
-}
-
-export const LIMITERS = {
-  devSignIn: new FixedWindowLimiter(SERVER_CONFIG.rateLimit.devSignIn),
-  pin: new FixedWindowLimiter(SERVER_CONFIG.rateLimit.pin),
-  phoneCode: new FixedWindowLimiter(SERVER_CONFIG.rateLimit.phoneCode),
-} as const;
-
-export function resetRateLimits(): void {
-  for (const limiter of Object.values(LIMITERS)) limiter.reset();
 }

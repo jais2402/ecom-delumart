@@ -3,7 +3,8 @@
  * same-origin Origin header on state-changing requests (each can be left out or replaced to test
  * the guards).
  */
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
+import { PEER_HEADER, peerStampValue } from "../../src/server/client-address";
 import type { RouteHandler } from "../../src/server/http";
 import { APP_ORIGIN } from "./app";
 
@@ -21,6 +22,12 @@ export interface CallOptions {
   idempotencyKey?: boolean | string;
   /** false: send no cookies. */
   cookies?: boolean;
+}
+
+/** A documentation-range address (RFC 3849, 2001:db8::/32) for a new browser. */
+function testAddress(): string {
+  const group = () => randomInt(0x10000).toString(16);
+  return `2001:db8:${group()}:${group()}::${group()}`;
 }
 
 export interface CallResult {
@@ -54,6 +61,11 @@ export class Browser {
   csrfToken: string | null = null;
   /** Every response body this browser saw, for leak assertions. */
   readonly seen: string[] = [];
+  /**
+   * The TCP peer address the server sees for this browser. The test stamps it exactly as the
+   * server process does for a real connection (instrumentation.ts); null sends no stamp.
+   */
+  peer: string | null = testAddress();
 
   async call(
     handler: RouteHandler,
@@ -62,6 +74,7 @@ export class Browser {
     options: CallOptions = {},
   ): Promise<CallResult> {
     const headers = new Headers(options.headers);
+    if (this.peer !== null) headers.set(PEER_HEADER, peerStampValue(this.peer));
     if (options.cookies !== false && this.jar.size > 0) {
       headers.set("cookie", [...this.jar].map(([k, v]) => `${k}=${v}`).join("; "));
     }

@@ -515,6 +515,12 @@ async function priceForPay(c: PoolClient, sessionId: string): Promise<unknown> {
   }
 }
 
+/** The unique violation of core.ownership (user_id, product_id): a concurrent purchase won. */
+function isOwnershipRace(error: unknown): boolean {
+  const e = error as { code?: unknown; constraint?: unknown } | null;
+  return e?.code === "23505" && e.constraint === "ownership_user_id_product_id_key";
+}
+
 /**
  * LLD §5.2 pay transaction, through core.commit_purchase. Idempotent per (user, key); one
  * success per session. A validation failure leaves no business rows: the database records
@@ -525,7 +531,7 @@ export async function pay(pool: Pool, input: PayInput): Promise<PayReceipt> {
   requireUuid(input.sessionId, "sessionId");
   requireUuid(input.attemptId, "attemptId");
   const hash = requestHash(PAY, { sessionId: input.sessionId, attemptId: input.attemptId });
-  const outcome = await asPay(pool, input.authSessionId, async (c) => {
+  const purchase = asPay(pool, input.authSessionId, async (c) => {
     const order = await priceForPay(c, input.sessionId);
     const { rows } = await c.query<{ r: PayOutcome }>(
       "SELECT core.commit_purchase($1, $2, $3, $4, $5::jsonb) AS r",
@@ -541,6 +547,16 @@ export async function pay(pool: Pool, input: PayInput): Promise<PayReceipt> {
     if (!r) throw new Error("commit_purchase returned nothing");
     return r;
   });
+  let outcome: PayOutcome;
+  try {
+    outcome = await purchase;
+  } catch (error) {
+    // Two pays of one buyer (different keys, different sessions) for the same product can both pass
+    // the ownership check before either commits; the loser then meets the one-owner-per-product
+    // unique index. That is the same refusal as the check (fifth security review), not a fault.
+    if (isOwnershipRace(error)) throw new PayFailure("ALREADY_OWNED", "you already own this product");
+    throw error;
+  }
   if (outcome.status === "SUCCEEDED") return receiptOf(outcome.receipt, outcome.reversed);
   const failure = domainErrorOf(outcome.error);
   throw new PayFailure(failure.code, failure.message, {}, outcome.replayed);

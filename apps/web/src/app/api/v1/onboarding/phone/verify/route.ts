@@ -5,7 +5,7 @@ import { authProvider } from "@/server/auth";
 import { emailFingerprint, phoneFingerprint } from "@/server/crypto";
 import { payPool } from "@/server/db";
 import { route } from "@/server/http";
-import { LIMITERS } from "@/server/rate-limit";
+import { RATE_RULES } from "@/server/rate-limit";
 import { onboardingView } from "@/server/views";
 
 const MESSAGES = {
@@ -22,7 +22,7 @@ export const POST = route(
   {
     auth: "session",
     body: z.strictObject({ code: z.string().regex(/^\d{6}$/) }),
-    rateLimit: { limiter: LIMITERS.phoneCode, by: "session" },
+    rateLimits: [{ rule: RATE_RULES.phoneVerifyAddress }, { rule: RATE_RULES.phoneVerifyActor }],
   },
   async ({ body, session }) => {
     const provider = await authProvider();

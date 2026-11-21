@@ -2,10 +2,11 @@ import { DomainError } from "@delulu/core";
 import { z } from "zod";
 import { type AuthProvider, authProvider } from "@/server/auth";
 import { SERVER_CONFIG } from "@/server/config";
+import { sessionCsrfToken } from "@/server/crypto";
 import { env } from "@/server/env";
 import { route } from "@/server/http";
-import { LIMITERS } from "@/server/rate-limit";
-import { sessionCookie } from "@/server/session";
+import { RATE_RULES } from "@/server/rate-limit";
+import { csrfCookie, sessionCookie } from "@/server/session";
 
 /**
  * POST /api/v1/auth/dev/sign-in {email}: development only. NOT_FOUND unless AUTH_PROVIDER is 'dev'
@@ -15,7 +16,8 @@ export const POST = route(
   {
     auth: "anonymous",
     body: z.strictObject({ email: z.string().min(3).max(254) }),
-    rateLimit: { limiter: LIMITERS.devSignIn, by: "ip" },
+    rateLimits: [{ rule: RATE_RULES.signInAddress }],
+    preSessionCsrf: true,
   },
   async ({ body, cookieSessionId }) => {
     const { appOrigin, authProvider: kind } = env();
@@ -29,9 +31,14 @@ export const POST = route(
     await provider.beginSignIn(body.email);
     if (cookieSessionId !== null) await provider.signOut(cookieSessionId); // replace, never stack, sessions
     const { sessionId } = await provider.completeDevSignIn(body.email);
+    // the pre-session CSRF token is replaced by the one bound to the new session
+    const csrfToken = sessionCsrfToken(sessionId);
     return {
-      json: { signedIn: true },
-      setCookies: [sessionCookie(sessionId, appOrigin, SERVER_CONFIG.session.ttlSeconds)],
+      json: { signedIn: true, csrfToken },
+      setCookies: [
+        sessionCookie(sessionId, appOrigin, SERVER_CONFIG.session.ttlSeconds),
+        csrfCookie(csrfToken, appOrigin, SERVER_CONFIG.session.ttlSeconds),
+      ],
     };
   },
 );

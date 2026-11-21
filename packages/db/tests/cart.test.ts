@@ -570,4 +570,37 @@ describe("cart", () => {
       expect(preview.totalPaise).toBe(500n * RUPEE + STANDARD_DELIVERY);
     });
   });
+
+  describe("fifth review: the fee of every offered speed comes with the preview", () => {
+    it("US-33: each seller's speedOptions list every offered speed with the fee the preview gives when that speed is chosen", async () => {
+      await clear(a);
+      const express = await stocked({ express: true, rupees: 900n });
+      const plain = await stocked({ rupees: 800n });
+      const seeded = await seed(400n);
+      for (const p of [express, seeded]) await add(a, p);
+      const preview = await previewCart(pool, { authSessionId: a.authSessionId });
+      expect(preview.sellers.length).toBe(2);
+      for (const s of preview.sellers) {
+        expect(s.speedOptions.map((o) => o.speed)).toEqual(s.speedsOffered);
+        const current = s.speedOptions.find((o) => o.speed === s.speed);
+        expect(current?.deliveryFeePaise).toBe(s.deliveryFeePaise);
+        for (const option of s.speedOptions) {
+          const chosen = await previewCart(pool, {
+            authSessionId: a.authSessionId,
+            speedBySeller: { [s.sellerKey]: option.speed },
+          });
+          const mine = chosen.sellers.find((x) => x.sellerKey === s.sellerKey);
+          expect(mine?.deliveryFeePaise, `${s.sellerKey} ${option.speed}`).toBe(option.deliveryFeePaise);
+        }
+      }
+      expect(preview.sellers.find((x) => x.sellerKey === s.companyId)?.speedsOffered).toContain("EXPRESS");
+      // a seller whose lines do not all offer Express is offered Standard only
+      await add(a, plain);
+      const mixed = await previewCart(pool, { authSessionId: a.authSessionId });
+      expect(
+        mixed.sellers.find((x) => x.sellerKey === s.companyId)?.speedOptions.map((o) => o.speed),
+      ).toEqual(["STANDARD"]);
+      await clear(a);
+    });
+  });
 });

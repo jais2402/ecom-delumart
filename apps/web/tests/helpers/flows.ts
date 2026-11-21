@@ -73,6 +73,8 @@ export async function signedIn(email: string = uniqueEmail()): Promise<Browser> 
   b.csrfToken = str(token.json.csrfToken);
   const res = await b.call(R.devSignIn.POST, "POST", "/api/v1/auth/dev/sign-in", { body: { email } });
   expect(res.status).toBe(200);
+  // as the browser's api() does after signing in: the token is now the one bound to the session
+  b.csrfToken = str(res.json.csrfToken);
   return b;
 }
 

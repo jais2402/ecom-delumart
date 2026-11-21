@@ -316,6 +316,8 @@ export interface PreviewSeller {
   platformDiscountPaise: string;
   deliveryFeePaise: string;
   totalPaise: string;
+  /** Every offered speed with the delivery fee it would cost for this seller (same pricing path). */
+  speedOptions: { speed: Speed; deliveryFeePaise: string }[];
 }
 
 export interface PreviewResponse {

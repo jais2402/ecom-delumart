@@ -3,7 +3,7 @@ import { z } from "zod";
 import { authProvider } from "@/server/auth";
 import { env } from "@/server/env";
 import { route } from "@/server/http";
-import { LIMITERS } from "@/server/rate-limit";
+import { RATE_RULES } from "@/server/rate-limit";
 
 /**
  * POST /api/v1/onboarding/phone {phone}: validates the number (PHONE_INVALID) and asks the sign-in
@@ -14,7 +14,7 @@ export const POST = route(
   {
     auth: "session",
     body: z.strictObject({ phone: z.string().min(1).max(32) }),
-    rateLimit: { limiter: LIMITERS.phoneCode, by: "session" },
+    rateLimits: [{ rule: RATE_RULES.phoneCodeAddress }, { rule: RATE_RULES.phoneCodeActor }],
   },
   async ({ body, session }) => {
     const e164 = normalizePhone(body.phone);

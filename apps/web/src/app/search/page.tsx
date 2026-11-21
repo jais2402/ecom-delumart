@@ -6,9 +6,7 @@ import { SearchResults } from "./SearchResults";
 
 export const metadata: Metadata = { title: "Search" };
 
-/** Static and cacheable: the query is read in the browser, so the HTML is the same for everyone. */
-export const revalidate = 60;
-
+/** Public: the query is read in the browser, so the HTML is the same for everyone. */
 export default async function SearchPage() {
   const products = await loadCatalog();
   return (

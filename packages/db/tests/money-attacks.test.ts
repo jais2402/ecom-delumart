@@ -3094,6 +3094,8 @@ describe("money attacks (security review)", () => {
         "core.my_wallet()",
         "core.owns_products(uuid[])",
         "core.page_size(integer)",
+        // fifth review (0031): the database rate counter, hit by the server before a call
+        "core.rate_hit(text,bytea,integer,integer)",
         "core.reveal_card_number(uuid)",
         "core.set_coupon_status(uuid,text)",
         "core.update_profile(text,jsonb,boolean)",
@@ -3127,6 +3129,7 @@ describe("money attacks (security review)", () => {
         "core.onboarding_status()",
         "core.owns_products(uuid[])",
         "core.provision_account(bytea,bytea,text[],text,text)",
+        "core.rate_hit(text,bytea,integer,integer)",
         "core.record_birthdate(bytea,boolean)",
         "core.record_phone_verified(bytea,bytea)",
         "core.reset_card_pin(uuid,bytea)",
@@ -3138,6 +3141,7 @@ describe("money attacks (security review)", () => {
         "core.identity_is_tombstoned(bytea,bytea)",
         "core.is_published_version(uuid)",
         "core.purge_idempotency_records()",
+        "core.rate_purge(interval)", // fifth review (0031): expired rate counter windows
         "ops.terminate_stuck_money_sessions(interval)",
       ]);
       expect(by("npc_worker")).toEqual(["core.is_published_version(uuid)"]);

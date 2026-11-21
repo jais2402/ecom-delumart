@@ -4,6 +4,7 @@ import { cartResponse } from "@/server/cart";
 import { SERVER_CONFIG } from "@/server/config";
 import { webPool } from "@/server/db";
 import { route } from "@/server/http";
+import { RATE_RULES } from "@/server/rate-limit";
 import { cartMergeSkipView } from "@/server/views";
 
 /**
@@ -15,6 +16,7 @@ export const POST = route(
   {
     auth: "session",
     body: z.strictObject({ productIds: z.array(z.uuid()).max(SERVER_CONFIG.http.maxCartLines) }),
+    rateLimits: [{ rule: RATE_RULES.cartWriteActor }],
   },
   async ({ body, session }) => {
     const { skipped } = await cartMerge(webPool(), {
