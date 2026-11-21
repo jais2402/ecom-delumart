@@ -19,6 +19,7 @@ export function ShopShell({
       header={
         <SiteHeader
           balancePaise={STARTING_GRANT_PAISE}
+          accountHref="/sign-in"
           cartCount={0}
           onSearch={(query) => router.push(query ? `/search?q=${encodeURIComponent(query)}` : "/search")}
           {...(searchDefaultValue !== undefined ? { searchDefaultValue } : {})}
