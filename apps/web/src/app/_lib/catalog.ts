@@ -51,6 +51,7 @@ export function toGridItem(product: ProductResponse): ProductGridItem {
     hue: product.templateId,
     imageAlt: product.altText,
     pricePaise: parsePaise(product.pricePaise),
+    ...(product.referencePricePaise ? { referencePricePaise: parsePaise(product.referencePricePaise) } : {}),
     storeName: storeNameOf(product),
     zapEligible: product.zap,
     stock: stockStateOf(product),

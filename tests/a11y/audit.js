@@ -20,13 +20,23 @@ const pages = [
   { path: '/sell', signedIn: true, label: '/sell (signed in)' },
   { path: '/sell/passport', signedIn: true },
   { path: '/store/{handle}' },
+  { path: '/account/reports', signedIn: true },
+  { path: '/account/blocks', signedIn: true },
+  { path: '/p/{product}', signedIn: true, openDialog: 'Report this product', label: '/p/[id] report dialog' },
   // the Partner Portal and the Commerce Console: operator frames have no site footer
   { path: '/studio', as: 'owner', operator: true },
   { path: '/studio/new', as: 'owner', operator: true },
   { path: '/studio/{listing}', as: 'owner', operator: true, label: '/studio/[id] (published listing)' },
   { path: '/studio/{draft}', as: 'owner', operator: true, label: '/studio/[id] (draft)' },
   { path: '/studio/inventory', as: 'owner', operator: true },
+  { path: '/studio/overview', as: 'owner', operator: true },
+  { path: '/studio/orders', as: 'owner', operator: true },
+  { path: '/studio/earnings', as: 'owner', operator: true },
+  { path: '/studio/coupons', as: 'owner', operator: true },
+  { path: '/studio/appeals', as: 'owner', operator: true },
   { path: '/console/moderation', as: 'admin', operator: true },
+  { path: '/console/reports', as: 'admin', operator: true },
+  { path: '/console/reports', label: '/console/reports (not available)' },
   { path: '/console/moderation', label: '/console/moderation (not available)' },
 ];
 const sizes = [[1280, 900], [360, 800]];
@@ -242,6 +252,10 @@ async function addToServerCart(page, productId) {
         await page.getByRole('heading', { level: 1 }).first().waitFor();
         await page.waitForLoadState('networkidle');
         if (entry.cart) await page.waitForSelector('button[aria-label^="Remove "]');
+        if (entry.openDialog) {
+          await page.getByRole('button', { name: entry.openDialog }).click();
+          await page.getByRole('dialog').waitFor();
+        }
         const key = `${entry.label || p} ${w} ${scheme}`;
         const r = await page.evaluate(pageFn);
         const focus = [];

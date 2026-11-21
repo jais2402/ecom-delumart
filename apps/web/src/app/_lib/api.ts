@@ -196,6 +196,8 @@ export interface ProductResponse {
   stockBand?: "UNLIMITED" | "IN_STOCK" | "LOW" | "SOLD_OUT";
   /** Exclusive editions: how many are issued of the fixed supply. */
   edition?: { issued: number; supply: number } | null;
+  /** The usual price when the product is on sale; null or absent otherwise. Never invented. */
+  referencePricePaise?: string | null;
 }
 
 /** GET /products/:id: a product, or a bare marker for one that was published and is no longer. */

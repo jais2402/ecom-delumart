@@ -4,6 +4,7 @@ import { Alert, Badge, Button, FictionLabel, Heading, Price, StockBadge, Text } 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api, describeError, newIdempotencyKey, type ProductResponse } from "../_lib/api";
+import { useBlockedSellerKeys } from "../_lib/blocks-store";
 import { checkoutSellerId, isLow, leftCount, stockStateOf, storeNameOf } from "../_lib/catalog";
 import { saveCheckoutContext } from "../_lib/checkout-context";
 import { parsePaiseOrNull } from "../_lib/money";
@@ -31,6 +32,8 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
   const [error, setError] = useState<string | null>(null);
   const intentKey = useRef<string | null>(null);
   const signedIn = session.status === "signedIn";
+  const blockedKeys = useBlockedSellerKeys();
+  const shopBlocked = product.sellerKey !== undefined && blockedKeys.has(product.sellerKey);
 
   useEffect(() => {
     if (!signedIn) {
@@ -72,7 +75,7 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
   const owned = overlay?.owned.includes(product.id) ?? false;
   const balance = parsePaiseOrNull(overlay?.balancePaise);
   const sellerId = checkoutSellerId(product);
-  const unavailable = !product.available;
+  const unavailable = !product.available || shopBlocked;
 
   async function buyNow() {
     if (session.status !== "signedIn") {
@@ -151,6 +154,11 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
       </Text>
 
       {error ? <Alert tone="danger">{error}</Alert> : null}
+      {shopBlocked ? (
+        <Alert tone="info" title="You blocked this shop">
+          You cannot buy from it while it is blocked. Unblock it from the menu below to buy again.
+        </Alert>
+      ) : null}
       {sellerId === null && !ownListing ? (
         <Alert tone="warning">Buying from creator shops is not open from this page yet.</Alert>
       ) : null}
@@ -189,7 +197,7 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
           <AddToCartButton
             productId={product.id}
             name={product.name}
-            available={product.available}
+            available={!unavailable}
             owned={owned}
           />
           <div className="flex items-center gap-2">

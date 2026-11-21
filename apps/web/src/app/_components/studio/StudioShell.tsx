@@ -8,6 +8,15 @@ import { useApiGet } from "../../_lib/use-api";
 import { useRequireAccount } from "../../_lib/use-require-account";
 import { ErrorBlock, LoadingBlock } from "../LoadState";
 
+const SECTIONS = ["overview", "orders", "earnings", "inventory", "coupons", "appeals"] as const;
+
+/** The sidebar entry for a path; the listing editor (/studio/new, /studio/<id>) belongs to Products. */
+export function currentHref(pathname: string): string {
+  const segment = pathname.replace(/\/+$/, "").split("/")[2];
+  const section = SECTIONS.find((s) => s === segment);
+  return section ? `/studio/${section}` : "/studio/products";
+}
+
 const StudioContext = createContext<CompanyView | null>(null);
 
 /** The signed-in person's shop, available to every studio screen. */
@@ -32,14 +41,19 @@ export function StudioShell({ children }: { children: ReactNode }) {
     if (loaded.status === "ready" && loaded.data.company === null) router.replace("/sell");
   }, [loaded, router]);
 
-  const current = pathname.startsWith("/studio/inventory") ? "/studio/inventory" : "/studio";
+  const current = currentHref(pathname);
   const nav = (
     <SidebarNav
       label="Partner Portal"
       currentHref={current}
       items={[
-        { label: "Products", href: "/studio" },
+        { label: "Overview", href: "/studio/overview" },
+        { label: "Products", href: "/studio/products" },
+        { label: "Orders", href: "/studio/orders" },
+        { label: "Earnings", href: "/studio/earnings" },
         { label: "Inventory", href: "/studio/inventory" },
+        { label: "Coupons", href: "/studio/coupons" },
+        { label: "Appeals", href: "/studio/appeals" },
         { label: "Back to the shop", href: "/" },
       ]}
     />

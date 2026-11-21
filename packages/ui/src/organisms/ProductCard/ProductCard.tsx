@@ -18,6 +18,8 @@ export type ProductCardProps = Omit<ComponentPropsWithRef<"article">, "children"
   /** Description of the imagined product photo. */
   imageAlt?: string;
   pricePaise: bigint;
+  /** The usual price, shown struck through with "Was" text for screen readers. Never invented. */
+  referencePricePaise?: bigint;
   storeName: string;
   stock?: StockState;
   zapEligible?: boolean;
@@ -39,6 +41,7 @@ export function ProductCard({
   artSeed,
   imageAlt,
   pricePaise,
+  referencePricePaise,
   storeName,
   stock,
   zapEligible = false,
@@ -81,7 +84,15 @@ export function ProductCard({
           ) : null}
         </div>
         <p id={infoId} className="flex flex-wrap items-baseline justify-between gap-x-2 text-sm">
-          <Price amountPaise={pricePaise} className="text-lg" />
+          <span className="flex flex-wrap items-baseline gap-x-2">
+            <Price amountPaise={pricePaise} className="text-lg" />
+            {referencePricePaise !== undefined ? (
+              <span className="text-fg-muted">
+                <span className="sr-only">Was </span>
+                <Price amountPaise={referencePricePaise} className="font-normal text-fg-muted line-through" />
+              </span>
+            ) : null}
+          </span>
           <span className="text-fg-muted">
             <span className="sr-only">Sold by </span>
             {storeName}

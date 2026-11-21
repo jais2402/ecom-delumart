@@ -3,9 +3,22 @@
 import { rupees } from "@delulu/core";
 import { FilterPanel, ProductGrid, type ProductGridItem } from "@delulu/ui";
 import { useMemo, useState } from "react";
+import { useBlockedSellerKeys } from "../../_lib/blocks-store";
 import { PRICE_STEPS } from "../../_lib/price-steps";
 
-export function CategoryBrowser({ items }: { items: readonly ProductGridItem[] }) {
+/** `sellers` maps a product id to its seller key, so products of shops the viewer blocked can be left out. */
+export function CategoryBrowser({
+  items: all,
+  sellers = {},
+}: {
+  items: readonly ProductGridItem[];
+  sellers?: Readonly<Record<string, string>>;
+}) {
+  const blocked = useBlockedSellerKeys();
+  const items = useMemo(
+    () => all.filter((item) => !blocked.has(sellers[item.id] ?? "")),
+    [all, blocked, sellers],
+  );
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [zapOnly, setZapOnly] = useState(false);

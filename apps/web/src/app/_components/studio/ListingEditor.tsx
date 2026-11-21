@@ -281,7 +281,7 @@ export function ListingEditor({ productId }: { productId: string | null }) {
     setBusy(true);
     try {
       await api(`/api/v1/studio/products/${id}`, { method: "DELETE" });
-      window.location.assign("/studio");
+      window.location.assign("/studio/products");
     } catch (error) {
       setConfirmDelete(false);
       reportFailure(error);

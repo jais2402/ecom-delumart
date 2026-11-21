@@ -71,6 +71,10 @@ export interface Listing {
 }
 
 export interface ListingDetail extends Listing {
+  /** The latest appeal of this listing, if any. */
+  appeal: { id: string; status: "OPEN" | "UPHELD" | "DENIED"; createdAt: string } | null;
+  /** Rejected or hidden by moderation, and not yet appealed. */
+  appealable: boolean;
   priceHistory: {
     versionId: string;
     pricePaise: string;

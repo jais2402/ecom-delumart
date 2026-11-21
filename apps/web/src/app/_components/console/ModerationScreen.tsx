@@ -4,7 +4,7 @@ import {
   Alert,
   Badge,
   Button,
-  ConsoleLayout,
+  DecisionForm,
   EmptyState,
   FormField,
   Heading,
@@ -12,28 +12,25 @@ import {
   ModerationReviewCard,
   Price,
   ProductCard,
-  SidebarNav,
   Switch,
   Text,
   Textarea,
 } from "@delulu/ui";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, api } from "../../_lib/api";
+import { type AppealQueueItem, reasonLabel } from "../../_lib/merchant";
 import { parsePaise } from "../../_lib/money";
 import { formatWhen } from "../../_lib/orders";
 import {
   categoryLabel,
-  isForbidden,
   type ModerationItem,
   type ModerationPage,
   reasonLines,
   studioErrorText,
 } from "../../_lib/studio";
-import { ErrorBlock, LoadingBlock } from "../LoadState";
 import { PageHeading } from "../PageHeading";
-import { ShopShell } from "../ShopShell";
+import { type ConsoleAccess, ConsoleFrame, ConsoleGate, isDenied } from "./ConsoleFrame";
 
-type Access = "checking" | "denied" | "allowed" | "error";
 type Notice = { tone: "success" | "danger" | "info"; text: string };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -49,28 +46,30 @@ const reasonProblem = (text: string): string | null => {
  * signed out) gets a plain "Not available" page that says nothing about what exists.
  */
 export function ModerationScreen() {
-  const [access, setAccess] = useState<Access>("checking");
+  const [access, setAccess] = useState<ConsoleAccess>("checking");
   const [items, setItems] = useState<ModerationItem[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [appeals, setAppeals] = useState<AppealQueueItem[]>([]);
   const [message, setMessage] = useState("");
 
   const load = useCallback(async (): Promise<boolean> => {
     try {
       const all: ModerationItem[] = [];
+      const queue = new Map<string, AppealQueueItem>();
       let cursor: string | null = null;
       do {
         const page: ModerationPage = await api<ModerationPage>(
           `/api/v1/admin/moderation?limit=50${cursor ? `&cursor=${cursor}` : ""}`,
         );
         all.push(...page.items);
+        for (const a of page.appeals as AppealQueueItem[]) queue.set(a.appealId, a);
         cursor = page.nextCursor;
       } while (cursor);
       setItems(all);
-      setNextCursor(null);
+      setAppeals([...queue.values()]);
       setAccess("allowed");
       return true;
     } catch (error) {
-      if (isForbidden(error) || (error instanceof ApiError && error.code === "AUTH_REQUIRED")) {
+      if (isDenied(error)) {
         setAccess("denied");
       } else {
         setMessage(studioErrorText(error));
@@ -84,68 +83,31 @@ export function ModerationScreen() {
     void load();
   }, [load]);
 
-  if (access === "checking") {
-    return (
-      <ShopShell>
-        <LoadingBlock rows={2} label="Loading" />
-      </ShopShell>
-    );
-  }
-  if (access === "denied") {
-    return (
-      <ShopShell>
-        <div className="flex flex-col gap-3">
-          <PageHeading>Not available</PageHeading>
-          <Text muted>This page is not available.</Text>
-          <Button asChild className="self-start">
-            <a href="/">Go to the shop</a>
-          </Button>
-        </div>
-      </ShopShell>
-    );
-  }
-  if (access === "error") {
-    return (
-      <ShopShell>
-        <PageHeading>Something went wrong</PageHeading>
-        <ErrorBlock message={message} onRetry={() => void load()} />
-      </ShopShell>
-    );
-  }
+  if (access !== "allowed")
+    return <ConsoleGate access={access} message={message} onRetry={() => void load()} />;
 
   return (
-    <ConsoleLayout
-      nav={
-        <SidebarNav
-          label="Commerce Console"
-          currentHref="/console/moderation"
-          items={[
-            { label: "Moderation", href: "/console/moderation" },
-            { label: "Back to the shop", href: "/" },
-          ]}
-        />
-      }
-      topBar={<Badge tone="highlight">Super Admin</Badge>}
-    >
+    <ConsoleFrame current="/console/moderation">
       <ModerationBody
         items={items}
-        hasMore={nextCursor !== null}
+        appeals={appeals}
         reload={load}
         announce={(text) => setMessage(text)}
         message={message}
       />
-    </ConsoleLayout>
+    </ConsoleFrame>
   );
 }
 
 function ModerationBody({
   items,
+  appeals,
   reload,
   announce,
   message,
 }: {
   items: ModerationItem[];
-  hasMore: boolean;
+  appeals: AppealQueueItem[];
   reload: () => Promise<boolean>;
   announce: (text: string) => void;
   message: string;
@@ -255,6 +217,8 @@ function ModerationBody({
           </ul>
         )}
       </section>
+
+      <AppealsSection appeals={appeals} reload={reload} say={say} />
 
       <HideRestore say={say} />
       <PauseSwitch paused={paused} setPaused={setPaused} say={say} />
@@ -417,6 +381,132 @@ function PauseSwitch({
         )}
       </FormField>
       {error ? <Alert tone="danger">{error}</Alert> : null}
+    </section>
+  );
+}
+
+const KIND_LABEL = { REJECTION: "Rejected first submission", HIDE: "Hidden listing" } as const;
+
+function AppealsSection({
+  appeals,
+  reload,
+  say,
+}: {
+  appeals: AppealQueueItem[];
+  reload: () => Promise<boolean>;
+  say: (n: Notice) => void;
+}) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  async function resolve(a: AppealQueueItem, outcome: "UPHELD" | "DENIED", reason: string) {
+    setBusyId(a.appealId);
+    setErrors((e) => ({ ...e, [a.appealId]: "" }));
+    try {
+      await api(`/api/v1/admin/appeals/${a.appealId}/resolve`, { method: "POST", body: { outcome, reason } });
+      say({
+        tone: "success",
+        text: `${outcome === "UPHELD" ? "Appeal upheld" : "Appeal denied"}: ${a.version?.name ?? a.store.displayName}.`,
+      });
+      await reload();
+    } catch (error) {
+      setErrors((e) => ({ ...e, [a.appealId]: studioErrorText(error) }));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section aria-labelledby="appeals-heading" className="flex flex-col gap-3">
+      <Heading level={2} size="sm" id="appeals-heading">
+        Appeals ({appeals.length})
+      </Heading>
+      <Text size="sm" muted>
+        Oldest first. Upholding restores the listing; denying leaves the decision as it was.
+      </Text>
+      {appeals.length === 0 ? (
+        <EmptyState
+          title="No open appeals"
+          description="Appeals from sellers appear here."
+          headingLevel={3}
+        />
+      ) : (
+        <ul aria-label="Open appeals" className="flex flex-col gap-4">
+          {appeals.map((a) => {
+            const name = a.version?.name ?? "Listing";
+            const reasons = reasonLines(a.evidence.reasons);
+            const reports = a.evidence.reports;
+            return (
+              <li key={a.appealId}>
+                <article
+                  aria-label={`Appeal: ${name}`}
+                  className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Heading level={3} size="sm" className="break-words">
+                      {name}
+                    </Heading>
+                    <Badge tone="info">{KIND_LABEL[a.kind]}</Badge>
+                  </div>
+                  <p className="text-sm text-fg-muted">
+                    From {a.store.displayName} (/store/{a.store.handle}) · sent {formatWhen(a.createdAt)} ·
+                    listing is now {a.productStatus.toLowerCase().replaceAll("_", " ")}
+                  </p>
+                  <div>
+                    <p className="text-sm font-bold">The seller says</p>
+                    <p className="whitespace-pre-wrap break-words text-sm">{a.statement}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold">Original decision</p>
+                    {a.decision ? (
+                      <p className="break-words text-sm">
+                        {a.decision.action.toLowerCase().replaceAll("_", " ")}
+                        {a.decision.by ? ` by ${a.decision.by}` : ""}
+                        {a.decision.at ? `, ${formatWhen(a.decision.at)}` : ""}. Reason:{" "}
+                        {a.decision.reason ?? "none recorded"}
+                      </p>
+                    ) : (
+                      <p className="text-sm">No decision recorded.</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold">Evidence</p>
+                    {reasons.length === 0 && !reports ? <p className="text-sm">None recorded.</p> : null}
+                    {reasons.length > 0 ? (
+                      <ul aria-label="Screening reasons" className="list-disc pl-5 text-sm">
+                        {reasons.map((r) => (
+                          <li key={r}>{r}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {reports ? (
+                      <p className="text-sm">
+                        Report case with {reports.reporterCount}{" "}
+                        {reports.reporterCount === 1 ? "reporter" : "reporters"}:{" "}
+                        {Object.entries(reports.reasonCounts)
+                          .map(([r, n]) => `${reasonLabel(r)} (${n})`)
+                          .join(", ")}
+                        .
+                      </p>
+                    ) : null}
+                  </div>
+                  <DecisionForm
+                    label={`appeal for ${name}`}
+                    hint="The seller will see this."
+                    options={[
+                      { value: "UPHELD", label: "Uphold" },
+                      { value: "DENIED", label: "Deny", variant: "danger" },
+                    ]}
+                    busy={busyId === a.appealId}
+                    error={errors[a.appealId] || null}
+                    onDecide={(outcome, reason) => void resolve(a, outcome, reason)}
+                  />
+                </article>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }

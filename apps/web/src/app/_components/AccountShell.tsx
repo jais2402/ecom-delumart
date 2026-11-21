@@ -15,6 +15,8 @@ const ITEMS = [
   { label: "Cards", href: "/account/cards" },
   { label: "Collection", href: "/account/collection" },
   { label: "Saved", href: "/account/saved" },
+  { label: "Reports", href: "/account/reports" },
+  { label: "Blocked shops", href: "/account/blocks" },
   { label: "Profile", href: "/account/profile" },
 ] as const;
 

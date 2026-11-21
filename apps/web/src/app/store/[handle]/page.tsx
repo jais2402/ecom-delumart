@@ -6,6 +6,8 @@ import { notFound } from "next/navigation";
 import { webPool } from "@/server/db";
 import { storeView } from "@/server/views";
 import { ShopShell } from "../../_components/ShopShell";
+import { StoreCoupons } from "../../_components/safety/StoreCoupons";
+import { HideWhenBlocked, StoreSafety } from "../../_components/safety/StoreSafety";
 import { toGridItem } from "../../_lib/catalog";
 import { loadStoreProducts } from "../../_lib/catalog-server";
 
@@ -55,6 +57,8 @@ export default async function StorePage({
   if (!store) notFound();
   const cursor = typeof rawCursor === "string" && UUID.test(rawCursor) ? rawCursor.toLowerCase() : null;
   const page = await loadStoreProducts(store.handle, cursor);
+  // the shop's company id is public (it is every product's seller key); the store row itself has none
+  const companyId = page.items.find((p) => p.sellerKey && p.sellerKey !== "SEED")?.sellerKey ?? null;
 
   return (
     <ShopShell>
@@ -65,40 +69,44 @@ export default async function StorePage({
           description={store.description}
           tier={store.tier}
         />
-        <section aria-labelledby="shop-products" data-slot="shop-products" className="flex flex-col gap-3">
-          <Heading level={2} size="md" id="shop-products">
-            Products
-          </Heading>
-          {page.items.length === 0 && cursor === null ? (
-            <EmptyState
-              title="No products yet"
-              description="This shop has not listed anything. Check back later."
-              headingLevel={3}
-            />
-          ) : (
-            <ProductGrid
-              items={page.items.map(toGridItem)}
-              label={`Products from ${store.displayName}`}
-              headingLevel={3}
-              emptyTitle="No more products"
-              emptyDescription="That was the last page."
-            />
-          )}
-          {cursor !== null || page.nextCursor !== null ? (
-            <nav aria-label="Shop pages" className="flex flex-wrap gap-2">
-              {cursor !== null ? (
-                <Button asChild variant="secondary">
-                  <a href={`/store/${store.handle}`}>First page</a>
-                </Button>
-              ) : null}
-              {page.nextCursor !== null ? (
-                <Button asChild variant="secondary">
-                  <a href={`/store/${store.handle}?cursor=${page.nextCursor}`}>Next page</a>
-                </Button>
-              ) : null}
-            </nav>
-          ) : null}
-        </section>
+        <StoreSafety companyId={companyId} handle={store.handle} shopName={store.displayName} />
+        <StoreCoupons handle={store.handle} />
+        <HideWhenBlocked companyId={companyId}>
+          <section aria-labelledby="shop-products" data-slot="shop-products" className="flex flex-col gap-3">
+            <Heading level={2} size="md" id="shop-products">
+              Products
+            </Heading>
+            {page.items.length === 0 && cursor === null ? (
+              <EmptyState
+                title="No products yet"
+                description="This shop has not listed anything. Check back later."
+                headingLevel={3}
+              />
+            ) : (
+              <ProductGrid
+                items={page.items.map(toGridItem)}
+                label={`Products from ${store.displayName}`}
+                headingLevel={3}
+                emptyTitle="No more products"
+                emptyDescription="That was the last page."
+              />
+            )}
+            {cursor !== null || page.nextCursor !== null ? (
+              <nav aria-label="Shop pages" className="flex flex-wrap gap-2">
+                {cursor !== null ? (
+                  <Button asChild variant="secondary">
+                    <a href={`/store/${store.handle}`}>First page</a>
+                  </Button>
+                ) : null}
+                {page.nextCursor !== null ? (
+                  <Button asChild variant="secondary">
+                    <a href={`/store/${store.handle}?cursor=${page.nextCursor}`}>Next page</a>
+                  </Button>
+                ) : null}
+              </nav>
+            ) : null}
+          </section>
+        </HideWhenBlocked>
       </div>
     </ShopShell>
   );

@@ -48,4 +48,11 @@ describe("ProductCard", () => {
     await userEvent.click(button);
     expect(onAdd).toHaveBeenCalledTimes(1);
   });
+  it("shows a struck-through reference price with Was text only when one is given", () => {
+    const { rerender } = render(<ProductCard {...base} />);
+    expect(screen.queryByText("Was")).not.toBeInTheDocument();
+    rerender(<ProductCard {...base} referencePricePaise={base.pricePaise + 100_000n} />);
+    expect(screen.getByText(/Was/)).toBeInTheDocument();
+    expect(document.querySelector(".line-through")).not.toBeNull();
+  });
 });

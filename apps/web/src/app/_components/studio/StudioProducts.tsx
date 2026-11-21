@@ -19,6 +19,7 @@ import { formatWhen } from "../../_lib/orders";
 import { countCaps, LISTING_CAPS, type Listing, type ListingPage, type NextAction } from "../../_lib/studio";
 import { ErrorBlock, LoadingBlock } from "../LoadState";
 import { PageHeading } from "../PageHeading";
+import { PortalTitle } from "./PortalTitle";
 
 const PAGE_SIZE = 10;
 
@@ -112,12 +113,15 @@ export function StudioProducts() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <PageHeading>Your products</PageHeading>
-        <Button asChild>
-          <a href="/studio/new">New listing</a>
-        </Button>
-      </div>
+      <PortalTitle
+        actions={
+          <Button asChild>
+            <a href="/studio/new">New listing</a>
+          </Button>
+        }
+      >
+        Your products
+      </PortalTitle>
       <Text size="sm" muted data-testid="caps">
         {caps.drafts} of {LISTING_CAPS.drafts} drafts · {caps.published} of {LISTING_CAPS.published} published
       </Text>

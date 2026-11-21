@@ -5,10 +5,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 import { toShopGridItem } from "../_components/shop-items";
 import type { ProductResponse } from "../_lib/api";
+import { useBlockedSellerKeys, withoutBlocked } from "../_lib/blocks-store";
 import { usePublicCatalog } from "../_lib/use-public-catalog";
 
 export function SearchResults({ products: initial }: { products: readonly ProductResponse[] }) {
-  const { products } = usePublicCatalog(initial);
+  const { products: all } = usePublicCatalog(initial);
+  const blocked = useBlockedSellerKeys();
+  const products = useMemo(() => withoutBlocked(all, blocked), [all, blocked]);
   const router = useRouter();
   const query = useSearchParams().get("q") ?? "";
 

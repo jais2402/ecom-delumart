@@ -12,6 +12,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BuyPanel } from "../../_components/BuyPanel";
 import { ShopShell } from "../../_components/ShopShell";
+import { ProductSafetyActions } from "../../_components/safety/ProductSafetyActions";
 import { categoryName, storeNameOf } from "../../_lib/catalog";
 import { loadProduct, loadProductPage } from "../../_lib/catalog-server";
 import { parsePaise } from "../../_lib/money";
@@ -86,10 +87,22 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
             )}
           </Text>
           <div className="flex flex-col gap-1">
-            <PriceBlock amountPaise={parsePaise(product.pricePaise)} display="exact" />
+            <PriceBlock
+              amountPaise={parsePaise(product.pricePaise)}
+              {...(product.referencePricePaise
+                ? { referenceAmountPaise: parsePaise(product.referencePricePaise), saleLabel: "On sale" }
+                : {})}
+              display="exact"
+            />
             <FictionLabel>Fictional money</FictionLabel>
           </div>
           <BuyPanel product={product} />
+          <ProductSafetyActions
+            productId={product.id}
+            productName={product.name}
+            companyId={product.sellerKey && product.sellerKey !== "SEED" ? product.sellerKey : null}
+            shopName={storeNameOf(product)}
+          />
         </div>
       </div>
     </ShopShell>

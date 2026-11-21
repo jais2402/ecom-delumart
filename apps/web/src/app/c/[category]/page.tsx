@@ -21,7 +21,11 @@ export default async function CategoryPage({ params }: { params: Promise<{ categ
   const { category } = await params;
   const found = CATEGORIES.find((entry) => entry.slug === category);
   if (!found) notFound();
-  const items = (await loadCatalog(found.slug)).map(toShopGridItem);
+  const products = await loadCatalog(found.slug);
+  const items = products.map(toShopGridItem);
+  const sellers = Object.fromEntries(
+    products.flatMap((p) => (p.sellerKey && p.sellerKey !== "SEED" ? [[p.id, p.sellerKey]] : [])),
+  );
 
   return (
     <ShopShell>
@@ -32,7 +36,7 @@ export default async function CategoryPage({ params }: { params: Promise<{ categ
       <Text muted className="mb-6 max-w-reading">
         {found.blurb}
       </Text>
-      <CategoryBrowser items={items} />
+      <CategoryBrowser items={items} sellers={sellers} />
     </ShopShell>
   );
 }

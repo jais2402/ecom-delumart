@@ -1,5 +1,5 @@
-import { StudioProducts } from "../_components/studio/StudioProducts";
+import { StudioHome } from "../_components/studio/StudioHome";
 
 export default function Page() {
-  return <StudioProducts />;
+  return <StudioHome />;
 }
