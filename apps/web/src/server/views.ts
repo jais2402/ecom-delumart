@@ -1,6 +1,10 @@
 import "./server-only";
-import { serializePaise } from "@delulu/core";
+import { type ErrorCode, serializePaise } from "@delulu/core";
 import type {
+  Cart,
+  CartLine,
+  CartMergeSkip,
+  CartPreview,
   CatalogProduct,
   CheckoutSessionResult,
   CollectionItem,
@@ -154,4 +158,78 @@ export function receiptView(r: PayReceipt) {
     creatorUnlocked: r.creatorUnlocked,
     reversed: r.reversed,
   };
+}
+
+export function cartLineView(l: CartLine) {
+  return {
+    productId: l.productId,
+    versionId: l.versionId,
+    name: l.name,
+    hook: l.hook,
+    altText: l.altText,
+    templateId: l.templateId,
+    pricePaise: paise(l.pricePaise),
+    category: l.category,
+    available: l.available,
+    offersExpress: l.offersExpress,
+    zapAvailable: l.zapAvailable,
+    freeStandardDelivery: l.freeStandardDelivery,
+    issue: l.issue,
+    addedAt: iso(l.addedAt),
+  };
+}
+
+export function cartPreviewView(p: CartPreview) {
+  return {
+    sellers: p.sellers.map((s) => ({
+      sellerKey: s.sellerKey,
+      sellerName: s.sellerName,
+      speed: s.speed,
+      speedsOffered: s.speedsOffered,
+      productIds: s.productIds,
+      itemTotalPaise: paise(s.itemTotalPaise),
+      sellerDiscountPaise: paise(s.sellerDiscountPaise),
+      platformDiscountPaise: paise(s.platformDiscountPaise),
+      deliveryFeePaise: paise(s.deliveryFeePaise),
+      totalPaise: paise(s.totalPaise),
+    })),
+    totalPaise: paise(p.totalPaise),
+    balancePaise: p.balancePaise === null ? null : paise(p.balancePaise),
+    balanceAfterPaise: p.balanceAfterPaise === null ? null : paise(p.balanceAfterPaise),
+    couponCode: p.couponCode,
+    couponError: p.couponError,
+    issues: p.issues.map((i) => ({ productId: i.productId, issue: i.issue })),
+  };
+}
+
+/**
+ * The cart grouped by seller (first-added order), with its priced preview; `preview` is null and
+ * `previewError` names the code when the default options cannot be priced.
+ */
+export function cartView(
+  cart: Cart,
+  preview: CartPreview | null,
+  previewError: ErrorCode | null,
+  maxLines: number,
+) {
+  const groups: { sellerKey: string; sellerName: string; lines: ReturnType<typeof cartLineView>[] }[] = [];
+  for (const line of cart.lines) {
+    let group = groups.find((g) => g.sellerKey === line.sellerKey);
+    if (!group) {
+      group = { sellerKey: line.sellerKey, sellerName: line.sellerName, lines: [] };
+      groups.push(group);
+    }
+    group.lines.push(cartLineView(line));
+  }
+  return {
+    lineCount: cart.lines.length,
+    maxLines,
+    groups,
+    preview: preview === null ? null : cartPreviewView(preview),
+    previewError,
+  };
+}
+
+export function cartMergeSkipView(s: CartMergeSkip) {
+  return { productId: s.productId, reason: s.reason };
 }

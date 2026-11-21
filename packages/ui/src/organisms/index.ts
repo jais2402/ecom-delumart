@@ -13,6 +13,7 @@ export * from "./PinSetupForm";
 export * from "./ProductCard";
 export * from "./ProductGrid";
 export * from "./Receipt";
+export * from "./RevealableCard";
 export * from "./SidebarNav";
 export * from "./SignInPanel";
 export * from "./SiteFooter";

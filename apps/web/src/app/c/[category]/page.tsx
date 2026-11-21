@@ -9,6 +9,11 @@ import { CategoryBrowser } from "./CategoryBrowser";
 
 export const revalidate = 60;
 
+/** No pages are built ahead (there is no database at build time); each is cached on first visit. */
+export function generateStaticParams() {
+  return [];
+}
+
 export async function generateMetadata({
   params,
 }: {

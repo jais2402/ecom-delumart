@@ -27,7 +27,9 @@ export function OnboardingShell({ children }: { children: ReactNode }) {
           dev ? (
             <Alert tone="info">Local development sign-in: no email or text message is really sent.</Alert>
           ) : (
-            <Alert tone="info">A game account with fictional money. Never enter real card or bank details.</Alert>
+            <Alert tone="info">
+              A game account with fictional money. Never enter real card or bank details.
+            </Alert>
           )
         }
         progress={<OnboardingProgress current={current} />}

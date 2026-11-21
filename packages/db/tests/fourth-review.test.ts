@@ -57,8 +57,42 @@ describe("fourth security review", () => {
     expect(await reconcile(pool)).toEqual(CLEAN);
   });
   afterAll(async () => {
+    await restoreAppPayPassword(); // a safety net: the test restores it itself
     await db.drop();
   });
+
+  /**
+   * The watchdog matches the LOGIN role app_pay itself, so one test logs in as app_pay, which
+   * needs a password. Role passwords are cluster-wide (the local dev database's credentials use
+   * them too), so the stored verifier is saved before and put back verbatim afterwards: ALTER ROLE
+   * ... PASSWORD accepts a SCRAM or md5 verifier as it is, so the role ends exactly as it began.
+   */
+  let savedAppPay: { verifier: string | null } | null = null;
+
+  async function setTemporaryAppPayPassword(password: string): Promise<void> {
+    if (savedAppPay === null) {
+      const { rows } = await pool.query<{ v: string | null }>(
+        "SELECT rolpassword AS v FROM pg_authid WHERE rolname = 'app_pay'",
+      );
+      savedAppPay = { verifier: rows[0]?.v ?? null };
+    }
+    await pool.query(`ALTER ROLE app_pay PASSWORD '${password}'`);
+  }
+
+  async function restoreAppPayPassword(): Promise<void> {
+    if (savedAppPay === null) return;
+    const { verifier } = savedAppPay;
+    if (verifier === null) {
+      await pool.query("ALTER ROLE app_pay PASSWORD NULL");
+    } else {
+      const { rows } = await pool.query<{ sql: string }>(
+        "SELECT format('ALTER ROLE app_pay PASSWORD %L', $1::text) AS sql",
+        [verifier],
+      );
+      await pool.query(rows[0]?.sql ?? "SELECT 1");
+    }
+    savedAppPay = null;
+  }
 
   const jobs: Actor = { role: "app_jobs" };
   const owner: Actor = {};
@@ -715,7 +749,7 @@ describe("fourth security review", () => {
 
     it("an app_pay session that completes commit_purchase and never commits: victims get BUSY until ops.terminate_stuck_money_sessions ends it; nothing of it commits and the victim's retry succeeds", async () => {
       const password = `pw-${uuidv7()}`;
-      await pool.query(`ALTER ROLE app_pay PASSWORD '${password}'`);
+      await setTemporaryAppPayPassword(password);
       const url = new URL(db.url);
       url.username = "app_pay";
       url.password = password;
@@ -825,7 +859,7 @@ describe("fourth security review", () => {
       } finally {
         letCommit();
         await attackerPool.end().catch(() => undefined);
-        await pool.query("ALTER ROLE app_pay PASSWORD NULL");
+        await restoreAppPayPassword();
       }
     });
 

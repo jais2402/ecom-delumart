@@ -4,6 +4,8 @@ import { parsePaise } from "./money";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+const headersOf = (call: Parameters<typeof fetch> | undefined): Record<string, string> =>
+  (call?.[1]?.headers ?? {}) as Record<string, string>;
 const failure = (status: number, code: string, retryable: boolean) =>
   json(status, { error: { code, message: `${code} message`, retryable, details: {} } });
 
@@ -30,9 +32,9 @@ describe("api client", () => {
     const calls = fetchMock.mock.calls;
     expect(calls.filter(([url]) => String(url).endsWith("/csrf"))).toHaveLength(1);
     const get = calls.find(([url]) => url === "/api/v1/me");
-    expect((get?.[1]?.headers as Record<string, string>)["x-csrf-token"]).toBeUndefined();
+    expect(headersOf(get)["x-csrf-token"]).toBeUndefined();
     const post = calls.find(([url]) => url === "/api/v1/x");
-    expect((post?.[1]?.headers as Record<string, string>)["x-csrf-token"]).toBe("tok");
+    expect(headersOf(post)["x-csrf-token"]).toBe("tok");
     expect(post?.[1]?.credentials).toBe("same-origin");
   });
 
@@ -53,7 +55,7 @@ describe("api client", () => {
     expect(error).toBeInstanceOf(ApiError);
     const posts = fetchMock.mock.calls.filter(([url]) => url === "/api/v1/pay");
     expect(posts).toHaveLength(4);
-    const keys = new Set(posts.map(([, init]) => (init?.headers as Record<string, string>)["idempotency-key"]));
+    const keys = new Set(posts.map((call) => headersOf(call)["idempotency-key"]));
     expect(keys).toEqual(new Set([key]));
   });
 

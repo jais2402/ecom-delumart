@@ -53,7 +53,8 @@ export function resetCsrf(): void {
 
 async function loadCsrf(): Promise<string> {
   const response = await fetch("/api/v1/auth/csrf", { credentials: "same-origin", cache: "no-store" });
-  if (!response.ok) throw new ApiError("INTERNAL", "Could not start a secure request.", true, response.status);
+  if (!response.ok)
+    throw new ApiError("INTERNAL", "Could not start a secure request.", true, response.status);
   const json = (await response.json()) as { csrfToken?: unknown };
   if (typeof json.csrfToken !== "string") throw new ApiError("INTERNAL", "Unexpected response.", false, 500);
   return json.csrfToken;
@@ -133,7 +134,12 @@ export async function api<T>(path: string, request: ApiRequest = {}): Promise<T>
       } else {
         // fetch rejected: the network failed
         if (!retryNetwork || attempt >= RETRY.max) {
-          throw new ApiError("NETWORK", "Could not reach DeluluMart. Check your connection and try again.", true, 0);
+          throw new ApiError(
+            "NETWORK",
+            "Could not reach DeluluMart. Check your connection and try again.",
+            true,
+            0,
+          );
         }
       }
       await sleep(backoff(attempt));

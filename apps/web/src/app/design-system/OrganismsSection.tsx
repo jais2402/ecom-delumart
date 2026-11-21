@@ -1,5 +1,6 @@
 "use client";
 
+import { rupees } from "@delulu/core";
 import {
   AddressCard,
   BankChallenge,
@@ -26,7 +27,7 @@ import {
 } from "@delulu/ui";
 import { useState } from "react";
 import { CATEGORIES, SEED_PRODUCTS } from "../../data/seed-catalog";
-import { toGridItem } from "../_lib/catalog";
+import { SEED_STORE_NAME } from "../_lib/catalog";
 import { PRICE_STEPS } from "../_lib/price-steps";
 import { Level, Specimen } from "./Specimen";
 
@@ -57,7 +58,18 @@ export function OrganismsSection() {
     { id: "l1", name: "Teleporting Tiffin Box", hue: 20, quantity: 2, unitPricePaise: 499_900n },
     { id: "l2", name: "Pocket Comet", hue: 220, quantity: 1, unitPricePaise: 12_000_00n },
   ]);
-  const items = SEED_PRODUCTS.slice(0, 4).map(toGridItem);
+  // the showcase uses the bundled seed file, not the live catalog
+  const items = SEED_PRODUCTS.slice(0, 4).map((product) => ({
+    id: product.id,
+    href: `/p/${product.id}`,
+    name: product.name,
+    hook: product.hook,
+    hue: product.templateHue,
+    imageAlt: product.altText,
+    pricePaise: rupees(product.priceRupees),
+    storeName: SEED_STORE_NAME,
+    zapEligible: product.zapEligible,
+  }));
   const first = items[0];
 
   return (

@@ -1,22 +1,36 @@
-import { pay } from "@delulu/db/runtime";
+import { DomainError } from "@delulu/core";
+import { cartIssues, PayFailure, pay } from "@delulu/db/runtime";
 import { z } from "zod";
-import { payPool } from "@/server/db";
+import { payPool, webPool } from "@/server/db";
 import { pathId, route } from "@/server/http";
 import { receiptView } from "@/server/views";
 
+/** Refusals caused by a line that can no longer be bought: the response names the cart's issues. */
+const LINE_REFUSALS = new Set(["SOLD_OUT", "PRODUCT_UNAVAILABLE", "ALREADY_OWNED", "SELF_PURCHASE"]);
+
 /**
  * POST /api/v1/checkout-sessions/{id}/pay {attemptId} (Idempotency-Key): the pay transaction.
- * Repeating it with the same key returns the same order (or the same failure).
+ * Repeating it with the same key returns the same order (or the same failure). All-or-nothing: a
+ * line sold out or hidden since the quote fails the payment with no debit, and the error's
+ * `details.issues` lists the cart lines that can no longer be bought.
  */
 export const POST = route(
   { auth: "session", body: z.strictObject({ attemptId: z.uuid() }), idempotencyKey: true },
   async ({ body, session, params, idempotencyKey }) => {
-    const receipt = await pay(payPool(), {
-      authSessionId: session.id,
-      sessionId: pathId(params),
-      attemptId: body.attemptId.toLowerCase(),
-      idempotencyKey,
-    });
-    return { json: receiptView(receipt) };
+    try {
+      const receipt = await pay(payPool(), {
+        authSessionId: session.id,
+        sessionId: pathId(params),
+        attemptId: body.attemptId.toLowerCase(),
+        idempotencyKey,
+      });
+      return { json: receiptView(receipt) };
+    } catch (error) {
+      if (error instanceof PayFailure && LINE_REFUSALS.has(error.code)) {
+        const issues = await cartIssues(webPool(), { authSessionId: session.id });
+        throw new DomainError(error.code, error.message, { ...error.details, issues });
+      }
+      throw error;
+    }
   },
 );

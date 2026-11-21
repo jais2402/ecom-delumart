@@ -54,6 +54,7 @@ const STATUS: Record<ErrorCode, number> = {
   NOT_FOUND: 404,
   CONFLICT: 409,
   CART_CHANGED: 409,
+  CART_FULL: 409,
   PRICE_CHANGED: 409,
   SOLD_OUT: 409,
   ALREADY_OWNED: 409,

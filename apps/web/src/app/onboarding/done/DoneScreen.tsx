@@ -5,8 +5,8 @@ import { Button, FictionLabel, Heading, Text, WelcomePanel } from "@delulu/ui";
 import { useEffect, useState } from "react";
 import { useGateway } from "../../_lib/gateway-context";
 import { getReturnTo } from "../../_lib/onboarding-flow";
-import { useArrival } from "../../_lib/use-arrival";
 import { useSession } from "../../_lib/session-store";
+import { useArrival } from "../../_lib/use-arrival";
 
 export function DoneScreen() {
   const gateway = useGateway();
@@ -37,7 +37,8 @@ export function DoneScreen() {
     if (showing) headingRef.current?.focus();
   }, [showing, headingRef]);
 
-  if (!ready || session.status === "loading" || !cardChecked) return <p role="status">Loading your account…</p>;
+  if (!ready || session.status === "loading" || !cardChecked)
+    return <p role="status">Loading your account…</p>;
   const balance = session.status === "signedIn" ? session.balancePaise : null;
   const shopHref = getReturnTo() ?? "/";
 
@@ -65,7 +66,9 @@ export function DoneScreen() {
       {balance !== null ? (
         <div className="flex flex-col gap-1 rounded-lg bg-action-soft p-4">
           <FictionLabel>Your starting balance</FictionLabel>
-          <p className="font-display text-3xl font-bold text-fg">{formatInrCompact(balance)} · fictional money</p>
+          <p className="font-display text-3xl font-bold text-fg">
+            {formatInrCompact(balance)} · fictional money
+          </p>
         </div>
       ) : null}
       <Text muted>Your card is ready. Open your account to see it.</Text>

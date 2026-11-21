@@ -3074,13 +3074,19 @@ describe("money attacks (security review)", () => {
           ORDER BY 1`,
       );
       // the read-only questions RLS policies ask, the coupon commands of 0020 and the profile
-      // command of 0023 (no money moves), and the actor-scoped and catalog reads of 0026
+      // command of 0023 (no money moves), the actor-scoped and catalog reads of 0026, and the
+      // actor's own cart of 0028 (no money, stock or price authority)
       expect(fns.rows.map((r) => r.f)).toEqual([
         "core.actor_id()",
+        "core.cart_add(uuid)",
+        "core.cart_clear()",
+        "core.cart_merge(uuid[])",
+        "core.cart_remove(uuid)",
         "core.catalog_product(uuid)",
         "core.catalog_products(text,uuid,integer)",
         "core.create_coupon(uuid,text,bigint,bigint,timestamp with time zone,timestamp with time zone,integer,boolean,text)",
         "core.is_published_version(uuid)",
+        "core.my_cart()",
         "core.my_collection()",
         "core.my_order(uuid)",
         "core.my_orders(uuid,integer)",
@@ -3106,11 +3112,17 @@ describe("money attacks (security review)", () => {
       const by = (role: string) => rows.filter((r) => r.role === role).map((r) => r.f);
       expect(by("app_pay")).toEqual([
         "core.actor_id()",
+        "core.cart_add(uuid)",
+        "core.cart_clear()",
+        "core.cart_merge(uuid[])",
+        "core.cart_quote_inputs(jsonb)",
+        "core.cart_remove(uuid)",
         "core.checkout_inputs(jsonb,text)",
         "core.commit_purchase(uuid,uuid,text,bytea,jsonb)",
         "core.create_checkout_session(jsonb,text)",
         "core.create_payment_attempt(uuid,text,uuid)",
         "core.is_published_version(uuid)",
+        "core.my_cart()",
         "core.my_wallet()",
         "core.onboarding_status()",
         "core.owns_products(uuid[])",

@@ -167,7 +167,10 @@ interface PricingLine {
   freeStdDelivery: boolean;
 }
 
-interface CouponTerms {
+export interface CouponTerms {
+  /** Set by core.resolve_cart (the coupon's id and normalised code); not read by pricing. */
+  id?: string;
+  code?: string;
   companyId: string;
   kind: "PERCENT" | "FLAT";
   value: string;
@@ -249,8 +252,33 @@ function requestHash(command: string, body: unknown): Buffer {
     .digest();
 }
 
-type Refusal = { code?: unknown; message?: unknown };
-type Outcome<T> = { ok: T } | { refused: Refusal };
+export type Refusal = { code?: unknown; message?: unknown };
+export type Outcome<T> = { ok: T } | { refused: Refusal };
+
+/**
+ * The one pricing path of a product checkout: the resolved cart (core.resolve_cart) priced by
+ * price() with the configuration version it names. createCheckoutSession and the cart preview
+ * (cart.ts) both call this, so a preview and the checkout session made from the same inputs
+ * cannot disagree. A refusal price() raises (a coupon below its minimum spend, ...) is returned.
+ */
+export async function priceInputs(c: PoolClient, inputs: CartInputs): Promise<Outcome<Priced>> {
+  const cfg = await loadConfig(c, inputs.configVersion);
+  if (!cfg) return { refused: { code: "MAINTENANCE", message: "no effective configuration version" } };
+  try {
+    return {
+      ok: priceLines(
+        inputs.lines.map((l) => ({ ...l, listPaise: BigInt(l.listPaise) })),
+        inputs.coupon,
+        inputs.speedBySeller,
+        inputs.isMember,
+        cfg,
+      ),
+    };
+  } catch (error) {
+    if (error instanceof DomainError) return { refused: { code: error.code, message: error.message } };
+    throw error;
+  }
+}
 
 // ---------------------------------------------------------------------------- B1: checkout session
 
@@ -273,7 +301,8 @@ interface StoredSession {
   quote: { configVersion: number; totalPaise: string; sellers: StoredSeller[] };
 }
 
-interface CartInputs {
+/** What core.resolve_cart returns for a cart (migration 0018): everything price() needs. */
+export interface CartInputs {
   configVersion: number;
   isMember: boolean;
   lines: { productId: string; sellerId: string; listPaise: string; freeStdDelivery: boolean }[];
@@ -340,22 +369,9 @@ export async function createCheckoutSession(
     const r1 = step1.rows[0]?.r;
     if (r1?.replay) return { ok: r1.replay };
     if (!r1?.inputs) return { refused: r1?.error ?? {} };
-    const inputs = r1.inputs;
-    const cfg = await loadConfig(c, inputs.configVersion);
-    if (!cfg) return { refused: { code: "MAINTENANCE", message: "no effective configuration version" } };
-    let priced: Priced;
-    try {
-      priced = priceLines(
-        inputs.lines.map((l) => ({ ...l, listPaise: BigInt(l.listPaise) })),
-        inputs.coupon,
-        inputs.speedBySeller,
-        inputs.isMember,
-        cfg,
-      );
-    } catch (error) {
-      if (error instanceof DomainError) return { refused: { code: error.code, message: error.message } };
-      throw error;
-    }
+    const pricing = await priceInputs(c, r1.inputs);
+    if ("refused" in pricing) return pricing;
+    const priced = pricing.ok;
     const step2 = await c.query<{ r: { replay?: StoredSession; error?: Refusal; result?: StoredSession } }>(
       "SELECT core.create_checkout_session($1::jsonb, $2) AS r",
       [JSON.stringify({ ...choices, priced: serialisePriced(priced) }), input.idempotencyKey],

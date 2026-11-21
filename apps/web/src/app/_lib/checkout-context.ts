@@ -51,3 +51,14 @@ export function clearCheckoutContext(id: string): void {
     // ignore
   }
 }
+
+const justPaid = new Set<string>();
+
+/** Remember (in memory) that this order was just paid, so its page can say so once. */
+export function markJustPaid(orderId: string): void {
+  justPaid.add(orderId);
+}
+
+export function wasJustPaid(orderId: string): boolean {
+  return justPaid.has(orderId);
+}

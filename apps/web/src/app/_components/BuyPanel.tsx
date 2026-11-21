@@ -102,7 +102,8 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
 
       {signedIn && balance !== null ? (
         <Text size="sm" muted>
-          Your balance: <Price amountPaise={balance} display="exact" /> <FictionLabel>fictional money</FictionLabel>
+          Your balance: <Price amountPaise={balance} display="exact" />{" "}
+          <FictionLabel>fictional money</FictionLabel>
         </Text>
       ) : null}
 
@@ -124,11 +125,19 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
             Already in your collection
           </Button>
           <Text as="span" size="sm" muted id="owned-hint">
-            Each product can be owned once. <a className="text-action underline" href="/account/collection">See your collection</a>
+            Each product can be owned once.{" "}
+            <a className="text-action underline" href="/account/collection">
+              See your collection
+            </a>
           </Text>
         </>
       ) : (
-        <Button size="lg" loading={pending} disabled={unavailable || sellerId === null} onClick={() => void buyNow()}>
+        <Button
+          size="lg"
+          loading={pending}
+          disabled={unavailable || sellerId === null}
+          onClick={() => void buyNow()}
+        >
           Buy now
         </Button>
       )}

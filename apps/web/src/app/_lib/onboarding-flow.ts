@@ -38,7 +38,7 @@ let returnTo: string | null = null;
 
 /** Only same-site paths: "/p/abc" is fine, "//evil.example" and "https://..." are not. */
 export function safeReturnPath(value: string | null | undefined): string | null {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return null;
+  if (!value?.startsWith("/") || value.startsWith("//") || value.includes("\\")) return null;
   return value;
 }
 export const setReturnTo = (path: string | null) => {

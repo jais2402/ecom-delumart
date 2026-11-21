@@ -5,8 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 import type { ProductResponse } from "../_lib/api";
 import { toGridItem } from "../_lib/catalog";
+import { usePublicCatalog } from "../_lib/use-public-catalog";
 
-export function SearchResults({ products }: { products: readonly ProductResponse[] }) {
+export function SearchResults({ products: initial }: { products: readonly ProductResponse[] }) {
+  const { products } = usePublicCatalog(initial);
   const router = useRouter();
   const query = useSearchParams().get("q") ?? "";
 

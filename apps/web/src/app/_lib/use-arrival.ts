@@ -6,7 +6,7 @@ import { useGateway } from "./gateway-context";
 import { FLOW_PATHS } from "./onboarding-flow";
 
 function rank(path: string): number {
-  const index = FLOW_PATHS.findIndex((p) => p === path);
+  const index = (FLOW_PATHS as readonly string[]).indexOf(path);
   return index === -1 ? FLOW_PATHS.length : index; // "/account" ranks after every step
 }
 

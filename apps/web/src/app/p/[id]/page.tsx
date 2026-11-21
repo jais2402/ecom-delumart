@@ -10,6 +10,11 @@ import { parsePaise } from "../../_lib/money";
 /** Public and cacheable. Ownership and balance are added in the browser by BuyPanel. */
 export const revalidate = 60;
 
+/** No pages are built ahead (there is no database at build time); each is cached on first visit. */
+export function generateStaticParams() {
+  return [];
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const product = await loadProduct(id);

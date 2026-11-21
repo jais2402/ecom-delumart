@@ -36,3 +36,27 @@ export function toGridItem(product: ProductResponse): ProductGridItem {
     stock: product.available ? { state: "in-stock" } : { state: "sold-out" },
   };
 }
+
+const priceOf = (p: ProductResponse) => parsePaise(p.pricePaise);
+const byPrice = (a: ProductResponse, b: ProductResponse) => {
+  const x = priceOf(a);
+  const y = priceOf(b);
+  return x < y ? -1 : x > y ? 1 : 0;
+};
+
+/**
+ * Two products per category: one from the lower quarter and one from the upper quarter of that
+ * category's prices, so the grid shows a spread rather than the cheapest items. Cheapest first.
+ */
+export function featuredAcrossPrices(
+  products: readonly ProductResponse[],
+  categorySlugs: readonly string[],
+): ProductResponse[] {
+  return categorySlugs
+    .flatMap((slug) => {
+      const sorted = products.filter((product) => product.category === slug).sort(byPrice);
+      const picks = [sorted[Math.floor(sorted.length * 0.25)], sorted[Math.floor(sorted.length * 0.8)]];
+      return picks.filter((product): product is ProductResponse => product !== undefined);
+    })
+    .sort(byPrice);
+}

@@ -4,7 +4,7 @@ import { type PinWeakReason, validateNewPin } from "@delulu/core";
 import { Check, Circle } from "lucide-react";
 import { type ComponentPropsWithRef, type FormEvent, type Ref, useRef, useState } from "react";
 import { Button } from "../../atoms/Button";
-import { Heading } from "../../atoms/Heading";
+import { Heading, type HeadingLevel } from "../../atoms/Heading";
 import { Icon } from "../../atoms/Icon";
 import { VisuallyHidden } from "../../atoms/VisuallyHidden";
 import { cn } from "../../lib/cn";
@@ -18,6 +18,12 @@ export type PinSetupFormProps = Omit<ComponentPropsWithRef<"div">, "children" | 
   pending?: boolean;
   error?: string | null;
   headingRef?: Ref<HTMLHeadingElement>;
+  /** Title text; defaults to "Set your game PIN". */
+  title?: string;
+  /** Semantic level of the title: 1 on its own page, 2 when it sits inside another page. */
+  headingLevel?: HeadingLevel;
+  /** Label of the submit button. */
+  submitLabel?: string;
 };
 
 const WEAK_TEXT: Record<PinWeakReason, string> = {
@@ -41,6 +47,9 @@ export function PinSetupForm({
   pending = false,
   error,
   headingRef,
+  title = "Set your game PIN",
+  headingLevel = 1,
+  submitLabel = "Save PIN",
   className,
   ...props
 }: PinSetupFormProps) {
@@ -85,8 +94,8 @@ export function PinSetupForm({
 
   return (
     <div className={cn("flex flex-col gap-4", className)} {...props}>
-      <Heading level={1} size="md" tabIndex={-1} ref={headingRef}>
-        Set your game PIN
+      <Heading level={headingLevel} size="md" tabIndex={-1} ref={headingRef}>
+        {title}
       </Heading>
       <Alert tone="warning">Game PIN only. Do not use the PIN of a real card or UPI app.</Alert>
       {error ? <Alert tone="danger">{error}</Alert> : null}
@@ -121,7 +130,7 @@ export function PinSetupForm({
           ))}
         </ul>
         <Button type="submit" size="lg" loading={pending}>
-          Save PIN
+          {submitLabel}
         </Button>
       </form>
     </div>

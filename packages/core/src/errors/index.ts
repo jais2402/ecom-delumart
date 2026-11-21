@@ -36,6 +36,8 @@ export const ERROR_CODES = [
   // API access (LLD §8.3): no live sign-in session; a phone code that did not verify
   "AUTH_REQUIRED",
   "PHONE_CODE_FAILED",
+  // cart (PRD R2.2): the cart already holds the configured maximum number of lines
+  "CART_FULL",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

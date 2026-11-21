@@ -3,10 +3,10 @@
 import { SignInPanel } from "@delulu/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { describeError } from "../../_lib/api";
 import { useGateway } from "../../_lib/gateway-context";
 import { getReturnTo, messageOf, safeReturnPath, setReturnTo } from "../../_lib/onboarding-flow";
 import { useArrival } from "../../_lib/use-arrival";
-import { describeError } from "../../_lib/api";
 
 export function SignInScreen() {
   const gateway = useGateway();

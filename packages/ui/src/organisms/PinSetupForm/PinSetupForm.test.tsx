@@ -42,4 +42,19 @@ describe("PinSetupForm", () => {
     await userEvent.type(screen.getByLabelText("Confirm game PIN"), "482915{Enter}");
     expect(onSubmit).toHaveBeenCalledWith("482915");
   });
+
+  it("takes a custom title, heading level and button label (for use inside another page)", () => {
+    render(
+      <PinSetupForm
+        onSubmit={noop}
+        birthdate={BIRTHDATE}
+        title="Change your game PIN"
+        headingLevel={2}
+        submitLabel="Change PIN"
+      />,
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "Change your game PIN" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Change PIN" })).toBeInTheDocument();
+  });
 });

@@ -1,40 +1,21 @@
-import { FictionLabel, Heading, ProductGrid, Text } from "@delulu/ui";
+import { FictionLabel, Heading, Text } from "@delulu/ui";
 import type { Metadata } from "next";
 import { CATEGORIES } from "../data/seed-catalog";
+import { FeaturedProducts } from "./_components/FeaturedProducts";
 import { ShopShell } from "./_components/ShopShell";
-import type { ProductResponse } from "./_lib/api";
-import { toGridItem } from "./_lib/catalog";
+import { featuredAcrossPrices } from "./_lib/catalog";
 import { loadCatalog } from "./_lib/catalog-server";
-import { parsePaise } from "./_lib/money";
 
 export const metadata: Metadata = { title: "Buy things that don't exist" };
 
 /** Public page, rebuilt at most once a minute; it never contains anything about a signed-in person. */
 export const revalidate = 60;
 
-const byPrice = (a: ProductResponse, b: ProductResponse) => {
-  const x = parsePaise(a.pricePaise);
-  const y = parsePaise(b.pricePaise);
-  return x < y ? -1 : x > y ? 1 : 0;
-};
-
-/**
- * Two products per category: one from the lower quarter and one from the upper
- * quarter of that category's prices, so the grid shows a spread rather than the
- * cheapest items. Shown cheapest first.
- */
-function featuredAcrossPrices(products: readonly ProductResponse[]) {
-  return CATEGORIES.flatMap((category) => {
-    const sorted = products.filter((product) => product.category === category.slug).sort(byPrice);
-    const picks = [sorted[Math.floor(sorted.length * 0.25)], sorted[Math.floor(sorted.length * 0.8)]];
-    return picks.filter((product): product is ProductResponse => product !== undefined);
-  })
-    .sort(byPrice)
-    .map(toGridItem);
-}
-
 export default async function HomePage() {
-  const featured = featuredAcrossPrices(await loadCatalog());
+  const featured = featuredAcrossPrices(
+    await loadCatalog(),
+    CATEGORIES.map((c) => c.slug),
+  );
 
   return (
     <ShopShell>
@@ -72,7 +53,7 @@ export default async function HomePage() {
         <Heading level={2} size="md" id="featured" className="mb-3">
           Fresh impossibilities
         </Heading>
-        <ProductGrid items={featured} label="Featured products" />
+        <FeaturedProducts initial={featured} />
       </section>
     </ShopShell>
   );

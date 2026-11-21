@@ -10,7 +10,15 @@ import type { ProductResponse } from "./api";
  */
 const PAGE = 50;
 
+/**
+ * `next build` runs with production settings and no database, so the static pages are generated
+ * empty at build time; the browser then fills them from the public catalog route (usePublicCatalog)
+ * until the first background revalidation produces the full page.
+ */
+const building = () => process.env.NEXT_PHASE === "phase-production-build";
+
 export async function loadCatalog(category?: string): Promise<ProductResponse[]> {
+  if (building()) return [];
   const all: ProductResponse[] = [];
   let cursor: string | null = null;
   do {
