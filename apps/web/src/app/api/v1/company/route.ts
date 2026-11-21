@@ -1,6 +1,6 @@
 import { myCompany, updateStore } from "@delulu/db/runtime";
 import { z } from "zod";
-import { webPool } from "@/server/db";
+import { payPool, webPool } from "@/server/db";
 import { route } from "@/server/http";
 import { RATE_RULES } from "@/server/rate-limit";
 import { checkStoreEdit } from "@/server/selling";
@@ -27,7 +27,8 @@ export const PATCH = route(
   },
   async ({ body, session }) => {
     const edit = checkStoreEdit(body);
-    const company = await updateStore(webPool(), { authSessionId: session.id, ...edit });
+    // the pay credential only: text stored on the strength of this server's screening (0050)
+    const company = await updateStore(payPool(), { authSessionId: session.id, ...edit });
     return { json: { company: companyView(company) } };
   },
 );

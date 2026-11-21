@@ -30,7 +30,7 @@ export interface Creator {
 export async function creator(pool: pg.Pool, toSave: readonly ProductFixture[]): Promise<Creator> {
   const u = await user(pool);
   await completePassport(pool, u, toSave);
-  const handle = `shop-${uuidv7().slice(-10)}`;
+  const handle = `lamps-${uuidv7().slice(-10)}`; // "shop" is reserved as a token (0049)
   const q = await companyQuote(pool, {
     authSessionId: u.authSessionId,
     handle,

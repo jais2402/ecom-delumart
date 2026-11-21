@@ -64,6 +64,11 @@ function Detail({ order }: { order: MerchantOrder }) {
               <code className="font-mono">{order.couponCode}</code>
             </dd>
           </>
+        ) : order.couponKind === "PRIVATE" ? (
+          <>
+            <dt className="text-fg-muted">Coupon used</dt>
+            <dd>Private coupon</dd>
+          </>
         ) : null}
       </dl>
 

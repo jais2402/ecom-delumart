@@ -12,14 +12,33 @@ const body = z.strictObject({
   description: z.string().max(2000).default(""),
 });
 
+function passesChecks(b: z.infer<typeof body>): boolean {
+  try {
+    checkStoreIdentity(b);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * POST /api/v1/company/quote {handle, displayName, description}: checked and screened here
  * (VALIDATION_FAILED with `details.reasons` per field), then a COMPANY_REGISTRATION checkout session
- * that reserves the handle for five minutes. Pay it with POST /checkout-sessions/{id}/attempts
+ * that reserves the handle for five minutes (never extended by quoting it again; once it lapses
+ * unpaid, the same person waits 30 minutes for that handle; five quotes per hour). Pay it with
+ * POST /checkout-sessions/{id}/attempts
  * (and /attempts/{id}/pin for a card), then POST /company/register.
  */
 export const POST = route(
-  { auth: "session", body, rateLimits: [{ rule: RATE_RULES.companyActor }] },
+  {
+    auth: "session",
+    body,
+    rateLimits: [
+      { rule: RATE_RULES.companyActor },
+      // quotes that would reserve a handle: five an hour (a refused field reserves nothing)
+      { rule: RATE_RULES.companyQuoteActor, when: (b) => passesChecks(b) },
+    ],
+  },
   async ({ body: b, session }) => {
     const identity = checkStoreIdentity(b);
     const quote = await companyQuote(payPool(), { authSessionId: session.id, ...identity });

@@ -1,6 +1,7 @@
 import "./server-only";
 import { type ErrorCode, serializePaise } from "@delulu/core";
 import type {
+  AdminStatus,
   AppealQueueItem,
   AppealResolution,
   AppealView,
@@ -674,7 +675,9 @@ export function merchantOrderView(o: MerchantOrder) {
     deliveryFeeBuyerPaise: paise(o.deliveryFeeBuyerPaise),
     deliveryFeeSellerPaise: paise(o.deliveryFeeSellerPaise),
     netPaise: paise(o.netPaise),
+    // a private coupon's code could name the buyer: only public codes reach the seller (0051)
     couponCode: o.couponCode,
+    couponKind: o.couponKind,
     delivery: o.delivery && {
       speed: o.delivery.speed,
       placedAt: iso(o.delivery.placedAt),
@@ -769,5 +772,21 @@ export function inventoryView(i: Inventory) {
       lowStock: p.lowStock,
       edition: p.edition && { supply: p.edition.supply, issued: p.edition.issued },
     })),
+  };
+}
+
+/** The console's status (GET /api/v1/admin/status). */
+export function adminStatusView(s: AdminStatus) {
+  return {
+    publication: { enabled: s.publication.enabled, updatedAt: isoOrNull(s.publication.updatedAt) },
+    moderationOverdue: {
+      count: s.moderationOverdue.count,
+      oldestAgeSeconds: s.moderationOverdue.oldestAgeSeconds,
+      oldestSubmittedAt: isoOrNull(s.moderationOverdue.oldestSubmittedAt),
+      thresholdHours: s.moderationOverdue.thresholdHours,
+    },
+    needsReview: s.needsReview,
+    openReportCases: s.openReportCases,
+    openAppeals: s.openAppeals,
   };
 }

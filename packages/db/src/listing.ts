@@ -674,3 +674,46 @@ export function setSystemSwitch(
     ]),
   );
 }
+
+export interface ModerationOverdue {
+  /** NEEDS_REVIEW submissions older than the threshold. */
+  count: number;
+  /** Age of the oldest NEEDS_REVIEW submission, in whole seconds; null when none is waiting. */
+  oldestAgeSeconds: number | null;
+  oldestSubmittedAt: Date | null;
+  thresholdHours: number;
+}
+
+export interface AdminStatus {
+  publication: { enabled: boolean; updatedAt: Date | null };
+  moderationOverdue: ModerationOverdue;
+  needsReview: number;
+  openReportCases: number;
+  openAppeals: number;
+}
+
+export function moderationOverdueOf(v: unknown): ModerationOverdue {
+  const o = (v ?? {}) as Json;
+  return {
+    count: Number(o.count ?? 0),
+    oldestAgeSeconds:
+      o.oldestAgeSeconds === null || o.oldestAgeSeconds === undefined ? null : Number(o.oldestAgeSeconds),
+    oldestSubmittedAt: o.oldestSubmittedAt ? date(o.oldestSubmittedAt) : null,
+    thresholdHours: Number(o.thresholdHours ?? 0),
+  };
+}
+
+/** The console's status (Super Admin only; FORBIDDEN for anyone else, 0046). */
+export async function adminStatus(pool: Pool, input: Session): Promise<AdminStatus> {
+  const r = await asWeb(pool, input.authSessionId, (c) =>
+    one<Json>(c, "SELECT core.admin_status() AS r", []),
+  );
+  const p = (r.publication ?? {}) as Json;
+  return {
+    publication: { enabled: p.enabled === true, updatedAt: p.updatedAt ? date(p.updatedAt) : null },
+    moderationOverdue: moderationOverdueOf(r.moderationOverdue),
+    needsReview: Number(r.needsReview ?? 0),
+    openReportCases: Number(r.openReportCases ?? 0),
+    openAppeals: Number(r.openAppeals ?? 0),
+  };
+}

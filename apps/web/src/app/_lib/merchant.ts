@@ -37,7 +37,9 @@ export interface MerchantOrder {
   deliveryFeeBuyerPaise: string;
   deliveryFeeSellerPaise: string;
   netPaise: string;
+  /** Only a PUBLIC coupon's code; a private code could name the buyer. */
   couponCode: string | null;
+  couponKind: "PUBLIC" | "PRIVATE" | null;
   delivery: DeliveryTimes | null;
   lines: MerchantOrderLine[];
 }

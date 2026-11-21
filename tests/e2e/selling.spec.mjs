@@ -24,7 +24,7 @@ const CODE = "000000";
 const run = Math.random().toString(36).slice(2, 10);
 const phone = () => `9${String(Math.floor(Math.random() * 1e9)).padStart(9, "0")}`;
 const EMAIL = `sell-${run}@example.com`;
-const HANDLE = `shop-${run}`;
+const HANDLE = `lamps-${run}`; // "shop" is a reserved token in a store handle (sixth review)
 const SHOP_NAME = `Test Shop ${run}`;
 
 // Paise: ₹100 crore at the start; the registration fee is ₹5 lakh.

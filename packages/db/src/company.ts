@@ -217,12 +217,15 @@ export async function myCompany(pool: Pool, input: { authSessionId: string }): P
   return r.company === null ? null : companyOf(r.company);
 }
 
-/** The owner edits the display name and description (an omitted field is unchanged). */
+/**
+ * The owner edits the display name and description (an omitted field is unchanged). Runs as app_pay
+ * (0050): only the pay credential stores text on the strength of the server's screening.
+ */
 export async function updateStore(
   pool: Pool,
   input: { authSessionId: string; displayName?: string; description?: string },
 ): Promise<Company> {
-  const r = await asWeb(pool, input.authSessionId, (c) =>
+  const r = await asPay(pool, input.authSessionId, (c) =>
     one<{ company: StoredCompany }>(c, "SELECT core.update_store($1, $2) AS r", [
       input.displayName ?? null,
       input.description ?? null,

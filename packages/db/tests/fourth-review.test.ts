@@ -174,7 +174,9 @@ describe("fourth security review", () => {
       for (const role of ["app_jobs", "app_pay", "app_web", RAW_WRITER]) {
         for (const type of ["COMPENSATION", "REVERSAL", "ACCOUNT_RETIREMENT"]) {
           const message = await inRolledBackTx(pool, async (c) => {
-            // a grant mistake: the role is given INSERT (rolled back with the test)
+            // a grant mistake: the role is given INSERT (rolled back with the test); since the
+            // sixth review app_jobs has no USAGE on the ledger schema either, so the mistake includes it
+            await c.query(`GRANT USAGE ON SCHEMA ledger TO ${role}`);
             await c.query(`GRANT INSERT ON ledger.journal TO ${role}`);
             await c.query(`SET LOCAL ROLE ${role}`);
             try {
@@ -554,23 +556,27 @@ describe("fourth security review", () => {
       expect(refused).toBe("VALIDATION_FAILED");
       const made = await asWeb(shop.owner, async (c) => (await create(c, shop.companyId)).rows[0]?.r);
       expect(made?.code).toMatch(ALPHABET);
-      // a job cannot rename a private code to a chosen one, or make a coupon public
-      const existing = await asWeb(shop.owner, async (c) => {
-        const r = (await create(c, shop.companyId)).rows[0]?.r;
-        await c.query("RESET ROLE");
-        await c.query("SET LOCAL ROLE app_jobs");
-        const tryIt = async (sql: string) => {
-          await c.query("SAVEPOINT s");
-          const o = await outcome(c.query(sql, [r?.couponId]));
-          await c.query("ROLLBACK TO SAVEPOINT s");
-          return o;
-        };
-        return {
-          rename: await tryIt("UPDATE core.coupon SET code_normalised = 'CHOSEN10' WHERE id = $1"),
-          publish: await tryIt("UPDATE core.coupon SET is_public = true WHERE id = $1"),
-        };
-      });
-      expect(existing).toEqual({ rename: "23514", publish: "23514" });
+      // a job cannot rename a private code to a chosen one, or make a coupon public: since the sixth
+      // review (0047) app_jobs holds no UPDATE on coupons at all; a writer the grants missed is still
+      // stopped by the structural rule
+      const attempts = async (role: string) =>
+        asWeb(shop.owner, async (c) => {
+          const r = (await create(c, shop.companyId)).rows[0]?.r;
+          await c.query("RESET ROLE");
+          await c.query(`SET LOCAL ROLE ${role}`);
+          const tryIt = async (sql: string) => {
+            await c.query("SAVEPOINT s");
+            const o = await outcome(c.query(sql, [r?.couponId]));
+            await c.query("ROLLBACK TO SAVEPOINT s");
+            return o;
+          };
+          return {
+            rename: await tryIt("UPDATE core.coupon SET code_normalised = 'CHOSEN10' WHERE id = $1"),
+            publish: await tryIt("UPDATE core.coupon SET is_public = true WHERE id = $1"),
+          };
+        });
+      expect(await attempts("app_jobs")).toEqual({ rename: "42501", publish: "42501" });
+      expect(await attempts(RAW_WRITER)).toEqual({ rename: "23514", publish: "23514" });
     });
 
     it("core.create_coupon: only the company's owner, five active coupons per company, percent 1–90, public codes of 4–16 characters", async () => {
@@ -793,6 +799,7 @@ describe("fourth security review", () => {
         const coV = await checkout(pool, victim, [p2], standard(s));
         const attack = codeOf(payFor(holdingPool, attacker, coA));
         await atCommit; // the attacker's purchase succeeded inside its open transaction
+        const idleSince = Date.now();
 
         const k = key();
         expect(await codeOf(payFor(pool, victim, coV, k))).toBe("BUSY");
@@ -805,7 +812,10 @@ describe("fourth security review", () => {
             "42501",
           );
         }
-        // the watchdog (scheduled every few seconds in production), as the job runner
+        // the watchdog (scheduled every few seconds in production), as the job runner; since the
+        // sixth review it ends a backend only after it has sat idle in its transaction for at least
+        // five seconds (a shorter max_age is ignored)
+        await new Promise((resolve) => setTimeout(resolve, Math.max(0, 5_300 - (Date.now() - idleSince))));
         const killed = await withTransaction(
           pool,
           async (c) =>

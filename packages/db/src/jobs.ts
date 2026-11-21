@@ -77,9 +77,35 @@ export async function applyScreening(
   );
 }
 
-/** Pauses publication when the oldest waiting submission is overdue (48 h by default). */
-export async function moderationSafetyNet(pool: Pool): Promise<{ paused: boolean }> {
-  return asJobs(pool, (c) => one<{ paused: boolean }>(c, "SELECT core.moderation_safety_net() AS r", []));
+export interface SafetyNetResult {
+  /** Some NEEDS_REVIEW listing has waited longer than the threshold (48 h by default). */
+  overdue: boolean;
+  /** How many have. */
+  count: number;
+  oldestAgeSeconds: number | null;
+  /** This run wrote the day's SYSTEM audit row (at most one per UTC day). */
+  audited: boolean;
+}
+
+/**
+ * The moderation safety net (0046): never switches publication off; when a listing has waited for
+ * review too long, it records that once per UTC day in the audit chain.
+ */
+export async function moderationSafetyNet(pool: Pool): Promise<SafetyNetResult> {
+  const r = await asJobs(pool, (c) =>
+    one<{
+      overdue: boolean;
+      count: number | string;
+      oldestAgeSeconds: number | string | null;
+      audited: boolean;
+    }>(c, "SELECT core.moderation_safety_net() AS r", []),
+  );
+  return {
+    overdue: r.overdue === true,
+    count: Number(r.count),
+    oldestAgeSeconds: r.oldestAgeSeconds === null ? null : Number(r.oldestAgeSeconds),
+    audited: r.audited === true,
+  };
 }
 
 /** Expired rate counter windows (older than two days). */
@@ -103,5 +129,23 @@ export async function terminateStuckMoneySessions(pool: Pool): Promise<number> {
   return asJobs(pool, async (c) => {
     const { rows } = await c.query<{ n: number }>("SELECT ops.terminate_stuck_money_sessions() AS n");
     return Number(rows[0]?.n ?? 0);
+  });
+}
+
+/**
+ * The jobs endpoint's replay guard (0048): records the SHA-256 of an accepted request signature
+ * with its signed time. True the first time; false for a replay. Throws when the database cannot
+ * answer: the caller then refuses the request (fails closed).
+ */
+export async function acceptJobsRequest(
+  pool: Pool,
+  input: { signatureHash: Uint8Array; requestAt: Date },
+): Promise<boolean> {
+  return asJobs(pool, async (c) => {
+    const { rows } = await c.query<{ ok: boolean }>("SELECT core.jobs_accept_request($1, $2) AS ok", [
+      Buffer.from(input.signatureHash),
+      input.requestAt,
+    ]);
+    return rows[0]?.ok === true;
   });
 }

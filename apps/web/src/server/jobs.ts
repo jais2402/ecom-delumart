@@ -6,6 +6,7 @@ import {
   pendingScreenings,
   purgeIdempotencyRecords,
   purgeRateCounters,
+  type SafetyNetResult,
   terminateStuckMoneySessions,
 } from "@delulu/db/runtime";
 import type pg from "pg";
@@ -21,7 +22,8 @@ import { env } from "./env";
  *     database busy or down) leaves it in SCREENING for a later run: nothing is ever approved by
  *     default. With publication switched off the database applies nothing (PAUSED) and the run
  *     stops screening;
- *  2. the moderation safety net (pauses publication when the oldest waiting listing is overdue);
+ *  2. the moderation safety net (records, once a day, that a listing has waited for review too
+ *     long; it never switches publication off);
  *  3. the rate counter purge, the idempotency record purge and the stuck-session watchdog.
  * Every step is idempotent, so overlapping or repeated runs are safe. The report holds counts only
  * (no listing text, no ids of people).
@@ -34,7 +36,7 @@ export interface JobsReport {
     failed: number;
     paused: boolean;
   };
-  safetyNet: { paused: boolean } | null;
+  safetyNet: SafetyNetResult | null;
   ratePurged: number | null;
   idempotencyPurged: number | null;
   terminated: number | null;

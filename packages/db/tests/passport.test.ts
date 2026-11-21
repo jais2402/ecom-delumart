@@ -1,13 +1,12 @@
-import { PASSPORT_RULE_VERSION } from "@delulu/core";
 import type pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   creatorAccess,
   mySaves,
   passportProgress,
-  recordPassportQuiz,
   saveProduct,
   submitPassportConcept,
+  submitPassportQuiz,
   unsaveProduct,
 } from "../src/passport";
 import {
@@ -36,7 +35,15 @@ import {
   type TestUser,
   uuidv7,
 } from "./helpers";
-import { CONCEPT, completePassport, passQuiz, published, STARTING, spendTo } from "./selling-fixtures";
+import {
+  CONCEPT,
+  CORRECT_ANSWERS,
+  completePassport,
+  passQuiz,
+  published,
+  STARTING,
+  spendTo,
+} from "./selling-fixtures";
 
 const web = (u: TestUser): Actor => ({ role: "app_web", userId: u.userId });
 const payAs = (u: TestUser): Actor => ({ role: "app_pay", userId: u.userId });
@@ -174,8 +181,15 @@ describe("saves and the Inventor Passport", () => {
 
   describe("passport (US-05)", () => {
     const progress = (u: TestUser) => passportProgress(pool, { authSessionId: u.authSessionId });
-    const quiz = (u: TestUser, passed: boolean, ruleVersion = PASSPORT_RULE_VERSION) =>
-      recordPassportQuiz(pool, { authSessionId: u.authSessionId, passed, ruleVersion });
+    // graded by the database against its own key (sixth review, 0050)
+    const quiz = async (u: TestUser, passed: boolean, answers?: Record<string, string>) =>
+      (
+        await submitPassportQuiz(pool, {
+          authSessionId: u.authSessionId,
+          answers:
+            answers ?? (passed ? CORRECT_ANSWERS : { ...CORRECT_ANSWERS, "q-money": "opt-money-real" }),
+        })
+      ).passport;
     const concept = (u: TestUser, text = CONCEPT, screening: "OK" | "NEEDS_REVIEW" | "REJECT" = "OK") =>
       submitPassportConcept(pool, { authSessionId: u.authSessionId, concept: text, screening });
     const entitlements = (u: TestUser) =>
@@ -209,11 +223,13 @@ describe("saves and the Inventor Passport", () => {
       });
     });
 
-    it("US-05 step 1: a wrong quiz may be retried without limit; a pass is kept; unknown rule versions are refused", async () => {
+    it("US-05 step 1: a wrong quiz may be retried without limit; a pass is kept; malformed answers are refused", async () => {
       const a = await user(pool);
       for (let i = 0; i < 4; i++) await quiz(a, false);
       expect((await progress(a)).quiz).toMatchObject({ done: false, failedAttempts: 4 });
-      expect(await codeOf(quiz(a, true, "passport_v0"))).toBe("VALIDATION_FAILED");
+      expect(await codeOf(quiz(a, true, { "q-money": 3 } as unknown as Record<string, string>))).toBe(
+        "VALIDATION_FAILED",
+      );
       expect((await progress(a)).quiz.done).toBe(false);
       const passed = await quiz(a, true);
       expect(passed.quiz.done).toBe(true);

@@ -439,11 +439,12 @@ describe("journey: sell, coupon, buy, earnings, reports, appeal", () => {
       brandUnlocked: false,
     });
 
-    // three aged users report the product: it is hidden at once and gone from the catalog
+    // three established users (a week old, sixth review) report the product: it is hidden at once
+    // and gone from the catalog
     const reporters = [];
     for (let i = 0; i < 3; i++) {
       const r = await player({ pin: false });
-      await ageAccount(app, r.b, 48);
+      await ageAccount(app, r.b, 8 * 24);
       reporters.push(r.b);
     }
     expect((await reportProduct(reporters[0] as Browser, productId)).status).toBe(201);

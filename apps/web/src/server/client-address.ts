@@ -68,3 +68,32 @@ export function stampPeerHeader(headers: NodeHeaders, remoteAddress: string | un
   if (remoteAddress === undefined) delete headers[PEER_HEADER];
   else headers[PEER_HEADER] = peerStampValue(remoteAddress);
 }
+
+/**
+ * The key a client address is rate-limited under (sixth security review, minor 10): an IPv4 address
+ * as it is (an IPv4-mapped IPv6 address becomes its IPv4 address); an IPv6 address by its /64
+ * prefix, since one host typically holds a whole /64 and could otherwise use a fresh address per
+ * request. Anything unparseable is returned unchanged (it is still hashed before storage).
+ */
+export function rateAddressKey(address: string): string {
+  const a = address.trim().toLowerCase();
+  if (!a.includes(":")) return a;
+  const mapped = /^(?:::|(?:0{1,4}:){5})ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(a);
+  if (mapped?.[1]) return mapped[1];
+  const hextets = expandIpv6(a);
+  if (hextets === null) return a;
+  return `${hextets.slice(0, 4).join(":")}::/64`;
+}
+
+function expandIpv6(a: string): string[] | null {
+  const halves = a.split("::");
+  if (halves.length > 2) return null;
+  const part = (s: string | undefined): string[] => (s === undefined || s === "" ? [] : s.split(":"));
+  const head = part(halves[0]);
+  const tail = part(halves[1]);
+  const missing = 8 - head.length - tail.length;
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+  const all = [...head, ...Array<string>(halves.length === 1 ? 0 : missing).fill("0"), ...tail];
+  if (all.length !== 8 || !all.every((h) => /^[0-9a-f]{1,4}$/.test(h))) return null;
+  return all.map((h) => h.padStart(4, "0"));
+}

@@ -116,13 +116,22 @@ const productPage = (id: string) =>
 const balanceOf = async (b: Browser): Promise<bigint> =>
   BigInt(str((await b.call(R.wallet.GET, "GET", "/api/v1/wallet")).json.balancePaise));
 
+/**
+ * A fresh signed timestamp per call: an accepted signature is never accepted again (sixth review), so
+ * two calls in the same second with the same body take consecutive seconds, as a scheduler would.
+ */
+let lastTimestamp = 0;
+function freshTimestamp(): string {
+  lastTimestamp = Math.max(Math.floor(Date.now() / 1000), lastTimestamp + 1);
+  return String(lastTimestamp);
+}
+
 /** The signed scheduler call. */
 async function runJobs(
   options: { body?: string; timestamp?: string | null; signature?: string | null; cookie?: Browser } = {},
 ): Promise<CallResult> {
   const body = options.body ?? "{}";
-  const timestamp =
-    options.timestamp === undefined ? String(Math.floor(Date.now() / 1000)) : options.timestamp;
+  const timestamp = options.timestamp === undefined ? freshTimestamp() : options.timestamp;
   const key = Buffer.from(process.env.JOBS_SIGNING_KEY ?? "", "hex");
   const signature =
     options.signature === undefined ? signJobsRequest(key, timestamp ?? "", body) : options.signature;
@@ -157,7 +166,7 @@ async function seller(): Promise<{ b: Browser; companyId: string; warehouseId: s
     body: { concept: "A lamp that is mostly moon and partly nap." },
   });
   expect(conceptRes.status).toBe(200);
-  const handle = `shop-${Array.from(randomBytes(8), (b) => "bcdfghjklmnpqrstvwxz"[b % 20]).join("")}`;
+  const handle = `lamps-${Array.from(randomBytes(8), (b) => "bcdfghjklmnpqrstvwxz"[b % 20]).join("")}`;
   const q = await b.call(companyQuote.POST, "POST", "/api/v1/company/quote", {
     body: { handle, displayName: "Storm Supplies", description: "Weather in jars." },
   });
@@ -484,7 +493,7 @@ describe("the signed job runner", () => {
     }
   });
 
-  it("accepts a replay of the same timestamp and body within the window; every job is idempotent", async () => {
+  it("refuses a replay of the same signed request within the window (sixth review); a fresh request is idempotent", async () => {
     const s = await seller();
     const id = str((await createDraft(s.b)).json.product?.id);
     await submitDraft(s.b, id);
@@ -494,7 +503,7 @@ describe("the signed job runner", () => {
     expect(first.status).toBe(200);
     expect(first.json.report).toMatchObject({
       screening: { outcomes: { PUBLISHED: 1 }, failed: 0, paused: false },
-      safetyNet: { paused: false },
+      safetyNet: { overdue: false, audited: false },
       ratePurged: expect.any(Number),
       idempotencyPurged: expect.any(Number),
       terminated: 0,
@@ -508,12 +517,17 @@ describe("the signed job runner", () => {
         )
       ).rows[0];
     const before = await snapshot();
+    // the very same signed request again: refused, with the answer every bad signature gets
     const replay = await runJobs({ timestamp, body });
-    expect(replay.status).toBe(200);
-    expect(replay.json.report).toMatchObject({
+    expect(replay.status).toBe(403);
+    expect(replay.json).toEqual((await runJobs({ signature: "0".repeat(64) })).json);
+    expect(await snapshot()).toEqual(before);
+    // a fresh signed request runs, and changes nothing the first run did not
+    const again = await runJobs({ body });
+    expect(again.status).toBe(200);
+    expect(again.json.report).toMatchObject({
       screening: { processed: 0, skipped: 0, failed: 0 },
-      safetyNet: { paused: false },
-      ratePurged: 0,
+      safetyNet: { overdue: false, audited: false },
       idempotencyPurged: 0,
       terminated: 0,
     });

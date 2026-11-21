@@ -57,6 +57,8 @@ export const SERVER_CONFIG = {
     reliefActor: { scope: "relief.claim.actor", by: "actor", limit: 10, windowSeconds: 60 },
     /** Company quotes, registrations and store edits per account. */
     companyActor: { scope: "company.write.actor", by: "actor", limit: 10, windowSeconds: 60 },
+    /** Company registration quotes per account (sixth review: 5 / hour; the database counts them too). */
+    companyQuoteActor: { scope: "company.quote.actor", by: "actor", limit: 5, windowSeconds: 3_600 },
     /** Studio writes (drafts, submissions, prices, stock, shipping, Zap hub) per account. */
     studioActor: { scope: "studio.write.actor", by: "actor", limit: 30, windowSeconds: 60 },
     /** Super Admin moderation calls per account. */

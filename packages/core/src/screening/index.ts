@@ -311,9 +311,47 @@ export const HANDLE_RULES = { minChars: 3, maxChars: 24 } as const;
 export const STORE_NAME_RULES = { minChars: 3, maxChars: 40 } as const;
 export const STORE_DESCRIPTION_MAX_CHARS = 280;
 
-const RESERVED: ReadonlySet<string> = new Set(RESERVED_HANDLES);
+/** Look-alike characters folded to the letter they imitate (sixth security review, minor 6). */
+const HANDLE_FOLD: Readonly<Record<string, string>> = {
+  "0": "o",
+  "1": "l",
+  i: "l",
+  "3": "e",
+  "4": "a",
+  "5": "s",
+  "7": "t",
+  "8": "b",
+};
 
-/** A store handle: 3–24 of a–z, 0–9 and hyphen; no leading, trailing or double hyphen; not reserved. */
+/**
+ * The confusable-folded form of a handle (or of one of its tokens): 0→o, 1/i/l→l, 3→e, 4→a, 5→s,
+ * 7→t, 8→b, hyphens removed. Mirrored by core.store_handle_fold in the database (0049).
+ */
+export function foldHandle(handle: string): string {
+  let out = "";
+  for (const ch of handle) {
+    if (ch === "-") continue;
+    out += HANDLE_FOLD[ch] ?? ch;
+  }
+  return out;
+}
+
+const RESERVED_FOLDED: ReadonlySet<string> = new Set(RESERVED_HANDLES.map(foldHandle));
+
+/**
+ * Whether a handle imitates a reserved one: its folded form is a folded reserved handle
+ * (`de1ulumart`, `deluiumart`), or one of its hyphen-separated tokens folds to one (`admin-team`,
+ * `support-desk`, `official-store`).
+ */
+export function isLookalikeHandle(handle: string): boolean {
+  if (RESERVED_FOLDED.has(foldHandle(handle))) return true;
+  return handle.split("-").some((token) => token !== "" && RESERVED_FOLDED.has(foldHandle(token)));
+}
+
+/**
+ * A store handle: 3–24 of a–z, 0–9 and hyphen; no leading, trailing or double hyphen; not reserved
+ * and not a look-alike of a reserved handle (isLookalikeHandle).
+ */
 export function validateHandle(
   handle: string,
 ): { ok: true; value: string } | { ok: false; code: HandleProblem } {
@@ -323,7 +361,7 @@ export function validateHandle(
   if (!/^[a-z0-9-]+$/.test(handle)) return { ok: false, code: "BAD_CHARACTERS" };
   if (handle.startsWith("-") || handle.endsWith("-")) return { ok: false, code: "HYPHEN_EDGE" };
   if (handle.includes("--")) return { ok: false, code: "DOUBLE_HYPHEN" };
-  if (RESERVED.has(handle)) return { ok: false, code: "RESERVED" };
+  if (isLookalikeHandle(handle)) return { ok: false, code: "RESERVED" };
   return { ok: true, value: handle };
 }
 

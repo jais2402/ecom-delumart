@@ -6,7 +6,7 @@
  * number) or a block to the blocked store.
  */
 import type { Pool } from "pg";
-import { asWeb, one, requireUuid } from "./command";
+import { asPay, asWeb, one, requireUuid } from "./command";
 import { type AppealView, appealOf } from "./listing";
 
 type Json = Record<string, unknown>;
@@ -51,9 +51,10 @@ export interface MyReport {
   resolvedAt: Date | null;
 }
 
+/** Runs as app_pay (0050): the detail and its screening flags are the server's word. */
 export async function createReport(pool: Pool, input: Session & ReportInput): Promise<ReportReceipt> {
   requireUuid(input.targetId, "targetId");
-  const r = await asWeb(pool, input.authSessionId, (c) =>
+  const r = await asPay(pool, input.authSessionId, (c) =>
     one<Json>(c, "SELECT core.report_create($1, $2, $3, $4, $5::jsonb) AS r", [
       input.targetType,
       input.targetId,
@@ -93,7 +94,8 @@ export async function createAppeal(
   input: Session & { productId: string; statement: string },
 ): Promise<AppealView> {
   requireUuid(input.productId, "productId");
-  const r = await asWeb(pool, input.authSessionId, (c) =>
+  // app_pay (0050): the statement is stored on the strength of the server's screening
+  const r = await asPay(pool, input.authSessionId, (c) =>
     one<{ appeal: unknown }>(c, "SELECT core.appeal_create($1, $2) AS r", [input.productId, input.statement]),
   );
   return appealOf(r.appeal);

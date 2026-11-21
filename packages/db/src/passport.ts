@@ -6,7 +6,7 @@
  */
 import { DomainError } from "@delulu/core";
 import type { Pool } from "pg";
-import { asWeb, isUuid, one, requireUuid } from "./command";
+import { asPay, asWeb, isUuid, one, requireUuid } from "./command";
 
 export interface SavedProduct {
   saveId: string;
@@ -162,29 +162,47 @@ export async function passportProgress(
   return passportOf(s);
 }
 
-/** Records the web server's grading of the quiz (pass or a failed try) under `ruleVersion`. */
-export async function recordPassportQuiz(
+export interface QuizResult {
+  passed: boolean;
+  /** Ids of the questions answered wrongly or not at all, in question order (never the right options). */
+  wrong: string[];
+  ruleVersion: string;
+  passport: PassportProgress;
+}
+
+/**
+ * Submits the quiz answers ({questionId: optionId}); the database grades them against its own
+ * answer key for the current rule version (0050) and records a pass or a failed try.
+ */
+export async function submitPassportQuiz(
   pool: Pool,
-  input: { authSessionId: string; passed: boolean; ruleVersion: string },
-): Promise<PassportProgress> {
-  const s = await asWeb(pool, input.authSessionId, (c) =>
-    one<StoredPassport>(c, "SELECT core.passport_record_quiz($1, $2) AS r", [
-      input.passed,
-      input.ruleVersion,
-    ]),
+  input: { authSessionId: string; answers: Readonly<Record<string, string>> },
+): Promise<QuizResult> {
+  const r = await asWeb(pool, input.authSessionId, (c) =>
+    one<{ passed: boolean; wrong: string[]; ruleVersion: string; passport: StoredPassport }>(
+      c,
+      "SELECT core.passport_submit_quiz($1::jsonb) AS r",
+      [JSON.stringify(input.answers)],
+    ),
   );
-  return passportOf(s);
+  return {
+    passed: r.passed === true,
+    wrong: r.wrong.map(String),
+    ruleVersion: String(r.ruleVersion),
+    passport: passportOf(r.passport),
+  };
 }
 
 /**
  * Submits the invention concept with the web server's screening verdict; the database stores it
- * only when the verdict is 'OK' and the length is within the rules.
+ * only when the verdict is 'OK' and the length is within the rules. Runs as app_pay (0050): only the
+ * pay credential may store text on the strength of the server's screening.
  */
 export async function submitPassportConcept(
   pool: Pool,
   input: { authSessionId: string; concept: string; screening: "OK" | "NEEDS_REVIEW" | "REJECT" },
 ): Promise<PassportProgress> {
-  const s = await asWeb(pool, input.authSessionId, (c) =>
+  const s = await asPay(pool, input.authSessionId, (c) =>
     one<StoredPassport>(c, "SELECT core.passport_submit_concept($1, $2) AS r", [
       input.concept,
       input.screening,

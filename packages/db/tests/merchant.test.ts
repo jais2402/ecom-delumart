@@ -277,6 +277,7 @@ describe("the merchant side", () => {
         [
           "buyer",
           "couponCode",
+          "couponKind",
           "cancelledAt",
           "deliveredAt",
           "delivery",

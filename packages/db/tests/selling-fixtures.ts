@@ -1,6 +1,6 @@
-import { PASSPORT_RULE_VERSION } from "@delulu/core";
+import { PASSPORT_V1 } from "@delulu/core";
 import type pg from "pg";
-import { recordPassportQuiz, saveProduct, submitPassportConcept } from "../src/passport";
+import { saveProduct, submitPassportConcept, submitPassportQuiz } from "../src/passport";
 import {
   CRORE,
   checkout,
@@ -42,12 +42,13 @@ export async function spendTo(pool: pg.Pool, u: TestUser, target: bigint) {
   return receipt;
 }
 
+/** The quiz's correct answers (the database grades them against its own key, 0050). */
+export const CORRECT_ANSWERS: Record<string, string> = Object.fromEntries(
+  PASSPORT_V1.questions.map((q) => [q.id, q.correctOptionId]),
+);
+
 export const passQuiz = (pool: pg.Pool, u: TestUser) =>
-  recordPassportQuiz(pool, {
-    authSessionId: u.authSessionId,
-    passed: true,
-    ruleVersion: PASSPORT_RULE_VERSION,
-  });
+  submitPassportQuiz(pool, { authSessionId: u.authSessionId, answers: CORRECT_ANSWERS });
 
 /** All three passport steps through the commands, saving the given products. */
 export async function completePassport(pool: pg.Pool, u: TestUser, toSave: readonly ProductFixture[]) {

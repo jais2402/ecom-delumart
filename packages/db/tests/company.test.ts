@@ -34,7 +34,7 @@ const MINT = "00000000-0000-7000-8000-000000000001";
 const SINK = "00000000-0000-7000-8000-000000000002";
 const FEE = 5n * LAKH;
 
-const handle = (): string => `shop-${randomBytes(5).toString("hex")}`;
+const handle = (): string => `lamps-${randomBytes(5).toString("hex")}`; // "shop" is reserved as a token (0049)
 
 /** Company registration (E, US-18, US-19), migration 0034. */
 describe("company registration", () => {

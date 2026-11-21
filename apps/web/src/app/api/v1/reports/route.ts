@@ -1,5 +1,5 @@
 import { createReport, myReports } from "@delulu/db/runtime";
-import { webPool } from "@/server/db";
+import { payPool, webPool } from "@/server/db";
 import { route } from "@/server/http";
 import { RATE_RULES } from "@/server/rate-limit";
 import { checkReport, reportBody } from "@/server/safety";
@@ -21,7 +21,8 @@ export const POST = route(
   { auth: "session", body: reportBody, rateLimits: [{ rule: RATE_RULES.reportActor }] },
   async ({ body, session }) => {
     const { detail, detailFlags } = checkReport(body);
-    const receipt = await createReport(webPool(), {
+    // the pay credential only: the detail and its flags are this server's screening (0050)
+    const receipt = await createReport(payPool(), {
       authSessionId: session.id,
       targetType: body.targetType,
       targetId: body.targetId.toLowerCase(),

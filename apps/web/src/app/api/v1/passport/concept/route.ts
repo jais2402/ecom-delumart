@@ -1,6 +1,6 @@
 import { submitPassportConcept } from "@delulu/db/runtime";
 import { z } from "zod";
-import { webPool } from "@/server/db";
+import { payPool } from "@/server/db";
 import { route } from "@/server/http";
 import { RATE_RULES } from "@/server/rate-limit";
 import { checkConcept } from "@/server/selling";
@@ -19,7 +19,8 @@ export const POST = route(
   },
   async ({ body, session }) => {
     const concept = checkConcept(body.concept);
-    const progress = await submitPassportConcept(webPool(), {
+    // the pay credential only: text stored on the strength of this server's screening (0050)
+    const progress = await submitPassportConcept(payPool(), {
       authSessionId: session.id,
       concept,
       screening: "OK",

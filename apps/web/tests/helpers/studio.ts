@@ -41,7 +41,7 @@ export const draftBody = (overrides: Record<string, unknown> = {}) => ({
 
 /** A store handle of letters only (random hex can trip the text screening). */
 export const letterHandle = (): string =>
-  `shop-${Array.from(randomBytes(10), (b) => "bcdfghjklmnpqrstvwxz"[b % 20]).join("")}`;
+  `lamps-${Array.from(randomBytes(10), (b) => "bcdfghjklmnpqrstvwxz"[b % 20]).join("")}`;
 
 export interface Seller {
   b: Browser;
@@ -90,9 +90,13 @@ export async function seller(app: TestApp): Promise<Seller> {
 }
 
 /** The signed scheduler call (runs screening). */
+/** Consecutive seconds for calls within one second: an accepted signature is never accepted again. */
+let lastTimestamp = 0;
+
 export async function runJobs(): Promise<number> {
   const body = "{}";
-  const timestamp = String(Math.floor(Date.now() / 1000));
+  lastTimestamp = Math.max(Math.floor(Date.now() / 1000), lastTimestamp + 1);
+  const timestamp = String(lastTimestamp);
   const key = Buffer.from(process.env.JOBS_SIGNING_KEY ?? "", "hex");
   const headers = new Headers({ "content-type": "application/json" });
   headers.set(JOBS_TIMESTAMP_HEADER, timestamp);

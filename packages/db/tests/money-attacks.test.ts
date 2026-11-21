@@ -2420,6 +2420,7 @@ describe("money attacks (security review)", () => {
       expect(await commitState(pool, { role: "app_jobs", userId: buyer.userId }, steal)).toBe("42501");
       // even granted the writes (a grant mistake, rolled back with the test), it acts as no user
       const granted = await asActor(pool, {}, async (c) => {
+        await c.query("GRANT USAGE ON SCHEMA ledger TO app_jobs"); // revoked since the sixth review (0047)
         await c.query("GRANT INSERT ON ledger.journal, ledger.posting TO app_jobs");
         await c.query("GRANT EXECUTE ON FUNCTION ledger.sync_wallets(uuid[]) TO app_jobs");
         await become(c, { role: "app_jobs", userId: buyer.userId });
@@ -3087,6 +3088,9 @@ describe("money attacks (security review)", () => {
       // command of 0023 (no money moves), the actor-scoped and catalog reads of 0026, and the
       // actor's own cart of 0028 (no money, stock or price authority)
       expect(fns.rows.map((r) => r.f)).toEqual([
+        // sixth review (0050): the policies' company scope, now a definer so that no application
+        // role reads a company's owner column; answers only the actor's own companies
+        "core.actor_company_ids()",
         "core.actor_id()",
         // 0039: Super Admin appeals and report cases (each refuses anyone but the Super Admin; no money moves)
         "core.admin_appeal_resolve(uuid,text,text)",
@@ -3098,8 +3102,10 @@ describe("money attacks (security review)", () => {
         "core.admin_report_resolve(uuid,text,text)",
         "core.admin_reports(uuid,integer)",
         "core.admin_set_switch(text,boolean,text)",
-        // 0039/0040: the actor's own appeals, reports and blocks (no money moves)
-        "core.appeal_create(uuid,text)",
+        // sixth review (0046): the console's status (Super Admin only)
+        "core.admin_status()",
+        // 0039/0040: the actor's own appeals, reports and blocks (no money moves); since the sixth
+        // review (0050) creating a report or an appeal is app_pay's (screened text)
         "core.block_store(uuid)",
         "core.cart_add(uuid)",
         "core.cart_clear()",
@@ -3140,8 +3146,8 @@ describe("money attacks (security review)", () => {
         "core.owns_products(uuid[])",
         "core.page_size(integer)",
         "core.passport_progress()",
-        "core.passport_record_quiz(boolean,text)",
-        "core.passport_submit_concept(text,text)",
+        // sixth review (0050): the quiz is graded by the database; the concept is app_pay's
+        "core.passport_submit_quiz(jsonb)",
         "core.product_allocate_and_publish(uuid,integer)",
         "core.product_archive(uuid)",
         "core.product_restock(uuid,integer)",
@@ -3156,7 +3162,6 @@ describe("money attacks (security review)", () => {
         "core.rate_hit(text,bytea,integer,integer)",
         // 0033: the actor's own relief status
         "core.relief_status()",
-        "core.report_create(text,uuid,text,text,jsonb)",
         "core.reveal_card_number(uuid)",
         "core.save_product(uuid)",
         "core.set_coupon_status(uuid,text)",
@@ -3167,7 +3172,6 @@ describe("money attacks (security review)", () => {
         "core.unblock_store(uuid)",
         "core.unsave_product(uuid)",
         "core.update_profile(text,jsonb,boolean)",
-        "core.update_store(text,text)",
         "core.warehouse_set_zap_hub(uuid,boolean)",
       ]);
     });
@@ -3183,7 +3187,10 @@ describe("money attacks (security review)", () => {
       );
       const by = (role: string) => rows.filter((r) => r.role === role).map((r) => r.f);
       expect(by("app_pay")).toEqual([
+        "core.actor_company_ids()",
         "core.actor_id()",
+        // sixth review (0050): text stored on the strength of the server's screening is app_pay's
+        "core.appeal_create(uuid,text)",
         "core.cart_add(uuid)",
         "core.cart_clear()",
         "core.cart_merge(uuid[])",
@@ -3203,19 +3210,23 @@ describe("money attacks (security review)", () => {
         "core.my_wallet()",
         "core.onboarding_status()",
         "core.owns_products(uuid[])",
+        "core.passport_submit_concept(text,text)",
         "core.provision_account(bytea,bytea,text[],text,text)",
         "core.rate_hit(text,bytea,integer,integer)",
         "core.record_birthdate(bytea,boolean)",
         "core.record_phone_verified(bytea,bytea)",
+        "core.report_create(text,uuid,text,text,jsonb)",
         "core.reset_card_pin(uuid,bytea)",
         "core.set_card_frozen(uuid,boolean)",
         "core.set_card_pin(uuid,bytea,bytea)",
+        "core.update_store(text,text)",
         "core.verify_card_pin(uuid,bytea)",
       ]);
+      // sixth review (0047): only the jobs' own functions
       expect(by("app_jobs")).toEqual([
-        "core.identity_is_tombstoned(bytea,bytea)",
-        "core.is_published_version(uuid)",
-        // 0037: the moderation safety net (pauses publication; writes a SYSTEM audit row)
+        // 0048: the jobs endpoint's replay guard
+        "core.jobs_accept_request(bytea,timestamp with time zone)",
+        // 0046: the moderation safety net (records overdue reviews; never pauses publication)
         "core.moderation_safety_net()",
         "core.purge_idempotency_records()",
         "core.rate_purge(interval)", // fifth review (0031): expired rate counter windows

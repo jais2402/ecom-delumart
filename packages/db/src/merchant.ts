@@ -177,8 +177,13 @@ export interface MerchantOrder {
   deliveryFeeSellerPaise: bigint;
   /** What the owner was credited (the ledger posting for this order). */
   netPaise: bigint;
-  /** The store's own coupon used on this order, if any. */
+  /**
+   * The store's own PUBLIC coupon code used on this order; null for a private coupon (whose code
+   * could identify the buyer) and when none was used (0051).
+   */
   couponCode: string | null;
+  /** Which kind of this store's coupon was used, if any. */
+  couponKind: "PUBLIC" | "PRIVATE" | null;
   delivery: {
     speed: "STANDARD" | "EXPRESS" | "ZAP";
     placedAt: Date;
@@ -207,6 +212,7 @@ function merchantOrderOf(j: Json): MerchantOrder {
     deliveryFeeSellerPaise: paise(j.deliveryFeeSellerPaise),
     netPaise: paise(j.netPaise),
     couponCode: textOrNull(j.couponCode),
+    couponKind: j.couponKind === "PUBLIC" || j.couponKind === "PRIVATE" ? j.couponKind : null,
     delivery: d
       ? {
           speed: d.speed as "STANDARD" | "EXPRESS" | "ZAP",

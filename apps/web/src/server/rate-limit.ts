@@ -1,6 +1,7 @@
 import "./server-only";
 import { DomainError } from "@delulu/core";
 import { rateHit } from "@delulu/db/runtime";
+import { rateAddressKey } from "./client-address";
 import { SERVER_CONFIG } from "./config";
 import { rateSubject } from "./crypto";
 import { webPool } from "./db";
@@ -33,7 +34,8 @@ export function retryAfterSeconds(windowSeconds: number, nowMs: number = Date.no
 export async function enforceRate(rule: RateRule, value: string): Promise<void> {
   const allowed = await rateHit(webPool(), "app_web", {
     scope: rule.scope,
-    subject: rateSubject(rule.by, value),
+    // an IPv6 client counts by its /64 (sixth review, minor 10)
+    subject: rateSubject(rule.by, rule.by === "address" ? rateAddressKey(value) : value),
     windowSeconds: rule.windowSeconds,
     maxHits: rule.limit * env().rateLimitMultiplier,
   });

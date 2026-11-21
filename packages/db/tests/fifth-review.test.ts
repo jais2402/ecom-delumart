@@ -172,12 +172,13 @@ describe("fifth security review: advisory locks", () => {
     expect(new Set(mine.map((r) => r.prev?.toString("hex"))).size).toBe(20); // no fork
   });
 
-  it("item 2c: the watchdog ends an application login (matched by membership, not by name) that holds an advisory lock idle outside any transaction", async () => {
+  it("item 2c: the watchdog ends an application login (matched by membership, not by name) that holds an advisory lock idle outside any transaction while another backend waits for it", async () => {
     const login = `delulu_fifth_${randomBytes(4).toString("hex")}`;
     const password = randomBytes(18).toString("hex");
     const admin = new pg.Client({ connectionString: ADMIN_URL });
     await admin.connect();
     let attacker: pg.Client | null = null;
+    let waiter: pg.PoolClient | null = null;
     try {
       await admin.query(`CREATE ROLE ${login} LOGIN PASSWORD '${password}' IN ROLE app_web`);
       // a platform where EXECUTE could not be revoked (a non-superuser owner): granted directly
@@ -191,7 +192,13 @@ describe("fifth security review: advisory locks", () => {
       await attacker.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [
         `core.cart_line:${victim.userId}`,
       ]);
-      await new Promise((resolve) => setTimeout(resolve, 1_300));
+      // sixth review: the watchdog ends only a backend that is idle in a transaction or keeps another
+      // waiting, and never before five seconds; here another backend waits for the attacker's key
+      waiter = await pool.connect();
+      const waiting = waiter.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [
+        `core.cart_line:${victim.userId}`,
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 5_300));
       const killed = await withTransaction(
         pool,
         async (c) =>
@@ -203,12 +210,15 @@ describe("fifth security review: advisory locks", () => {
         { role: "app_jobs" },
       );
       expect(killed).toBe(1);
+      await waiting; // the waiter gets the key once the attacker is gone
       expect(await codeOf(attacker.query("SELECT 1"))).not.toBe("ok");
       const audit = await pool.query<{ detail: { role: string } }>(
         `SELECT detail FROM audit.audit_log WHERE action = 'terminate_stuck_money_session' ORDER BY id DESC LIMIT 1`,
       );
       expect(audit.rows[0]?.detail.role).toBe(login);
     } finally {
+      await waiter?.query("SELECT pg_advisory_unlock_all()").catch(() => undefined);
+      waiter?.release();
       await attacker?.end().catch(() => undefined);
       await pool
         .query(`REVOKE EXECUTE ON FUNCTION pg_advisory_lock(bigint) FROM ${login}`)
@@ -377,7 +387,8 @@ describe("fifth security review: database rate counters", () => {
       async (c) => (await c.query<{ n: number }>("SELECT core.rate_purge() AS n")).rows[0]?.n,
       { role: "app_jobs" },
     );
-    expect(purged).toBe(1);
+    // the old window goes (sixth review: so does any other window that has already ended)
+    expect(purged).toBeGreaterThanOrEqual(1);
     const { rows } = await pool.query<{ scope: string }>(
       "SELECT scope FROM core.rate_counter WHERE subject = $1",
       [who],

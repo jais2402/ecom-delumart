@@ -33,6 +33,25 @@ import { type ConsoleAccess, ConsoleFrame, ConsoleGate, isDenied } from "./Conso
 
 type Notice = { tone: "success" | "danger" | "info"; text: string };
 
+/** GET /api/v1/admin/status (the console's status). */
+interface AdminStatus {
+  publication: { enabled: boolean; updatedAt: string | null };
+  moderationOverdue: {
+    count: number;
+    oldestAgeSeconds: number | null;
+    oldestSubmittedAt: string | null;
+    thresholdHours: number;
+  };
+  needsReview: number;
+  openReportCases: number;
+  openAppeals: number;
+}
+
+const hoursText = (seconds: number): string => {
+  const h = Math.floor(seconds / 3600);
+  return h === 1 ? "1 hour" : `${h} hours`;
+};
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const reasonProblem = (text: string): string | null => {
   const n = [...text.trim()].length;
@@ -49,6 +68,7 @@ export function ModerationScreen() {
   const [access, setAccess] = useState<ConsoleAccess>("checking");
   const [items, setItems] = useState<ModerationItem[]>([]);
   const [appeals, setAppeals] = useState<AppealQueueItem[]>([]);
+  const [status, setStatus] = useState<AdminStatus | null>(null);
   const [message, setMessage] = useState("");
 
   const load = useCallback(async (): Promise<boolean> => {
@@ -66,6 +86,7 @@ export function ModerationScreen() {
       } while (cursor);
       setItems(all);
       setAppeals([...queue.values()]);
+      setStatus(await api<AdminStatus>("/api/v1/admin/status"));
       setAccess("allowed");
       return true;
     } catch (error) {
@@ -91,6 +112,7 @@ export function ModerationScreen() {
       <ModerationBody
         items={items}
         appeals={appeals}
+        status={status}
         reload={load}
         announce={(text) => setMessage(text)}
         message={message}
@@ -102,12 +124,14 @@ export function ModerationScreen() {
 function ModerationBody({
   items,
   appeals,
+  status,
   reload,
   announce,
   message,
 }: {
   items: ModerationItem[];
   appeals: AppealQueueItem[];
+  status: AdminStatus | null;
   reload: () => Promise<boolean>;
   announce: (text: string) => void;
   message: string;
@@ -115,7 +139,11 @@ function ModerationBody({
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [paused, setPaused] = useState<boolean | null>(null);
+  const [paused, setPaused] = useState<boolean | null>(status ? !status.publication.enabled : null);
+  useEffect(() => {
+    if (status) setPaused(!status.publication.enabled);
+  }, [status]);
+  const overdue = status?.moderationOverdue ?? null;
 
   function say(next: Notice) {
     setNotice(next);
@@ -150,8 +178,20 @@ function ModerationBody({
         {message}
       </span>
       {paused === true ? (
-        <Alert tone="warning" title="Publishing is paused">
-          Nothing new goes live, and approvals are refused, until you resume publishing below.
+        <Alert tone="warning" title="Automatic publishing is paused">
+          Screening publishes nothing new until you resume publishing below. Your own approvals and restores
+          still go live.
+        </Alert>
+      ) : null}
+      {overdue && overdue.count > 0 ? (
+        <Alert tone="warning" title="Reviews are overdue">
+          {overdue.count === 1
+            ? `1 listing has waited more than ${overdue.thresholdHours} hours for review.`
+            : `${overdue.count} listings have waited more than ${overdue.thresholdHours} hours for review.`}{" "}
+          {overdue.oldestAgeSeconds !== null
+            ? `The oldest has waited ${hoursText(overdue.oldestAgeSeconds)}. `
+            : ""}
+          They stay unpublished until you decide.
         </Alert>
       ) : null}
       {notice ? <Alert tone={notice.tone}>{notice.text}</Alert> : null}
@@ -338,7 +378,7 @@ function PauseSwitch({
       setShown(false);
       say({
         tone: pause ? "info" : "success",
-        text: pause ? "Publishing is paused for everyone." : "Publishing is back on.",
+        text: pause ? "Automatic publishing is paused." : "Publishing is back on.",
       });
     } catch (e) {
       setError(studioErrorText(e));
@@ -364,9 +404,9 @@ function PauseSwitch({
         />
         <Text size="sm">
           {paused === null
-            ? "Publishing status is shown once you change it, or when an approval is refused."
+            ? "Publishing status is not known yet."
             : paused
-              ? "Publishing is paused."
+              ? "Automatic publishing is paused. Your approvals and restores still apply."
               : "Publishing is on."}
         </Text>
       </div>

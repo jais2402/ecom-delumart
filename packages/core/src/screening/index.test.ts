@@ -1,6 +1,9 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import { HANDLE_AGREEMENT_CASES } from "./handle-cases";
 import {
+  foldHandle,
+  isLookalikeHandle,
   normaliseForScreening,
   RESERVED_HANDLES,
   type ScreenCode,
@@ -209,5 +212,50 @@ describe("validateStoreName (D)", () => {
     ["Moon\nLamps", { ok: false, code: "CONTROL_CHARACTERS" }],
   ])("%j", (name, expected) => {
     expect(validateStoreName(name)).toEqual(expected);
+  });
+});
+
+describe("look-alike store handles (sixth security review, minor 6)", () => {
+  it.each(HANDLE_AGREEMENT_CASES.map((c) => [c.handle, c.accepted] as const))(
+    "shared table: %s accepted=%s",
+    (handle, accepted) => {
+      const r = validateHandle(handle);
+      expect(r.ok).toBe(accepted);
+      if (!r.ok) expect(r.code).toBe("RESERVED");
+    },
+  );
+
+  it("folds 0→o, 1/i/l→l, 3→e, 4→a, 5→s, 7→t, 8→b and drops hyphens", () => {
+    expect(foldHandle("de1ulumart")).toBe(foldHandle("delulumart"));
+    expect(foldHandle("deluiumart")).toBe(foldHandle("delulumart"));
+    expect(foldHandle("0-1-i-l-3-4-5-7-8")).toBe("ollleastb");
+  });
+
+  it("property: every reserved handle, any of its confusable spellings, and any handle with it as a token, is refused", () => {
+    const reverse: Record<string, string[]> = {
+      o: ["0"],
+      l: ["1", "i"],
+      i: ["1", "l"],
+      e: ["3"],
+      a: ["4"],
+      s: ["5"],
+      t: ["7"],
+      b: ["8"],
+    };
+    const spelling = fc
+      .constantFrom(...RESERVED_HANDLES)
+      .chain((h) =>
+        fc
+          .tuple(...[...h].map((ch) => fc.constantFrom(ch, ...(reverse[ch] ?? []))))
+          .map((chars) => chars.join("")),
+      );
+    const token = fc.stringMatching(/^[a-z0-9]{1,6}$/);
+    fc.assert(
+      fc.property(spelling, token, fc.boolean(), (bad, other, before) => {
+        expect(isLookalikeHandle(bad)).toBe(true);
+        const joined = before ? `${other}-${bad}` : `${bad}-${other}`;
+        if (joined.length <= 24) expect(validateHandle(joined)).toEqual({ ok: false, code: "RESERVED" });
+      }),
+    );
   });
 });

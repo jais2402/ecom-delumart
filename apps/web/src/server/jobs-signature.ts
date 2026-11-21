@@ -1,5 +1,5 @@
 import "./server-only";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 /**
  * The signature of POST /api/internal/jobs/run (LLD §9): the scheduler sends
@@ -7,7 +7,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  *   x-delulu-signature: hex(HMAC-SHA-256(JOBS_SIGNING_KEY, "<timestamp>.<raw body>"))
  * A request is accepted only with a well-formed timestamp within `maxAgeSeconds` of the server
  * clock (either side) and a signature equal, compared in constant time, to the one computed here.
- * A replay of the same timestamp and body inside the window is accepted: every job is idempotent.
+ * A signature accepted once is refused afterwards: the route records its SHA-256 in the database
+ * (core.jobs_accept_request, sixth security review) and fails closed when it cannot.
  */
 export const JOBS_TIMESTAMP_HEADER = "x-delulu-timestamp";
 export const JOBS_SIGNATURE_HEADER = "x-delulu-signature";
@@ -35,4 +36,9 @@ export function checkJobsSignature(input: {
   const given = Buffer.from(signature, "hex");
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) return "MISMATCH";
   return null;
+}
+
+/** The replay-guard key of a signature: SHA-256 of its (lowercase hex) text. Never the signature. */
+export function jobsSignatureHash(signature: string): Buffer {
+  return createHash("sha256").update(signature.toLowerCase(), "utf8").digest();
 }

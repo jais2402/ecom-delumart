@@ -183,8 +183,10 @@ describe("security hardening (review findings)", () => {
         for (const sql of statements) {
           expect(await stateOf(pool, sql, [], { role, userId: f.a.userId }), sql).toBe("42501");
         }
-        expect(await stateOf(pool, "SELECT 1 FROM core.config_version", [], { role })).toBe("no error");
-        expect(await stateOf(pool, "SELECT 1 FROM core.system_switch", [], { role })).toBe("no error");
+        // sixth review (0047): app_jobs reads no table directly, configuration included
+        const read = role === "app_jobs" ? "42501" : "no error";
+        expect(await stateOf(pool, "SELECT 1 FROM core.config_version", [], { role })).toBe(read);
+        expect(await stateOf(pool, "SELECT 1 FROM core.system_switch", [], { role })).toBe(read);
       });
     }
 
@@ -293,11 +295,22 @@ describe("security hardening (review findings)", () => {
         return out;
       });
       expect(seen).toEqual(Object.fromEntries(probes.map(([label]) => [label, 0])));
-      // the same rows exist and app_jobs (background processing) sees them
-      const jobsSeen = await asActor(pool, { role: "app_jobs" }, (c) =>
-        countRows(c, "SELECT count(*) AS n FROM core.order_group WHERE buyer_user_id = $1", [f.b.userId]),
-      );
-      expect(jobsSeen).toBe(1);
+      // the same rows exist (the owner sees them); app_jobs reads no table directly (sixth review, 0047)
+      expect(
+        await countRows(pool, "SELECT count(*) AS n FROM core.order_group WHERE buyer_user_id = $1", [
+          f.b.userId,
+        ]),
+      ).toBe(1);
+      expect(
+        await stateOf(
+          pool,
+          "SELECT count(*) AS n FROM core.order_group WHERE buyer_user_id = $1",
+          [f.b.userId],
+          {
+            role: "app_jobs",
+          },
+        ),
+      ).toBe("42501");
     });
 
     it("as app_web, user A sees their own rows, their own postings only, and MINT/SINK account rows", async () => {
@@ -395,12 +408,13 @@ describe("security hardening (review findings)", () => {
           WHERE has_any_column_privilege(r, 'audit.outbox', 'INSERT')`,
       );
       expect(rows).toEqual([]);
-      // the relay still marks events relayed
+      // sixth review (0047): no direct outbox privilege at all for app_jobs (the relay, when it is
+      // built, marks events through its own definer function)
       expect(
         await stateOf(pool, "UPDATE audit.outbox SET relayed_at = now() WHERE id = -1", [], {
           role: "app_jobs",
         }),
-      ).toBe("no error");
+      ).toBe("42501");
     });
 
     it("app_web sees only published product versions (plus its own company's drafts)", async () => {
@@ -790,7 +804,7 @@ describe("security hardening (review findings)", () => {
       expect(rows).toEqual([]);
     });
 
-    it("app_web, app_pay and app_jobs have DELETE on no core or ledger table except tombstones and coupon-lookup failures for jobs (retention)", async () => {
+    it("app_web, app_pay and app_jobs have DELETE on no core or ledger table (sixth review: not even the jobs' former retention tables)", async () => {
       const { rows } = await pool.query<{ r: string; t: string }>(
         `SELECT r, c.oid::regclass::text AS t
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace, unnest(ARRAY['app_web','app_pay','app_jobs']) r
@@ -798,11 +812,9 @@ describe("security hardening (review findings)", () => {
             AND (has_table_privilege(r, c.oid, 'DELETE') OR has_table_privilege(r, c.oid, 'TRUNCATE'))
           ORDER BY 1, 2`,
       );
-      // idempotency records are purged through core.purge_idempotency_records() (0018)
-      expect(rows).toEqual([
-        { r: "app_jobs", t: "core.coupon_lookup_failure" },
-        { r: "app_jobs", t: "core.identity_tombstone" },
-      ]);
+      // idempotency records are purged through core.purge_idempotency_records() (0018); the jobs'
+      // direct DELETE on tombstones and coupon-lookup failures is revoked (0047)
+      expect(rows).toEqual([]);
     });
 
     it("app_web cannot delete tombstones, orders, ownership, payments, grants or shipments", async () => {
@@ -825,21 +837,30 @@ describe("security hardening (review findings)", () => {
       );
     });
 
-    it("app_jobs may delete only expired tombstones", async () => {
+    it("app_jobs deletes no tombstone directly, expired or live (sixth review, 0047)", async () => {
       const live = randomBytes(32);
       const dead = randomBytes(32);
       await pool.query(
         "INSERT INTO core.identity_tombstone (fingerprint, kind, expires_at) VALUES ($1, 'EMAIL', now() + interval '1 day'), ($2, 'EMAIL', now() - interval '1 day')",
         [live, dead],
       );
-      const deleted = await asActor(
-        pool,
-        { role: "app_jobs" },
-        async (c) =>
-          (await c.query("DELETE FROM core.identity_tombstone WHERE fingerprint = ANY($1)", [[live, dead]]))
-            .rowCount,
-      );
-      expect(deleted).toBe(1);
+      expect(
+        await stateOf(
+          pool,
+          "DELETE FROM core.identity_tombstone WHERE fingerprint = ANY($1)",
+          [[live, dead]],
+          {
+            role: "app_jobs",
+          },
+        ),
+      ).toBe("42501");
+      expect(
+        await countRows(
+          pool,
+          "SELECT count(*) AS n FROM core.identity_tombstone WHERE fingerprint = ANY($1)",
+          [[live, dead]],
+        ),
+      ).toBe(2);
     });
 
     const negatives: [string, string, unknown[]][] = [
@@ -911,8 +932,13 @@ describe("security hardening (review findings)", () => {
           role,
         ).toBe("42501");
       }
-      // the job runner (account deletion) may ask
-      const answer = await asActor(pool, { role: "app_jobs" }, async (c) => {
+      // sixth review (0047): the job runner may not ask either (no job needs it); the owner can
+      expect(
+        await stateOf(pool, "SELECT core.identity_is_tombstoned($1, $2)", [randomBytes(32), fp], {
+          role: "app_jobs",
+        }),
+      ).toBe("42501");
+      const answer = await asActor(pool, {}, async (c) => {
         const { rows } = await c.query<{ email: boolean; phone: boolean; wrongKind: boolean }>(
           `SELECT core.identity_is_tombstoned($1, NULL) AS email, core.identity_is_tombstoned($1, $2) AS phone,
                   core.identity_is_tombstoned($2, $1) AS "wrongKind"`,

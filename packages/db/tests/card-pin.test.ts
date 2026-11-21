@@ -302,7 +302,8 @@ describe("US-48: Delulu PIN inside the database", () => {
           as,
         ),
         role,
-      ).toBe("no error");
+        // sixth review (0047): app_jobs reads no table directly
+      ).toBe(role === "app_jobs" ? "42501" : "no error");
       // nor can any of them move the PIN columns or counters
       expect(
         await stateOf(

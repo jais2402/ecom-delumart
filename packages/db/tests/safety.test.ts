@@ -83,8 +83,12 @@ describe("trust and safety", () => {
   });
 
   const as = (u: TestUser) => ({ authSessionId: u.authSessionId });
-  /** A player whose account was created `hours` ago (written as the owner, like the auth service would date it). */
-  const aged = async (hours = 48): Promise<TestUser> => {
+  /**
+   * A player whose account was created `hours` ago (written as the owner, like the auth service would
+   * date it). The default, eight days, makes the reporter established (sixth review, 0044: at least
+   * seven days old or a completed purchase) as well as older than the 24-hour minimum.
+   */
+  const aged = async (hours = 8 * 24): Promise<TestUser> => {
     const u = await user(pool);
     await pool.query(
       "UPDATE core.user_profile SET created_at = now() - make_interval(hours => $2) WHERE id = $1",
@@ -213,6 +217,10 @@ describe("trust and safety", () => {
     it("§7.7: two reporters, a young account and the owner do not hide; the third qualifying reporter does, at once", async () => {
       const l = await publishListing(pool, c);
       const [r1, r2, r4] = [await aged(), await aged(), await aged(24)];
+      // r4 is exactly 24 hours old: established by a completed purchase (sixth review, 0044)
+      const [seed] = await published(pool, 1);
+      if (!seed) throw new Error("no seed");
+      await payFor(pool, r4, await checkout(pool, r4, [seed], { SEED: "STANDARD" }));
       const young = await aged(23);
       await report(r1, l.productId);
       await report(r2, l.productId, "HATE");
@@ -274,7 +282,9 @@ describe("trust and safety", () => {
       ]);
       await plant(pool, (x) =>
         x.query(
-          `INSERT INTO core.report (id, reference, case_id, reporter_user_id, reason) VALUES ($1, $2, $3, $4, 'OTHER')`,
+          `INSERT INTO core.report (id, reference, case_id, reporter_user_id, reason, reporter_aged,
+                                    reporter_established, reporter_in_standing)
+           VALUES ($1, $2, $3, $4, 'OTHER', true, true, true)`,
           [uuidv7(), "R-WNERPLANTZ", rows[0]?.id, c.u.userId],
         ),
       );
@@ -431,7 +441,7 @@ describe("trust and safety", () => {
       ).toBe("VALIDATION_FAILED");
     });
 
-    it("§7.7: DISMISSED while publication is paused leaves an auto-hidden product hidden (PUBLICATION_PAUSED)", async () => {
+    it("§7.7: DISMISSED while publication is paused still restores an auto-hidden product (sixth review: the switch stops only automatic publication)", async () => {
       const l = await publishListing(pool, c);
       for (let i = 0; i < 3; i++) await report(await aged(), l.productId);
       const { rows } = await pool.query<{ id: string }>(
@@ -441,16 +451,14 @@ describe("trust and safety", () => {
       await pool.query("UPDATE core.system_switch SET enabled = false WHERE name = 'publication'");
       try {
         expect(
-          await codeOf(
-            resolveReportCase(pool, {
-              ...as(admin),
-              caseId: rows[0]?.id ?? "",
-              outcome: "DISMISSED",
-              reason: REASON,
-            }),
-          ),
-        ).toBe("PUBLICATION_PAUSED");
-        expect(await status(l.productId)).toBe("HIDDEN");
+          await resolveReportCase(pool, {
+            ...as(admin),
+            caseId: rows[0]?.id ?? "",
+            outcome: "DISMISSED",
+            reason: REASON,
+          }),
+        ).toMatchObject({ effect: "RESTORED", productStatus: "PUBLISHED" });
+        expect(await status(l.productId)).toBe("PUBLISHED");
       } finally {
         await pool.query("UPDATE core.system_switch SET enabled = true WHERE name = 'publication'");
       }

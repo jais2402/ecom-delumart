@@ -292,7 +292,7 @@ describe("listing moderation", () => {
   });
 
   describe("the publication switch and the safety net", () => {
-    it("with publication off, submissions stay in SCREENING and nothing publishes", async () => {
+    it("with publication off, submissions stay in SCREENING and nothing publishes automatically; the Super Admin still approves and restores (sixth review)", async () => {
       const full = await creator(pool, items);
       const hidden = (await publishListing(pool, full, { quantity: 99 })).productId;
       await hideListing(pool, { ...as(admin), productId: hidden, reason: REASON });
@@ -318,16 +318,18 @@ describe("listing moderation", () => {
         await setSystemSwitch(pool, { ...as(admin), name: "publication", enabled: false, reason: REASON });
         return r;
       })();
-      expect(
-        await codeOf(decideListing(pool, { ...as(admin), ...l, decision: "APPROVE", reason: REASON })),
-      ).toBe("PUBLICATION_PAUSED");
-      // an approval waiting for stock is not published either, nor is a hidden listing restored
+      // an approval waiting for stock is not published automatically
       expect(await codeOf(allocateAndPublish(pool, { ...as(full.u), productId: waiting }))).toBe(
         "PUBLICATION_PAUSED",
       );
-      expect(await codeOf(restoreListing(pool, { ...as(admin), productId: hidden, reason: REASON }))).toBe(
-        "PUBLICATION_PAUSED",
-      );
+      // sixth review (0046): the switch stops only automatic publication; the Super Admin's own
+      // decisions still apply
+      expect(
+        await decideListing(pool, { ...as(admin), ...l, decision: "APPROVE", reason: REASON }),
+      ).toMatchObject({ outcome: "PUBLISHED" });
+      expect(await restoreListing(pool, { ...as(admin), productId: hidden, reason: REASON })).toMatchObject({
+        outcome: "PUBLISHED",
+      });
       expect(
         await codeOf(
           setSystemSwitch(pool, { ...as(admin), name: "no_such_switch", enabled: true, reason: REASON }),
@@ -336,45 +338,39 @@ describe("listing moderation", () => {
 
       await setSystemSwitch(pool, { ...as(admin), name: "publication", enabled: true, reason: REASON });
       expect(await screen(pool, d.productId, "OK")).toMatchObject({ outcome: "PUBLISHED" });
-      await decideListing(pool, { ...as(admin), ...l, decision: "REJECT", reason: REASON });
     });
 
-    it("the safety net pauses publication when the oldest waiting listing is over 48 hours old, once, as SYSTEM", async () => {
+    it("the safety net records a listing waiting for review over 48 hours once, as SYSTEM, and never pauses publication (sixth review)", async () => {
       const fresh = await creator(pool, items);
-      const d = await createDraft(pool, { ...as(fresh.u), draft: draftInput() });
+      const d = await createDraft(pool, {
+        ...as(fresh.u),
+        draft: draftInput({ name: "MOON LAMP DELUXE EDITION" }),
+      });
       await submitProduct(pool, { ...as(fresh.u), productId: d.productId });
-      expect(await moderationSafetyNet(pool)).toEqual({ paused: false });
+      expect(await screen(pool, d.productId)).toMatchObject({ outcome: "NEEDS_REVIEW" });
+      const l = { productId: d.productId, versionId: d.current?.versionId ?? "" };
+      expect(await moderationSafetyNet(pool)).toMatchObject({ overdue: false, audited: false });
       await pool.query(
         "UPDATE core.listing_submission SET submitted_at = now() - interval '49 hours' WHERE product_id = $1",
-        [d.productId],
-      );
-      await pool.query(
-        "UPDATE core.system_switch SET updated_at = now() - interval '72 hours' WHERE name = 'publication'",
+        [l.productId],
       );
       const before = await auditRows();
-      expect(await moderationSafetyNet(pool)).toEqual({ paused: true });
+      expect(await moderationSafetyNet(pool)).toMatchObject({ overdue: true, count: 1, audited: true });
       expect(
         await count(
           pool,
           "SELECT count(*) AS n FROM core.system_switch WHERE name = 'publication' AND enabled",
         ),
-      ).toBe(0);
+      ).toBe(1);
       const { rows } = await pool.query(
         "SELECT actor_id, actor_kind, action FROM audit.audit_log ORDER BY id DESC LIMIT 1",
       );
-      expect(rows[0]).toEqual({ actor_id: null, actor_kind: "SYSTEM", action: "moderation.safety_net" });
-      // idempotent
-      expect(await moderationSafetyNet(pool)).toEqual({ paused: false });
+      expect(rows[0]).toEqual({ actor_id: null, actor_kind: "SYSTEM", action: "moderation.overdue" });
+      // idempotent within the day
+      expect(await moderationSafetyNet(pool)).toMatchObject({ overdue: true, audited: false });
       expect(await auditRows()).toBe(before + 1);
-      // switched back on by the Super Admin: not paused again for the same overdue listing
-      await setSystemSwitch(pool, {
-        ...as(admin),
-        name: "publication",
-        enabled: true,
-        reason: "Clearing the queue now.",
-      });
-      expect(await moderationSafetyNet(pool)).toEqual({ paused: false });
-      await screen(pool, d.productId, "OK");
+      await decideListing(pool, { ...as(admin), ...l, decision: "REJECT", reason: REASON });
+      expect(await moderationSafetyNet(pool)).toMatchObject({ overdue: false, count: 0 });
     });
   });
 

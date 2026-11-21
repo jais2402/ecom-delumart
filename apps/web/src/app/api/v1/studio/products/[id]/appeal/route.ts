@@ -1,5 +1,5 @@
 import { createAppeal } from "@delulu/db/runtime";
-import { webPool } from "@/server/db";
+import { payPool } from "@/server/db";
 import { pathId, route } from "@/server/http";
 import { RATE_RULES } from "@/server/rate-limit";
 import { appealBody, checkStatement } from "@/server/safety";
@@ -12,7 +12,8 @@ import { appealView } from "@/server/views";
 export const POST = route(
   { auth: "session", body: appealBody, rateLimits: [{ rule: RATE_RULES.studioActor }] },
   async ({ body, params, session }) => {
-    const appeal = await createAppeal(webPool(), {
+    // the pay credential only: the statement is stored on the strength of this server's screening (0050)
+    const appeal = await createAppeal(payPool(), {
       authSessionId: session.id,
       productId: pathId(params),
       statement: checkStatement(body.statement),

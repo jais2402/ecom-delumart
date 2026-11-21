@@ -1,5 +1,4 @@
-import { gradeQuiz } from "@delulu/core";
-import { recordPassportQuiz } from "@delulu/db/runtime";
+import { submitPassportQuiz } from "@delulu/db/runtime";
 import { z } from "zod";
 import { webPool } from "@/server/db";
 import { route } from "@/server/http";
@@ -11,19 +10,15 @@ const body = z.strictObject({
 });
 
 /**
- * POST /api/v1/passport/quiz {answers: {questionId: optionId}}: graded here (passport_v1); the
- * database records only pass or fail and the rule version. A failed try may be retried without
- * limit: the response names the wrong questions, never the right options.
+ * POST /api/v1/passport/quiz {answers: {questionId: optionId}}: graded by the database against its
+ * own answer key (passport_v1, migration 0050), which records only pass or fail and the rule
+ * version. A failed try may be retried without limit: the response names the wrong questions,
+ * never the right options.
  */
 export const POST = route(
   { auth: "session", body, rateLimits: [{ rule: RATE_RULES.passportActor }] },
   async ({ body: b, session }) => {
-    const graded = gradeQuiz(b.answers);
-    const progress = await recordPassportQuiz(webPool(), {
-      authSessionId: session.id,
-      passed: graded.passed,
-      ruleVersion: graded.ruleVersion,
-    });
-    return { json: { passed: graded.passed, wrong: graded.wrong, passport: passportView(progress) } };
+    const graded = await submitPassportQuiz(webPool(), { authSessionId: session.id, answers: b.answers });
+    return { json: { passed: graded.passed, wrong: graded.wrong, passport: passportView(graded.passport) } };
   },
 );
