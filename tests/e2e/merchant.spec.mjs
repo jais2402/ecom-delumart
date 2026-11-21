@@ -32,7 +32,7 @@ const phone = () => `+91 9${String(Math.floor(Math.random() * 1e9)).padStart(9, 
 const email = (who) => `${who}-${tag}@example.com`;
 const HANDLE = `shop${tag}`;
 const SHOP_NAME = `Shop ${tag}`;
-const ADMIN_EMAIL = email("admin");
+const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? email("admin");
 
 const results = [];
 const shots = [];

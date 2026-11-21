@@ -47,6 +47,10 @@ node tests/e2e/merchant.spec.mjs
 ```
 
 ```bash
+node tests/e2e/analytics.spec.mjs
+```
+
+```bash
 node tests/a11y/audit.js
 ```
 
@@ -56,30 +60,31 @@ node tests/a11y/audit.js
 
 **Selling.** A person can unlock creator access by spending or by passing the passport quiz, claim relief, register a shop with a handle, create and submit listings, have them screened by the jobs process and published, set stock, create public and private coupons, and see orders, earnings and inventory in the merchant portal. They can appeal a hidden listing.
 
-**Super Admin.** The console shows the moderation queue, report cases, appeals, the publication switch and an overdue banner.
+**Super Admin.** The console shows the moderation queue, report cases, appeals, the publication switch and an overdue banner, and three analytics screens: an overview with trends and the purchase funnel, usage by place (country, region, city), and top products, shops and categories.
 
 ## Built and verified
 
 | Area | What exists | Evidence |
 |---|---|---|
-| Design system (Daydream) | Tokens for light and dark; atoms, molecules, organisms and page layouts following atomic design | 324 component tests; scripted accessibility audit with 0 issues |
-| Domain logic (`core`) | Money, the pricing function, card numbers, PIN rules, identity, delivery schedule, progression, passport quiz, text screening, handle rules including look-alike checks, listing rules | 267 unit and property tests |
-| Database (`db`) | 51 migrations. Ledger with zero-sum, append-only and sealing rules; row-level security on every table; application roles with no direct writes to money, order, stock or identity tables; all commands as owner-defined functions; acting user derived from a live sign-in session | 678 tests on PostgreSQL, including attack-replay suites from six review rounds |
+| Design system (Daydream) | Tokens for light and dark; atoms, molecules, organisms and page layouts following atomic design | 345 component tests; scripted accessibility audit with 0 issues |
+| Domain logic (`core`) | Money, the pricing function, card numbers, PIN rules, identity, delivery schedule, progression, passport quiz, text screening, handle rules including look-alike checks, listing rules | 310 unit and property tests |
+| Database (`db`) | 57 migrations. Ledger with zero-sum, append-only and sealing rules; row-level security on every table; application roles with no direct writes to money, order, stock or identity tables; all commands as owner-defined functions; acting user derived from a live sign-in session | 814 tests on PostgreSQL, including attack-replay suites from seven review rounds |
 | Money path | Provisioning, checkout and all-or-nothing pay for multi-seller carts with merchant coupons, stock units, ownership, shipments, creator unlock, relief, company registration, idempotency, per-actor limits | Race tests (last unit, overspend, same key ×10, coupon cap) |
 | Card PIN | Set, change, reset and verify inside the database with limits and lockout; the database never sees a PIN | PIN suite including parallel guesses |
 | Cart | Storage, add, remove, clear, sign-in merge, priced preview sharing one pricing path with checkout | 50-random-cart preview-equals-checkout test |
 | Selling | Passport (quiz graded in the database), shop registration with handle reservation, listing drafts, append-only submission log with a daily cap, screening job, publishing, stock, merchant coupons, seller order and earnings views that do not identify buyers | Listing, company, coupon and merchant suites |
 | Safety | Reports with reporter standing, clearances after dismissal or upheld appeal, limits on automatic hiding, appeals, blocks, moderation overdue status | Report-abuse replay tests |
+| Analytics | Events with no user id, session, address or search text; a visitor key that rotates daily; place taken from the host's location headers; places under 10 daily visitors folded into their parent; daily rollups; money and order figures read from real tables, not browser events; opted-out accounts and browsers sending a do-not-track signal produce no events | Analytics suites in db and web; dashboards loaded as a real Super Admin against seeded data |
 | Jobs | Signed, replay-protected jobs endpoint; the jobs database role has no direct table access and works only through seven narrow functions; watchdog with a 5-second floor | Generated privilege test over every application table |
-| Web server | Typed configuration with server-only secrets, separate database pools per role, opaque session cookie, session-bound CSRF token and origin check, uniform error envelope, database-backed rate limits, content security policy with per-request nonce, private pages uncacheable | 316 web tests against PostgreSQL; production build checked for secrets in browser code |
-| Screens | Storefront, sign-in and onboarding, cart, checkout, receipt and tracking, account, selling hub, passport, shop registration, public shop page, studio (products, orders, earnings, inventory, coupons, appeals), console (moderation, reports) | Five browser journeys (21, 19, 15, 17 and 15 steps) at phone width |
+| Web server | Typed configuration with server-only secrets, separate database pools per role, opaque session cookie, session-bound CSRF token and origin check, uniform error envelope, database-backed rate limits, content security policy with per-request nonce, private pages uncacheable | 361 web tests against PostgreSQL; production build checked for secrets in browser code |
+| Screens | Storefront, sign-in and onboarding, cart, checkout, receipt and tracking, account, selling hub, passport, shop registration, public shop page, studio (products, orders, earnings, inventory, coupons, appeals), console (moderation, reports, analytics) | Six browser journeys (21, 19, 15, 17, 15 and 10 steps) |
 | Process | Standards, test catalogue, review mechanism, project agents with model tiers | `docs/engineering-standards.md`, `CLAUDE.md`, `.claude/agents/` |
 
-Total: 1,585 automated tests passing; lint, typecheck and production build clean.
+Total: 1,830 automated tests passing; lint, typecheck and production build clean.
 
 ## Security review history
 
-Six independent adversarial reviews, each followed by a fix round with tests that replay the attacks.
+Seven independent adversarial reviews, each followed by a fix round with tests that replay the attacks.
 
 | Round | Outcome |
 |---|---|
@@ -90,7 +95,9 @@ Six independent adversarial reviews, each followed by a fix round with tests tha
 | 5 | No blocker. Majors: open redirect after sign-in, advisory-lock denial of service, no content security policy, rate-limit bypass |
 | 6 | No blocker. Majors: three accounts could repeatedly hide any listing, submission cap bypass by deleting drafts, over-powerful jobs credential, one stale listing paused publishing platform-wide |
 
-**The seventh fix round (after review 6, migrations 0044–0051) has not itself been independently reviewed.**
+| 7 | One blocker: a shop could still be linked to its owner's user id through the listing-version table. Majors: one dismissed junk report gave a listing 30 days of immunity; seller order ids encoded the exact order time |
+
+**The eighth fix round (after review 7, migrations 0053–0057) and the analytics engine (migration 0052) have not been independently reviewed.**
 
 ## Not built
 
@@ -98,7 +105,7 @@ Six independent adversarial reviews, each followed by a fix round with tests tha
 |---|---|
 | Real sign-in | The Supabase provider is a stub that throws. Local development uses a dev-only provider that refuses to load in production. Google sign-in, real email links and SMS verification are not connected. |
 | Deployment | Nothing is hosted. No job runner is scheduled, so screening, the watchdog, purges and the moderation overdue check do not run on their own. |
-| Back office and analytics | Console configuration areas (catalogue, delivery, payments, platform coupons), the analytics engine, dashboards and usage by place |
+| Back office | Console configuration areas (catalogue, delivery, payments, platform coupons). Analytics has no hourly figures and no export. |
 | Payments | DeluluPay ID and net banking methods, platform coupons, membership, warehouse purchases, reversals |
 | Shopping extras | Public shelf, share cards, real addresses (checkout uses no address yet), Express on seed products |
 | Later phases | Brand teams, extra warehouses, collector screens, NPC sandbox, experiments, research dataset |
@@ -114,6 +121,9 @@ Six independent adversarial reviews, each followed by a fix round with tests tha
 - **Screening verdicts** are decided by the jobs process outside the database, so a compromised jobs credential can still approve pending listing text. It can do nothing else.
 - **Owner publishing while publication is off** stays blocked; only the Super Admin's approve and restore work during a pause.
 - **Not exercised:** load testing, a restore drill, deployment, real Supabase, two-seller carts in the browser.
+- **Usage by place needs the host's location headers,** which exist only once deployed on Vercel; locally everything is "Unknown location" unless `DEV_GEO` is set or synthetic data is seeded with `SEED_ANALYTICS=1 pnpm dev:setup`.
+- **A seller's own database scope still includes the internal order ids** of its orders; no route returns them, so reaching them needs an injection on the web credential.
+- **Browser journeys assume a fresh local database.** After many runs, test listings crowd seeded products off the first catalogue page and three journeys fail at setup; drop `delulu_dev` and run `pnpm dev:setup` again.
 - **One browser journey (`selling.spec`) timed out once** in a round 7 run and passed on every re-run; treated as flaky, cause not found.
 - **Design document drift.** `system-design/low-level-design.md` predates much of the code; the migrations and tests are the source of truth.
 - **Product art** is generated illustration, a placeholder.
