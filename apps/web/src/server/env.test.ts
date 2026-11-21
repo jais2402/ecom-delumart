@@ -207,3 +207,50 @@ describe("job runner configuration", () => {
     expect(message).not.toContain(placeholder);
   });
 });
+
+describe("analytics configuration (0052)", () => {
+  it("R16.5: ANALYTICS_KEY is optional (no key: nothing is recorded), and must differ from every other key", () => {
+    expect(parseEnv(valid()).analyticsKey).toBeNull();
+    const k = key();
+    expect(parseEnv(valid({ ANALYTICS_KEY: k })).analyticsKey).toEqual(Buffer.from(k, "hex"));
+    const shared = key();
+    expect(() => parseEnv(valid({ IDENTITY_KEY: shared, ANALYTICS_KEY: shared }))).toThrow(/distinct/);
+    expect(() =>
+      parseEnv(
+        valid({
+          NODE_ENV: "production",
+          AUTH_PROVIDER: "supabase",
+          DATABASE_URL_OWNER: undefined,
+          ANALYTICS_KEY: "0000000000000000000000000000000000000000000000000000000000000005",
+        }),
+      ),
+    ).toThrow(/ANALYTICS_KEY is a placeholder/);
+  });
+
+  it("R7.1: geo headers are read only on the Vercel edge unless GEO_SOURCE says otherwise", () => {
+    expect(parseEnv(valid()).geoSource).toBe("none");
+    expect(parseEnv(valid({ VERCEL: "1" })).geoSource).toBe("vercel");
+    expect(parseEnv(valid({ VERCEL: "1", GEO_SOURCE: "none" })).geoSource).toBe("none");
+    expect(() => parseEnv(valid({ GEO_SOURCE: "cloudflare" }))).toThrow(/GEO_SOURCE/);
+  });
+
+  it("R7.1: DEV_GEO fixes a place in development and is refused in production", () => {
+    expect(parseEnv(valid({ DEV_GEO: "IN/MH/Navi%20Mumbai" })).devGeo).toEqual({
+      country: "IN",
+      region: "MH",
+      city: "Navi%20Mumbai",
+    });
+    expect(parseEnv(valid({ DEV_GEO: "IN" })).devGeo).toEqual({ country: "IN", region: null, city: null });
+    expect(() => parseEnv(valid({ DEV_GEO: "India, Mumbai" }))).toThrow(/DEV_GEO/);
+    expect(() =>
+      parseEnv(
+        valid({
+          NODE_ENV: "production",
+          AUTH_PROVIDER: "supabase",
+          DATABASE_URL_OWNER: undefined,
+          DEV_GEO: "IN",
+        }),
+      ),
+    ).toThrow(/DEV_GEO must not be set/);
+  });
+});

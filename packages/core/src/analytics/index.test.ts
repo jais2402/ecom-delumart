@@ -61,12 +61,16 @@ describe("buckets never carry the exact value", () => {
 
   it("amounts are bucketed from bigint paise, monotonically (property)", () => {
     fc.assert(
-      fc.property(fc.bigInt({ min: 0n, max: 10n ** 15n }), fc.bigInt({ min: 0n, max: 10n ** 15n }), (a, b) => {
-        const [lo, hi] = a <= b ? [a, b] : [b, a];
-        expect(AMOUNT_BUCKETS.indexOf(amountBucket(lo))).toBeLessThanOrEqual(
-          AMOUNT_BUCKETS.indexOf(amountBucket(hi)),
-        );
-      }),
+      fc.property(
+        fc.bigInt({ min: 0n, max: 10n ** 15n }),
+        fc.bigInt({ min: 0n, max: 10n ** 15n }),
+        (a, b) => {
+          const [lo, hi] = a <= b ? [a, b] : [b, a];
+          expect(AMOUNT_BUCKETS.indexOf(amountBucket(lo))).toBeLessThanOrEqual(
+            AMOUNT_BUCKETS.indexOf(amountBucket(hi)),
+          );
+        },
+      ),
     );
     expect(amountBucket(99_999n)).toBe("lt_1k");
     expect(amountBucket(100_000n)).toBe("1k_10k");
@@ -91,7 +95,9 @@ describe("deviceClassOf", () => {
   });
 
   it("classifies common agents", () => {
-    expect(deviceClassOf("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148")).toBe("mobile");
+    expect(deviceClassOf("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148")).toBe(
+      "mobile",
+    );
     expect(deviceClassOf("Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/120 Mobile Safari/537.36")).toBe(
       "mobile",
     );
@@ -184,7 +190,11 @@ describe("parsePlace (R7.1: labels from the hosting edge, validated and capped)"
 
 describe("validateDateRange", () => {
   it("accepts from <= to within the limit and returns the day count", () => {
-    expect(validateDateRange("2026-01-01", "2026-01-01")).toEqual({ from: "2026-01-01", to: "2026-01-01", days: 1 });
+    expect(validateDateRange("2026-01-01", "2026-01-01")).toEqual({
+      from: "2026-01-01",
+      to: "2026-01-01",
+      days: 1,
+    });
     expect(validateDateRange("2025-01-01", "2025-12-31").days).toBe(365);
     expect(validateDateRange("2024-01-01", "2024-12-31").days).toBe(RANGE_MAX_DAYS);
   });

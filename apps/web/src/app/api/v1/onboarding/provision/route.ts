@@ -1,5 +1,6 @@
 import { DomainError, serializePaise } from "@delulu/core";
 import { type ProvisionResult, provisionAccount } from "@delulu/db/runtime";
+import { track } from "@/server/analytics";
 import { SERVER_CONFIG } from "@/server/config";
 import { bankAlias, cardNumberCandidates, delulupayId } from "@/server/crypto";
 import { payPool } from "@/server/db";
@@ -9,9 +10,10 @@ import { birthdateOf } from "@/server/identity";
 /**
  * POST /api/v1/onboarding/provision: opens the account (bank account, wallet with the starting
  * grant, card). Idempotent on the identity: a repeat returns the existing account. The full card
- * number is never returned here (only POST /cards/{id}/reveal shows it).
+ * number is never returned here (only POST /cards/{id}/reveal shows it). A newly opened account
+ * records a `sign_up` analytics event.
  */
-export const POST = route({ auth: "session" }, async ({ session }) => {
+export const POST = route({ auth: "session" }, async ({ request, session }) => {
   const profile = session.actor.profile;
   if (profile === null) throw new DomainError("PHONE_REQUIRED", "Verify your phone number first.");
   const birthdate = birthdateOf(session);
@@ -37,6 +39,7 @@ export const POST = route({ auth: "session" }, async ({ session }) => {
       }
     }
   }
+  if (result.created) await track(request, "sign_up", {}, { surface: "account", authSessionId: session.id });
   return {
     status: result.created ? 201 : 200,
     json: {

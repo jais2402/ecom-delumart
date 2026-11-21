@@ -33,6 +33,22 @@ export interface Env {
   databaseUrlJobs: string | null;
   /** The key the scheduler signs POST /api/internal/jobs/run with (HMAC-SHA-256). Null: disabled. */
   jobsSigningKey: Buffer | null;
+  /**
+   * Keys the daily-rotating analytics visitor key (HMAC-SHA-256 over day, address prefix and user
+   * agent; analytics.ts). Null: no analytics events are recorded at all.
+   */
+  analyticsKey: Buffer | null;
+  /**
+   * Where the approximate place of a request comes from (PRD R7.1): "vercel" reads the hosting
+   * edge's x-vercel-ip-* headers (which that edge overwrites); "none" ignores every geo header (any
+   * other host would let a client set them). Default: "vercel" when VERCEL=1, else "none".
+   */
+  geoSource: "vercel" | "none";
+  /**
+   * Development only (refused in production): a fixed place for every request, "CC", "CC/REGION"
+   * or "CC/REGION/City" (URL-encoded parts), so the console's place views can be tried locally.
+   */
+  devGeo: { country: string; region: string | null; city: string | null } | null;
 }
 
 /**
@@ -45,10 +61,11 @@ const EXAMPLE_KEYS: ReadonlySet<string> = new Set([
   "0000000000000000000000000000000000000000000000000000000000000002",
   "0000000000000000000000000000000000000000000000000000000000000003",
   "0000000000000000000000000000000000000000000000000000000000000004",
+  "0000000000000000000000000000000000000000000000000000000000000005",
 ]);
 
 const KEY_NAMES = ["IDENTITY_KEY", "CARD_KEY", "PIN_PEPPER", "FIELD_KEY"] as const;
-const OPTIONAL_KEY_NAMES = ["JOBS_SIGNING_KEY"] as const;
+const OPTIONAL_KEY_NAMES = ["JOBS_SIGNING_KEY", "ANALYTICS_KEY"] as const;
 
 function placeholderKey(hex: string): boolean {
   const lower = hex.toLowerCase();
@@ -82,6 +99,13 @@ const schema = z.object({
   DATABASE_URL_OWNER: postgresUrl.optional(),
   DATABASE_URL_JOBS: postgresUrl.optional(),
   JOBS_SIGNING_KEY: hexKey.optional(),
+  ANALYTICS_KEY: hexKey.optional(),
+  VERCEL: z.string().optional(),
+  GEO_SOURCE: z.enum(["vercel", "none"], { error: "must be 'vercel' or 'none'" }).optional(),
+  DEV_GEO: z
+    .string()
+    .regex(/^[A-Za-z]{2}(\/[^/\s]{1,200}){0,2}$/, { error: "must be CC, CC/REGION or CC/REGION/City" })
+    .optional(),
   IDENTITY_KEY: hexKey,
   CARD_KEY: hexKey,
   PIN_PEPPER: hexKey,
@@ -107,6 +131,11 @@ function loginOf(url: string): string {
   }
 }
 
+function devGeoOf(value: string): { country: string; region: string | null; city: string | null } {
+  const [country = "", region, city] = value.split("/");
+  return { country, region: region ?? null, city: city ?? null };
+}
+
 export function parseEnv(source: Record<string, string | undefined>): Env {
   // an empty value (VAR=) counts as unset
   const present = Object.fromEntries(Object.entries(source).filter(([, v]) => v !== undefined && v !== ""));
@@ -117,12 +146,12 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   } else {
     const v = parsed.data;
     const production = v.NODE_ENV === "production";
-    const keys = [v.IDENTITY_KEY, v.CARD_KEY, v.PIN_PEPPER, v.FIELD_KEY, v.JOBS_SIGNING_KEY]
+    const keys = [v.IDENTITY_KEY, v.CARD_KEY, v.PIN_PEPPER, v.FIELD_KEY, v.JOBS_SIGNING_KEY, v.ANALYTICS_KEY]
       .filter((k): k is string => k !== undefined)
       .map((k) => k.toLowerCase());
     if (new Set(keys).size !== keys.length) {
       problems.push(
-        "IDENTITY_KEY, CARD_KEY, PIN_PEPPER, FIELD_KEY and JOBS_SIGNING_KEY must be distinct keys",
+        "IDENTITY_KEY, CARD_KEY, PIN_PEPPER, FIELD_KEY, JOBS_SIGNING_KEY and ANALYTICS_KEY must be distinct keys",
       );
     }
     if (v.DATABASE_URL_OWNER) {
@@ -159,6 +188,9 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
       if (v.RATE_LIMIT_MULTIPLIER !== undefined) {
         problems.push("RATE_LIMIT_MULTIPLIER must not be set when NODE_ENV is production");
       }
+      if (v.DEV_GEO !== undefined) {
+        problems.push("DEV_GEO must not be set when NODE_ENV is production");
+      }
     }
     if (problems.length === 0) {
       return {
@@ -176,6 +208,9 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
         rateLimitMultiplier: Number(v.RATE_LIMIT_MULTIPLIER ?? "1"),
         databaseUrlJobs: v.DATABASE_URL_JOBS ?? null,
         jobsSigningKey: v.JOBS_SIGNING_KEY ? Buffer.from(v.JOBS_SIGNING_KEY, "hex") : null,
+        analyticsKey: v.ANALYTICS_KEY ? Buffer.from(v.ANALYTICS_KEY, "hex") : null,
+        geoSource: v.GEO_SOURCE ?? (v.VERCEL === "1" ? "vercel" : "none"),
+        devGeo: v.DEV_GEO === undefined ? null : devGeoOf(v.DEV_GEO),
       };
     }
   }

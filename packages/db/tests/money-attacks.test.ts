@@ -3224,6 +3224,9 @@ describe("money attacks (security review)", () => {
       ]);
       // sixth review (0047): only the jobs' own functions
       expect(by("app_jobs")).toEqual([
+        // 0052: the analytics retention purge and the rollup of yesterday and today
+        "core.analytics_purge_job()",
+        "core.analytics_rollup_job()",
         // 0048: the jobs endpoint's replay guard
         "core.jobs_accept_request(bytea,timestamp with time zone)",
         // 0046: the moderation safety net (records overdue reviews; never pauses publication)

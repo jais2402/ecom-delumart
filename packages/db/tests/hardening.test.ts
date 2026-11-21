@@ -378,7 +378,7 @@ describe("security hardening (review findings)", () => {
       expect(visible).toEqual([{ id: f.sellerOrderB, net_paise: "9500" }]);
     });
 
-    it("app_web cannot read tombstones, audit or raw analytics, but can append audit_log and analytics events", async () => {
+    it("app_web cannot read tombstones, audit or raw analytics, but can append audit_log; analytics events only through analytics.record_event (0052)", async () => {
       for (const sql of [
         "SELECT 1 FROM core.identity_tombstone",
         "SELECT 1 FROM audit.outbox",
@@ -391,10 +391,27 @@ describe("security hardening (review findings)", () => {
       }
       for (const sql of [
         "INSERT INTO audit.audit_log (actor_kind, action, row_hash) VALUES ('SYSTEM', 'x', '\\x00')",
-        "INSERT INTO analytics.event (event_id, type, occurred_at, props) VALUES (gen_random_uuid(), 't', now(), '{}')",
       ]) {
         expect(await stateOf(pool, sql, [], web()), sql).toBe("no error");
       }
+      // 0052: the event table takes no direct write from any application role; app_web appends
+      // through the allow-listed definer function only
+      expect(
+        await stateOf(
+          pool,
+          "INSERT INTO analytics.event (occurred_at, day, name, surface, visitor_key, signed_in, country, device_class) VALUES (date_trunc('minute', now()), current_date, 'page_view', 'shop', '\\x00112233445566778899aabbccddeeff', false, 'IN', 'mobile')",
+          [],
+          web(),
+        ),
+      ).toBe("42501");
+      expect(
+        await stateOf(
+          pool,
+          "SELECT analytics.record_event('page_view', 'shop', '\\x00112233445566778899aabbccddeeff', 'IN', NULL, NULL, 'mobile', '{}')",
+          [],
+          web(),
+        ),
+      ).toBe("no error");
     });
 
     it("review fix (outbox forgery): no application role inserts outbox events; only definer functions and the owner write them", async () => {

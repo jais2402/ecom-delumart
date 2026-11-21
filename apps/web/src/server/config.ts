@@ -67,6 +67,10 @@ export const SERVER_CONFIG = {
     reportActor: { scope: "reports.write.actor", by: "actor", limit: 5, windowSeconds: 3_600 },
     /** Blocks and unblocks per account. */
     blockActor: { scope: "blocks.write.actor", by: "actor", limit: 30, windowSeconds: 60 },
+    /** Browser analytics events per client address (beyond it events are dropped, still 204). */
+    eventsAddress: { scope: "analytics.events.address", by: "address", limit: 120, windowSeconds: 60 },
+    /** Super Admin analytics reads per account (a dashboard makes several per view). */
+    analyticsReadActor: { scope: "admin.analytics.actor", by: "actor", limit: 300, windowSeconds: 60 },
   },
   phone: {
     /** The only code the dev provider accepts (there is no SMS in development). */
@@ -107,6 +111,17 @@ export const SERVER_CONFIG = {
     screeningBatch: 20,
     /** The development-only inline run after a submission. */
     inlineBudgetMs: 5_000,
+  },
+  analytics: {
+    /** Largest body POST /api/v1/events reads. */
+    maxEventBytes: 1_024,
+    /** Bytes of the HMAC kept as the visitor key (the database stores exactly 16). */
+    visitorKeyBytes: 16,
+    /** The longest user agent hashed into the visitor key. */
+    maxUserAgentChars: 512,
+    /** Rows of a top-N read when the request names no limit, and the most it may ask for. */
+    topDefaultLimit: 10,
+    topMaxLimit: 50,
   },
   fieldEncryption: {
     /** Key id written in front of every ciphertext (LLD §5.6); FIELD_KEY is key 1. */

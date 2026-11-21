@@ -15,6 +15,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LoadingBlock } from "../_components/LoadState";
+import { trackClient } from "../_lib/analytics";
 import {
   ApiError,
   api,
@@ -341,6 +342,17 @@ function AccountCart() {
         body: { source: "CART", speedBySeller, ...(applied ? { couponCode: applied } : {}) },
       });
       checkoutKey.current = null;
+      trackClient(
+        "checkout_start",
+        {
+          itemCount: Math.max(
+            1,
+            preview.sellers.reduce((n, s) => n + s.productIds.length, 0),
+          ),
+          totalPaise: quote.totalPaise,
+        },
+        "checkout",
+      );
       const live = server.groups.filter((g) => g.lines.some((l) => l.issue === null));
       const first = live[0]?.lines[0];
       saveCheckoutContext(quote.id, {

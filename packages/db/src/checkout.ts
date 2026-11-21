@@ -527,6 +527,17 @@ function isOwnershipRace(error: unknown): boolean {
  * the attempt FAILED and stores the failure under the key, and this throws PayFailure.
  */
 export async function pay(pool: Pool, input: PayInput): Promise<PayReceipt> {
+  return (await payOutcome(pool, input)).receipt;
+}
+
+/**
+ * pay, also telling whether the receipt was returned from the idempotency record (`replayed`)
+ * rather than freshly committed: the web server records analytics for a fresh order only.
+ */
+export async function payOutcome(
+  pool: Pool,
+  input: PayInput,
+): Promise<{ receipt: PayReceipt; replayed: boolean }> {
   requireKey(input.idempotencyKey);
   requireUuid(input.sessionId, "sessionId");
   requireUuid(input.attemptId, "attemptId");
@@ -557,7 +568,9 @@ export async function pay(pool: Pool, input: PayInput): Promise<PayReceipt> {
     if (isOwnershipRace(error)) throw new PayFailure("ALREADY_OWNED", "you already own this product");
     throw error;
   }
-  if (outcome.status === "SUCCEEDED") return receiptOf(outcome.receipt, outcome.reversed);
+  if (outcome.status === "SUCCEEDED") {
+    return { receipt: receiptOf(outcome.receipt, outcome.reversed), replayed: outcome.replayed === true };
+  }
   const failure = domainErrorOf(outcome.error);
   throw new PayFailure(failure.code, failure.message, {}, outcome.replayed);
 }

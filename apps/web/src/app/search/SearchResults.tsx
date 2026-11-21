@@ -2,8 +2,9 @@
 
 import { Heading, ProductGrid, SearchBar } from "@delulu/ui";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { toShopGridItem } from "../_components/shop-items";
+import { trackClient } from "../_lib/analytics";
 import type { ProductResponse } from "../_lib/api";
 import { useBlockedSellerKeys, withoutBlocked } from "../_lib/blocks-store";
 import { usePublicCatalog } from "../_lib/use-public-catalog";
@@ -22,6 +23,15 @@ export function SearchResults({ products: initial }: { products: readonly Produc
       .filter((product) => `${product.name} ${product.hook ?? ""}`.toLowerCase().includes(needle))
       .map(toShopGridItem);
   }, [products, query]);
+
+  // one search event per query: its length and result count only, never the query itself
+  const tracked = useRef<string | null>(null);
+  useEffect(() => {
+    const needle = query.trim();
+    if (!needle || tracked.current === needle) return;
+    tracked.current = needle;
+    trackClient("search", { resultCount: results.length, queryLength: needle.length });
+  }, [query, results.length]);
 
   function search(next: string) {
     router.replace(next ? `/search?q=${encodeURIComponent(next)}` : "/search");

@@ -13,6 +13,7 @@ import { notFound } from "next/navigation";
 import { BuyPanel } from "../../_components/BuyPanel";
 import { ShopShell } from "../../_components/ShopShell";
 import { ProductSafetyActions } from "../../_components/safety/ProductSafetyActions";
+import { TrackEvent } from "../../_components/TrackEvent";
 import { categoryName, storeNameOf } from "../../_lib/catalog";
 import { loadProduct, loadProductPage } from "../../_lib/catalog-server";
 import { parsePaise } from "../../_lib/money";
@@ -53,6 +54,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
 
   return (
     <ShopShell>
+      <TrackEvent name="product_view" props={{ productId: product.id }} />
       <Breadcrumbs
         items={[
           { label: "Home", href: "/" },

@@ -3,6 +3,7 @@
 import { Alert, Badge, Button, FictionLabel, Heading, Price, StockBadge, Text } from "@delulu/ui";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { trackClient } from "../_lib/analytics";
 import { ApiError, api, describeError, newIdempotencyKey, type ProductResponse } from "../_lib/api";
 import { useBlockedSellerKeys } from "../_lib/blocks-store";
 import { checkoutSellerId, isLow, leftCount, stockStateOf, storeNameOf } from "../_lib/catalog";
@@ -95,6 +96,7 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
     try {
       const quote = await requestQuote(product.id, sellerId, "STANDARD", intentKey.current);
       intentKey.current = null;
+      trackClient("checkout_start", { itemCount: 1, totalPaise: quote.totalPaise }, "checkout");
       saveCheckoutContext(quote.id, {
         productId: product.id,
         productName: product.name,

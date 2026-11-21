@@ -2,6 +2,7 @@
 
 import { Button, Text } from "@delulu/ui";
 import { useId, useState } from "react";
+import { trackClient } from "../_lib/analytics";
 import { useCart } from "../_lib/cart-store";
 
 interface Props {
@@ -40,8 +41,10 @@ export function AddToCartButton({
     setMessage(null);
     const result = await cart.add(productId);
     setAdding(false);
-    if (result.status === "added") setAnnounce(`${name} added to your cart.`);
-    else if (result.status === "already") setAnnounce(`${name} is already in your cart.`);
+    if (result.status === "added") {
+      setAnnounce(`${name} added to your cart.`);
+      trackClient("cart_add", { productId });
+    } else if (result.status === "already") setAnnounce(`${name} is already in your cart.`);
     else if ("message" in result) {
       if (result.status === "owned") setOwnedHere(true);
       setMessage(result.message);

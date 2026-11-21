@@ -4,8 +4,10 @@ import {
   applyScreening,
   moderationSafetyNet,
   pendingScreenings,
+  purgeAnalyticsEvents,
   purgeIdempotencyRecords,
   purgeRateCounters,
+  rollupAnalytics,
   type SafetyNetResult,
   terminateStuckMoneySessions,
 } from "@delulu/db/runtime";
@@ -24,7 +26,9 @@ import { env } from "./env";
  *     stops screening;
  *  2. the moderation safety net (records, once a day, that a listing has waited for review too
  *     long; it never switches publication off);
- *  3. the rate counter purge, the idempotency record purge and the stuck-session watchdog.
+ *  3. the rate counter purge, the idempotency record purge and the stuck-session watchdog;
+ *  4. analytics (0052): the daily rollup of yesterday and today (idempotent, suppressed places) and
+ *     the purge of raw events past their retention (rollups are kept).
  * Every step is idempotent, so overlapping or repeated runs are safe. The report holds counts only
  * (no listing text, no ids of people).
  */
@@ -40,6 +44,9 @@ export interface JobsReport {
   ratePurged: number | null;
   idempotencyPurged: number | null;
   terminated: number | null;
+  /** Events rolled up for yesterday and today (UTC), or null when the step did not run. */
+  analyticsRollup: { yesterdayEvents: number; todayEvents: number } | null;
+  analyticsPurged: number | null;
   budgetExhausted: boolean;
 }
 
@@ -73,6 +80,8 @@ export async function runJobs(options: RunJobsOptions = {}): Promise<JobsReport>
     ratePurged: null,
     idempotencyPurged: null,
     terminated: null,
+    analyticsRollup: null,
+    analyticsPurged: null,
     budgetExhausted: false,
   };
 
@@ -131,6 +140,11 @@ export async function runJobs(options: RunJobsOptions = {}): Promise<JobsReport>
   report.ratePurged = await step("rate.purge", () => purgeRateCounters(pool));
   report.idempotencyPurged = await step("idempotency.purge", () => purgeIdempotencyRecords(pool));
   report.terminated = await step("watchdog", () => terminateStuckMoneySessions(pool));
+  report.analyticsRollup = await step("analytics.rollup", async () => {
+    const r = await rollupAnalytics(pool);
+    return { yesterdayEvents: r.yesterday.events, todayEvents: r.today.events };
+  });
+  report.analyticsPurged = await step("analytics.purge", () => purgeAnalyticsEvents(pool));
   report.budgetExhausted = !left();
   return report;
 }

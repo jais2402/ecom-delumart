@@ -81,6 +81,10 @@ export function setTestEnv(dbUrl: string, overrides: Record<string, string | und
     CARD_KEY: randomBytes(32).toString("hex"),
     PIN_PEPPER: randomBytes(32).toString("hex"),
     FIELD_KEY: randomBytes(32).toString("hex"),
+    ANALYTICS_KEY: randomBytes(32).toString("hex"),
+    GEO_SOURCE: undefined,
+    DEV_GEO: undefined,
+    VERCEL: undefined,
     AUTH_PROVIDER: "dev",
     APP_ORIGIN,
     TRUSTED_PROXY_HOPS: undefined,
@@ -140,8 +144,10 @@ export async function startTestApp(
 
 /** Every secret the server holds, for "never in a response" assertions. */
 export function serverSecrets(): string[] {
-  return ["IDENTITY_KEY", "CARD_KEY", "PIN_PEPPER", "FIELD_KEY", "JOBS_SIGNING_KEY"].flatMap((k) => {
-    const hex = process.env[k] ?? "";
-    return [hex, Buffer.from(hex, "hex").toString("base64")];
-  });
+  return ["IDENTITY_KEY", "CARD_KEY", "PIN_PEPPER", "FIELD_KEY", "JOBS_SIGNING_KEY", "ANALYTICS_KEY"].flatMap(
+    (k) => {
+      const hex = process.env[k] ?? "";
+      return [hex, Buffer.from(hex, "hex").toString("base64")];
+    },
+  );
 }

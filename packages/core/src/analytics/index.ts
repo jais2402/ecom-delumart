@@ -10,7 +10,13 @@ import type { Paise } from "../money/index";
  */
 
 /** Browser-originated events: the only names POST /api/v1/events accepts. */
-export const BROWSER_EVENT_NAMES = ["page_view", "search", "product_view", "cart_add", "checkout_start"] as const;
+export const BROWSER_EVENT_NAMES = [
+  "page_view",
+  "search",
+  "product_view",
+  "cart_add",
+  "checkout_start",
+] as const;
 /** Server-recorded events, written after the command succeeded; never accepted from a browser. */
 export const SERVER_EVENT_NAMES = [
   "purchase",
@@ -129,7 +135,8 @@ export function parsePlace(raw: {
     return { country: UNKNOWN_COUNTRY, region: null, city: null };
   }
   const regionLabel = decodeLabel(raw.region);
-  const region = regionLabel !== null && REGION_CODE.test(regionLabel) ? regionLabel.toUpperCase() : regionLabel;
+  const region =
+    regionLabel !== null && REGION_CODE.test(regionLabel) ? regionLabel.toUpperCase() : regionLabel;
   return { country, region, city: decodeLabel(raw.city) };
 }
 

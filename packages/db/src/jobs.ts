@@ -149,3 +149,34 @@ export async function acceptJobsRequest(
     return rows[0]?.ok === true;
   });
 }
+
+export interface AnalyticsRollupDay {
+  day: string;
+  events: number;
+  rows: number;
+  minVisitors: number;
+}
+
+/** Rolls up yesterday's and today's analytics events (UTC); idempotent (0052). */
+export async function rollupAnalytics(
+  pool: Pool,
+): Promise<{ yesterday: AnalyticsRollupDay; today: AnalyticsRollupDay }> {
+  const r = await asJobs(pool, (c) =>
+    one<Record<string, Record<string, unknown>>>(c, "SELECT core.analytics_rollup_job() AS r", []),
+  );
+  const day = (d: Record<string, unknown> | undefined): AnalyticsRollupDay => ({
+    day: String(d?.day ?? ""),
+    events: Number(d?.events ?? 0),
+    rows: Number(d?.rows ?? 0),
+    minVisitors: Number(d?.minVisitors ?? 0),
+  });
+  return { yesterday: day(r.yesterday), today: day(r.today) };
+}
+
+/** Deletes raw analytics events past their retention (rollups are kept); returns how many. */
+export async function purgeAnalyticsEvents(pool: Pool): Promise<number> {
+  return asJobs(pool, async (c) => {
+    const { rows } = await c.query<{ n: string }>("SELECT core.analytics_purge_job()::text AS n");
+    return Number(rows[0]?.n ?? 0);
+  });
+}

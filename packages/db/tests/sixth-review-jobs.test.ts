@@ -153,7 +153,7 @@ describe("sixth security review: the jobs credential", () => {
     const worker = await loginAs("app_web");
     try {
       await worker.query("BEGIN");
-      await worker.query("LOCK TABLE analytics.event IN ROW EXCLUSIVE MODE");
+      await worker.query("LOCK TABLE analytics.experiment_exposure IN ROW EXCLUSIVE MODE");
       const working = worker.query("SELECT pg_sleep(7)");
       await sleep(6_000);
       expect(await watchdog("1 second")).toBe(0);
@@ -169,7 +169,7 @@ describe("sixth security review: the jobs credential", () => {
     const idle = await loginAs("app_web");
     try {
       await idle.query("BEGIN");
-      await idle.query("LOCK TABLE analytics.event IN ROW EXCLUSIVE MODE");
+      await idle.query("LOCK TABLE analytics.experiment_exposure IN ROW EXCLUSIVE MODE");
       await sleep(2_000);
       expect(await watchdog("1 second")).toBe(0);
       expect(await alive(idle)).toBe(true); // a statement: idle again from now
@@ -190,11 +190,11 @@ describe("sixth security review: the jobs credential", () => {
     const waiter = await pool.connect();
     try {
       await blocker.query("BEGIN");
-      await blocker.query("LOCK TABLE analytics.event IN ROW EXCLUSIVE MODE");
+      await blocker.query("LOCK TABLE analytics.experiment_exposure IN ROW EXCLUSIVE MODE");
       const working = blocker.query("SELECT pg_sleep(30)").catch(() => "ended");
       await waiter.query("BEGIN");
       await waiter.query("SET LOCAL lock_timeout = '20s'");
-      const waiting = waiter.query("LOCK TABLE analytics.event IN ACCESS EXCLUSIVE MODE");
+      const waiting = waiter.query("LOCK TABLE analytics.experiment_exposure IN ACCESS EXCLUSIVE MODE");
       await sleep(5_500);
       expect(await watchdog("1 second")).toBe(1);
       await waiting; // the waiter gets its lock
