@@ -30,7 +30,9 @@ CREATE TABLE core.fictional_landmark (
 );
 
 CREATE TABLE core.user_profile (
-  id                uuid PRIMARY KEY,                  -- = auth.users.id
+  -- = auth.users.id: a profile exists only for a user the auth service created (on Supabase the
+  -- migration role needs REFERENCES on auth.users)
+  id                uuid PRIMARY KEY REFERENCES auth.users(id),
   handle            text UNIQUE CHECK (handle ~ '^[a-z0-9-]{3,24}$'),
   status            text NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','SUSPENDED','DELETED')),
   role              text NOT NULL DEFAULT 'PLAYER' CHECK (role IN ('PLAYER','SUPER_ADMIN')),

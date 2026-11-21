@@ -52,6 +52,16 @@ describe("ledger invariants", () => {
     return id;
   }
 
+  /** A journal created in this transaction and not yet checked (so not sealed). */
+  async function openJournal(c: pg.PoolClient): Promise<string> {
+    const id = uuidv7();
+    await c.query(
+      "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'COMPENSATION', 1)",
+      [id],
+    );
+    return id;
+  }
+
   it("zero-sum: an unbalanced journal is rejected at commit", async () => {
     const c = await pool.connect();
     try {
@@ -182,9 +192,9 @@ describe("ledger invariants", () => {
       expect(rows.filter((r) => r.has)).toEqual([]);
       expect(rows.length).toBe(36);
     });
-    // COMPENSATION is an admin action and runs as app_jobs; the money-command role app_pay
-    // posts the user's own journals (grants at provisioning, purchases). Both stay insert-only,
-    // not read-only. app_web inserts none.
+    // COMPENSATION is an admin action and runs as app_jobs (insert-only, not read-only). The
+    // user's own journals (grants at provisioning, purchases) are written by the owner-run
+    // command functions (0018); app_web and app_pay insert none directly.
     it("app_jobs can still INSERT a balanced COMPENSATION journal (insert-only, not read-only)", async () => {
       const state = await inRolledBackTx(pool, async (c) => {
         await c.query("SET LOCAL ROLE app_jobs");
@@ -208,10 +218,15 @@ describe("ledger invariants", () => {
         ),
       ).toBe("42501");
     });
-    it("app_pay can still INSERT a balanced journal of its own user (insert-only, not read-only)", async () => {
-      // Provisioning runs as app_pay and writes the user's STARTER_GRANT journal and postings.
-      // (COMPANY_REGISTRATION, WAREHOUSE_PURCHASE and MEMBERSHIP are refused for app_pay until
-      // they are backed, 0014; a PURCHASE needs a whole order group, 0016.)
+    it("app_pay cannot INSERT a journal directly; provisioning (core.provision_account) writes the user's balanced grant journal", async () => {
+      expect(
+        await stateOf(
+          pool,
+          "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'STARTER_GRANT', 1)",
+          [uuidv7()],
+          { role: "app_pay", userId },
+        ),
+      ).toBe("42501");
       const fresh = await provisionAccount(pool, provisionInput());
       const { rows } = await pool.query<{ n: string; s: string }>(
         "SELECT count(*) AS n, SUM(amount)::text AS s FROM ledger.posting WHERE journal_id = $1",
@@ -237,12 +252,13 @@ describe("ledger invariants", () => {
   });
 
   it("US-14: a second STARTER grant for a user is rejected", async () => {
-    // the provisioned user already holds a STARTER grant
-    const err = await inRolledBackTx(pool, (c) =>
+    // the provisioned user already holds a STARTER grant (a fresh, unchecked journal: the
+    // starter journal itself is sealed, 0016 R9)
+    const err = await inRolledBackTx(pool, async (c) =>
       sqlState(
         c.query(
           "INSERT INTO ledger.grant_record (id, user_id, journal_id, type, amount) VALUES ($1, $2, $3, 'STARTER', 1)",
-          [uuidv7(), userId, journalId],
+          [uuidv7(), userId, await openJournal(c)],
         ),
       ),
     );
@@ -251,12 +267,14 @@ describe("ledger invariants", () => {
 
   it("a second RELIEF grant on the same UTC day is rejected; the next day is allowed", async () => {
     const other = await createProfile(pool);
+    let open = "";
     const insertRelief = (c: pg.PoolClient, day: string) =>
       c.query(
         "INSERT INTO ledger.grant_record (id, user_id, journal_id, type, amount, utc_day) VALUES ($1, $2, $3, 'RELIEF', 100, $4)",
-        [uuidv7(), other, journalId, day],
+        [uuidv7(), other, open, day],
       );
     await inRolledBackTx(pool, async (c) => {
+      open = await openJournal(c);
       await insertRelief(c, "2026-11-20");
       await c.query("SAVEPOINT s");
       expect(await sqlState(insertRelief(c, "2026-11-20"))).toBe("23505");

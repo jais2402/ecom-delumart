@@ -301,7 +301,7 @@ describe("checkout and pay (LLD §5.2)", () => {
       });
       const outcome = await codeOf(
         createCheckoutSession(pool, {
-          userId: s.owner.userId,
+          authSessionId: s.owner.authSessionId,
           lines: [{ productId: p.id }],
           speedBySeller: standard(s),
           couponCode: "OWNERS",
@@ -412,7 +412,11 @@ describe("checkout and pay (LLD §5.2)", () => {
       // a fresh attempt on the paid session is refused too
       expect(
         await codeOf(
-          createPaymentAttempt(pool, { userId: buyer.userId, sessionId: co.sessionId, method: "BALANCE" }),
+          createPaymentAttempt(pool, {
+            authSessionId: buyer.authSessionId,
+            sessionId: co.sessionId,
+            method: "BALANCE",
+          }),
         ),
       ).toBe("CONFLICT");
       expect(await ordersFor(co.sessionId)).toBe(1);
@@ -483,13 +487,13 @@ describe("checkout and pay (LLD §5.2)", () => {
       const buyer = await user(pool);
       const p = await product(pool, { mode: "UNLIMITED_SEED", pricePaise: 1_000n * RUPEE });
       const session = await createCheckoutSession(pool, {
-        userId: buyer.userId,
+        authSessionId: buyer.authSessionId,
         lines: [{ productId: p.id }],
         speedBySeller: standard("SEED"),
         idempotencyKey: key(),
       });
       const attempt = await createPaymentAttempt(pool, {
-        userId: buyer.userId,
+        authSessionId: buyer.authSessionId,
         sessionId: session.sessionId,
         method: "CARD",
         cardId: buyer.cardId,
@@ -497,7 +501,7 @@ describe("checkout and pay (LLD §5.2)", () => {
       expect(attempt.authenticated).toBe(false);
       const k = key();
       const input = {
-        userId: buyer.userId,
+        authSessionId: buyer.authSessionId,
         sessionId: session.sessionId,
         attemptId: attempt.attemptId,
         idempotencyKey: k,
@@ -508,7 +512,10 @@ describe("checkout and pay (LLD §5.2)", () => {
       expect(outcome).toBe("PAYMENT_PENDING");
       expect(await attemptState(attempt.attemptId)).toEqual({ state: "PENDING", failure_code: null });
 
-      await markAttemptAuthenticated(pool, { userId: buyer.userId, attemptId: attempt.attemptId });
+      await markAttemptAuthenticated(pool, {
+        authSessionId: buyer.authSessionId,
+        attemptId: attempt.attemptId,
+      });
       const receipt = await pay(pool, input);
       expect(receipt.paymentReference).toBe(attempt.reference);
     });
@@ -517,24 +524,27 @@ describe("checkout and pay (LLD §5.2)", () => {
       const buyer = await user(pool);
       const p = await product(pool, { mode: "UNLIMITED_SEED", pricePaise: 1_000n * RUPEE });
       const session = await createCheckoutSession(pool, {
-        userId: buyer.userId,
+        authSessionId: buyer.authSessionId,
         lines: [{ productId: p.id }],
         speedBySeller: standard("SEED"),
         idempotencyKey: key(),
       });
       const attempt = await createPaymentAttempt(pool, {
-        userId: buyer.userId,
+        authSessionId: buyer.authSessionId,
         sessionId: session.sessionId,
         method: "CARD",
         cardId: buyer.cardId,
       });
-      await markAttemptAuthenticated(pool, { userId: buyer.userId, attemptId: attempt.attemptId });
+      await markAttemptAuthenticated(pool, {
+        authSessionId: buyer.authSessionId,
+        attemptId: attempt.attemptId,
+      });
       await pool.query("UPDATE core.virtual_card SET status = 'FROZEN' WHERE id = $1", [buyer.cardId]);
       try {
         const outcome = await expectNothingDebited(buyer.ledgerAccountId, session.sessionId, () =>
           codeOf(
             pay(pool, {
-              userId: buyer.userId,
+              authSessionId: buyer.authSessionId,
               sessionId: session.sessionId,
               attemptId: attempt.attemptId,
               idempotencyKey: key(),
@@ -545,7 +555,7 @@ describe("checkout and pay (LLD §5.2)", () => {
         expect(
           await codeOf(
             createPaymentAttempt(pool, {
-              userId: buyer.userId,
+              authSessionId: buyer.authSessionId,
               sessionId: session.sessionId,
               method: "CARD",
               cardId: buyer.cardId,
@@ -562,7 +572,7 @@ describe("checkout and pay (LLD §5.2)", () => {
       const other = await user(pool);
       const p = await product(pool, { mode: "UNLIMITED_SEED", pricePaise: 1_000n * RUPEE });
       const session = await createCheckoutSession(pool, {
-        userId: buyer.userId,
+        authSessionId: buyer.authSessionId,
         lines: [{ productId: p.id }],
         speedBySeller: standard("SEED"),
         idempotencyKey: key(),
@@ -570,7 +580,7 @@ describe("checkout and pay (LLD §5.2)", () => {
       expect(
         await codeOf(
           createPaymentAttempt(pool, {
-            userId: buyer.userId,
+            authSessionId: buyer.authSessionId,
             sessionId: session.sessionId,
             method: "CARD",
             cardId: other.cardId,
@@ -702,7 +712,7 @@ describe("checkout and pay (LLD §5.2)", () => {
       expect(
         await codeOf(
           pay(pool, {
-            userId: thief.userId,
+            authSessionId: thief.authSessionId,
             sessionId: co.sessionId,
             attemptId: co.attemptId,
             idempotencyKey: key(),

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MINT_ACCOUNT_ID, type ProvisionResult, SINK_ACCOUNT_ID } from "../src/provision";
+import { MINT_ACCOUNT_ID, SINK_ACCOUNT_ID } from "../src/provision";
 import { checkout, payFor, product, RUPEE, seller, standard, user, wallet } from "./checkout-fixtures";
 import {
   ADMIN_URL,
@@ -14,9 +14,11 @@ import {
   plant,
   provisionAccount,
   provisionInput,
+  RAW_WRITER,
   sqlState,
   stateOf,
   type TestDatabase,
+  type TestUser,
   uuidv7,
 } from "./helpers";
 
@@ -26,8 +28,8 @@ const RLS_SCHEMAS = ["core", "ledger", "private", "analytics", "audit", "sandbox
 
 /** Ids of a fully populated buyer B, seen from user A's session. */
 interface Fixture {
-  a: ProvisionResult;
-  b: ProvisionResult;
+  a: TestUser;
+  b: TestUser;
   /** owner of `company` (a bare profile) */
   seller: string;
   company: string;
@@ -146,6 +148,17 @@ describe("security hardening (review findings)", () => {
   let f: Fixture;
   const web = () => ({ role: "app_web", userId: f.a.userId });
   const payRole = () => ({ role: "app_pay", userId: f.a.userId });
+  /** a writer the grants did not stop (helpers.ts): the structural rules alone refuse it */
+  const raw = () => ({ role: RAW_WRITER, userId: f.a.userId });
+  /** A journal created in this transaction and not yet checked, so not sealed (0016 R9). */
+  const openJournal = async (c: pg.PoolClient): Promise<string> => {
+    const j = uuidv7();
+    await c.query(
+      "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'COMPENSATION', 1)",
+      [j],
+    );
+    return j;
+  };
 
   beforeAll(async () => {
     db = await createTestDatabase();
@@ -178,10 +191,13 @@ describe("security hardening (review findings)", () => {
     it("a STARTER grant_record can only carry exactly 100,000,000,000 paise", async () => {
       const user = await createProfile(pool);
       const insert = (amount: string) =>
-        stateOf(
-          pool,
-          "INSERT INTO ledger.grant_record (id, user_id, journal_id, type, amount) VALUES ($1, $2, $3, 'STARTER', $4)",
-          [uuidv7(), user, f.a.starterJournalId, amount],
+        asActor(pool, {}, async (c) =>
+          sqlState(
+            c.query(
+              "INSERT INTO ledger.grant_record (id, user_id, journal_id, type, amount) VALUES ($1, $2, $3, 'STARTER', $4)",
+              [uuidv7(), user, await openJournal(c), amount],
+            ),
+          ),
         );
       expect(await insert("100000000001")).toBe("23514");
       expect(await insert("1")).toBe("23514");
@@ -240,7 +256,7 @@ describe("security hardening (review findings)", () => {
       expect(owned.rows).toEqual([]);
     });
 
-    it("as app_web with app.user_id = A, none of B's owner-scoped rows are visible", async () => {
+    it("as app_web signed in as A, none of B's owner-scoped rows are visible", async () => {
       const probes: [string, string, unknown[]][] = [
         ["user_profile", "SELECT count(*) AS n FROM core.user_profile WHERE id = $1", [f.b.userId]],
         ["wallet", "SELECT count(*) AS n FROM ledger.wallet WHERE account_id = $1", [f.b.ledgerAccountId]],
@@ -259,11 +275,7 @@ describe("security hardening (review findings)", () => {
         ["attempt", "SELECT count(*) AS n FROM core.payment_attempt WHERE user_id = $1", [f.b.userId]],
         ["challenge", "SELECT count(*) AS n FROM core.payment_challenge WHERE attempt_id = $1", [f.attemptB]],
         ["order_group", "SELECT count(*) AS n FROM core.order_group WHERE buyer_user_id = $1", [f.b.userId]],
-        [
-          "seller_order",
-          "SELECT count(*) AS n FROM core.seller_order WHERE buyer_user_id = $1",
-          [f.b.userId],
-        ],
+        ["seller_order", "SELECT count(*) AS n FROM core.seller_order WHERE id = $1", [f.sellerOrderB]],
         [
           "order_line",
           "SELECT count(*) AS n FROM core.order_line WHERE seller_order_id = $1",
@@ -332,6 +344,27 @@ describe("security hardening (review findings)", () => {
       expect(claimed).toEqual({ sellerOrders: 0, lines: 0, shipments: 0, groups: 0 });
     });
 
+    it("purchases are anonymous to sellers: the owner reads its seller orders but never their buyer", async () => {
+      const owner = { role: "app_web", userId: f.seller };
+      expect(
+        await stateOf(
+          pool,
+          "SELECT buyer_user_id FROM core.seller_order WHERE id = $1",
+          [f.sellerOrderB],
+          owner,
+        ),
+      ).toBe("42501");
+      expect(await stateOf(pool, "SELECT * FROM core.seller_order", [], owner)).toBe("42501");
+      const visible = await asActor(pool, owner, async (c) => {
+        const { rows } = await c.query<{ id: string; net_paise: string }>(
+          "SELECT id, net_paise FROM core.seller_order WHERE id = $1",
+          [f.sellerOrderB],
+        );
+        return rows;
+      });
+      expect(visible).toEqual([{ id: f.sellerOrderB, net_paise: "9500" }]);
+    });
+
     it("app_web cannot read tombstones, audit or raw analytics, but can append outbox, audit_log and analytics events", async () => {
       for (const sql of [
         "SELECT 1 FROM core.identity_tombstone",
@@ -380,14 +413,15 @@ describe("security hardening (review findings)", () => {
   });
 
   describe("finding 3: wallets always equal their postings at commit", () => {
-    it("app_web cannot raise its own wallet at all; app_pay not without postings", async () => {
+    it("app_web and app_pay cannot raise a wallet at all; a writer the grants missed not without postings", async () => {
       const raise = (c: pg.PoolClient) =>
         c.query(
           "UPDATE ledger.wallet SET available_paise = available_paise + 1000000 WHERE account_id = $1",
           [f.a.ledgerAccountId],
         );
       expect(await commitState(pool, web(), raise)).toBe("42501");
-      expect(await commitState(pool, payRole(), raise)).toBe("23514");
+      expect(await commitState(pool, payRole(), raise)).toBe("42501");
+      expect(await commitState(pool, raw(), raise)).toBe("23514");
     });
 
     it("not even the owner can change a wallet without postings", async () => {
@@ -477,22 +511,24 @@ describe("security hardening (review findings)", () => {
           web(),
         ),
       ).toBe("42501");
-      const state = await asActor(pool, payRole(), (c) =>
+      const post = (c: pg.PoolClient) =>
         sqlState(
           c.query(
             "INSERT INTO ledger.posting (journal_id, account_id, amount, memo) VALUES ($1, $2, -5, 'x'), ($1, $3, 5, 'x')",
             [f.a.starterJournalId, MINT_ACCOUNT_ID, f.a.ledgerAccountId],
           ),
-        ),
-      );
-      expect(state).toBe("23514");
+        );
+      expect(await asActor(pool, payRole(), post)).toBe("42501");
+      expect(await asActor(pool, raw(), post)).toBe("23514");
       const asOwner = await commitError(pool, {}, (c) =>
         c.query(
           "INSERT INTO ledger.posting (journal_id, account_id, amount, memo) VALUES ($1, $2, -5, 'x'), ($1, $3, 5, 'x')",
           [f.a.starterJournalId, MINT_ACCOUNT_ID, f.a.ledgerAccountId],
         ),
       );
-      expect(asOwner).toMatch(/earlier transaction/);
+      // a committed journal was checked at its commit, so its seal (0016 R9) refuses first; the
+      // earlier-transaction rule (0003) stands behind it
+      expect(asOwner).toMatch(/sealed|earlier transaction/);
     });
 
     it("journal.created_txid is always the inserting transaction, whatever the inserter supplies", async () => {
@@ -512,7 +548,7 @@ describe("security hardening (review findings)", () => {
     });
 
     it("a journal needs at least two postings at commit", async () => {
-      expect(await commitError(pool, payRole(), (c) => journal(c, "PURCHASE", []))).toMatch(
+      expect(await commitError(pool, raw(), (c) => journal(c, "PURCHASE", []))).toMatch(
         /at least two postings/,
       );
     });
@@ -666,10 +702,10 @@ describe("security hardening (review findings)", () => {
         "accept",
       ],
     ];
-    // Admin journal types are inserted only by the job runner (0014, 0016); the rest by the
-    // money-command role. The unbacked fee types (MEMBERSHIP, ...) are refused for app_pay
-    // outright (0014, tests/ledger-gaps); their account rules are checked here as the owner
-    // acting for user A, the path they will take once they are backed.
+    // Admin journal types are inserted only by the job runner (0014, 0016). No application role
+    // inserts the rest (the command functions of 0018 do), so their account rules are exercised
+    // by a writer the grants did not stop. The unbacked fee types (MEMBERSHIP, ...) are checked
+    // as the owner acting for user A, the path they will take once they are backed.
     const ADMIN_TYPES = ["COMPENSATION", "REVERSAL", "ACCOUNT_RETIREMENT"];
     const UNBACKED_TYPES = ["COMPANY_REGISTRATION", "WAREHOUSE_PURCHASE", "MEMBERSHIP"];
     for (const [label, type, postings, expected] of cases) {
@@ -678,7 +714,7 @@ describe("security hardening (review findings)", () => {
           ? { role: "app_jobs" }
           : UNBACKED_TYPES.includes(type)
             ? { userId: f.a.userId }
-            : payRole();
+            : raw();
         const state = await commitState(pool, actor, (c) => journal(c, type, postings(f)));
         expect(state === "no error" ? "accept" : `reject:${state}`).toBe(
           expected === "accept" ? "accept" : "reject:23514",
@@ -688,59 +724,55 @@ describe("security hardening (review findings)", () => {
   });
 
   describe("finding 5: per-table, per-column privileges and CHECKs", () => {
-    it("app_web cannot change its own role, test flag, status or fingerprints", async () => {
-      for (const set of [
-        "role = 'SUPER_ADMIN'",
-        "is_test_account = true",
-        "status = 'SUSPENDED'",
-        "email_fingerprint = '\\x00'",
-        "phone_fingerprint = '\\x00'",
-        "is_adult = true",
-      ]) {
-        const sql = `UPDATE core.user_profile SET ${set} WHERE id = $1`;
-        expect(await stateOf(pool, sql, [f.a.userId], web()), set).toBe("42501");
+    it("app_web and app_pay cannot change any profile column: role, test flag, status, fingerprints, handle", async () => {
+      for (const role of ["app_web", "app_pay"]) {
+        for (const set of [
+          "role = 'SUPER_ADMIN'",
+          "is_test_account = true",
+          "status = 'SUSPENDED'",
+          "email_fingerprint = '\\x00'",
+          "phone_fingerprint = '\\x00'",
+          "is_adult = true",
+          "handle = 'player-a'",
+          "provisioned_at = now()",
+        ]) {
+          const sql = `UPDATE core.user_profile SET ${set} WHERE id = $1`;
+          expect(await stateOf(pool, sql, [f.a.userId], { role, userId: f.a.userId }), `${role} ${set}`).toBe(
+            "42501",
+          );
+        }
       }
-      expect(
-        await stateOf(
-          pool,
-          "UPDATE core.user_profile SET handle = 'player-a', privacy = '{}', research_opt_out = true WHERE id = $1",
-          [f.a.userId],
-          web(),
-        ),
-      ).toBe("no error");
     });
 
-    it("app_web cannot create a profile for itself as SUPER_ADMIN, staff or for someone else", async () => {
+    it("no application role can create a profile, not even its own ordinary one (only core.provision_account)", async () => {
       const fresh = uuidv7();
-      const insert = (cols: string, vals: string, id: string) =>
+      const insert = (cols: string, vals: string, id: string, role: string) =>
         stateOf(
           pool,
           `INSERT INTO core.user_profile (id, email_fingerprint${cols}) VALUES ($1, $2${vals})`,
           [id, randomBytes(32)],
-          { role: "app_web", userId: fresh },
+          { role, userId: fresh },
         );
-      expect(await insert(", role", ", 'SUPER_ADMIN'", fresh)).toBe("42501");
-      expect(await insert(", is_test_account", ", true", fresh)).toBe("42501");
-      expect(await insert("", "", uuidv7())).toBe("42501");
-      expect(await insert("", "", fresh)).toBe("no error");
+      for (const role of ["app_web", "app_pay", "app_jobs"]) {
+        expect(await insert(", role", ", 'SUPER_ADMIN'", fresh, role), role).toBe("42501");
+        expect(await insert(", is_test_account", ", true", fresh, role), role).toBe("42501");
+        expect(await insert("", "", uuidv7(), role), role).toBe("42501");
+        expect(await insert("", "", fresh, role), role).toBe("42501");
+      }
     });
 
-    it("app_web holds UPDATE on user_profile only for handle, privacy, research_opt_out and provisioned_at", async () => {
-      const { rows } = await pool.query<{ column_name: string }>(
-        `SELECT column_name FROM information_schema.columns
+    it("app_web and app_pay hold no INSERT or UPDATE on any user_profile column", async () => {
+      const { rows } = await pool.query<{ r: string; column_name: string }>(
+        `SELECT r, column_name FROM information_schema.columns, unnest(ARRAY['app_web','app_pay']) r
           WHERE table_schema = 'core' AND table_name = 'user_profile'
-            AND has_column_privilege('app_web', 'core.user_profile', column_name, 'UPDATE')
-          ORDER BY column_name`,
+            AND (has_column_privilege(r, 'core.user_profile', column_name, 'UPDATE')
+              OR has_column_privilege(r, 'core.user_profile', column_name, 'INSERT'))
+          ORDER BY 1, 2`,
       );
-      expect(rows.map((r) => r.column_name)).toEqual([
-        "handle",
-        "privacy",
-        "provisioned_at",
-        "research_opt_out",
-      ]);
+      expect(rows).toEqual([]);
     });
 
-    it("app_web, app_pay and app_jobs have DELETE on no core or ledger table except expired tombstones for jobs", async () => {
+    it("app_web, app_pay and app_jobs have DELETE on no core or ledger table except tombstones and coupon-lookup failures for jobs (retention)", async () => {
       const { rows } = await pool.query<{ r: string; t: string }>(
         `SELECT r, c.oid::regclass::text AS t
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace, unnest(ARRAY['app_web','app_pay','app_jobs']) r
@@ -748,8 +780,9 @@ describe("security hardening (review findings)", () => {
             AND (has_table_privilege(r, c.oid, 'DELETE') OR has_table_privilege(r, c.oid, 'TRUNCATE'))
           ORDER BY 1, 2`,
       );
+      // idempotency records are purged through core.purge_idempotency_records() (0018)
       expect(rows).toEqual([
-        { r: "app_jobs", t: "core.idempotency_record" },
+        { r: "app_jobs", t: "core.coupon_lookup_failure" },
         { r: "app_jobs", t: "core.identity_tombstone" },
       ]);
     });
@@ -834,7 +867,7 @@ describe("security hardening (review findings)", () => {
             // a RELIEF grant to update (the table is append-only for app roles, not for the owner)
             await c.query(
               "INSERT INTO ledger.grant_record (id, user_id, journal_id, type, amount, utc_day) VALUES ($1, $2, $3, 'RELIEF', 5, '2026-01-01')",
-              [uuidv7(), f.a.userId, f.a.starterJournalId],
+              [uuidv7(), f.a.userId, await openJournal(c)],
             );
           }
           return sqlState(c.query(sql, resolved));
@@ -845,13 +878,23 @@ describe("security hardening (review findings)", () => {
   });
 
   describe("finding 6: tombstone lookup is done by the database, not the caller", () => {
-    it("app_web can ask whether fingerprints are tombstoned but cannot read the table", async () => {
+    it("provisioning applies the tombstone rule itself; app_web and app_pay can neither read tombstones nor ask about a fingerprint", async () => {
       const fp = randomBytes(32);
       await pool.query(
         "INSERT INTO core.identity_tombstone (fingerprint, kind, expires_at) VALUES ($1, 'PHONE', now() + interval '1 day')",
         [fp],
       );
-      const answer = await asActor(pool, web(), async (c) => {
+      for (const role of ["app_web", "app_pay"]) {
+        expect(await stateOf(pool, "SELECT 1 FROM core.identity_tombstone", [], { role }), role).toBe(
+          "42501",
+        );
+        expect(
+          await stateOf(pool, "SELECT core.identity_is_tombstoned($1, $2)", [randomBytes(32), fp], { role }),
+          role,
+        ).toBe("42501");
+      }
+      // the job runner (account deletion) may ask
+      const answer = await asActor(pool, { role: "app_jobs" }, async (c) => {
         const { rows } = await c.query<{ email: boolean; phone: boolean; wrongKind: boolean }>(
           `SELECT core.identity_is_tombstoned($1, NULL) AS email, core.identity_is_tombstoned($1, $2) AS phone,
                   core.identity_is_tombstoned($2, $1) AS "wrongKind"`,
@@ -866,10 +909,13 @@ describe("security hardening (review findings)", () => {
   describe("finding 8: foreign keys", () => {
     it("grant_record.user_id must reference a profile", async () => {
       expect(
-        await stateOf(
-          pool,
-          "INSERT INTO ledger.grant_record (id, user_id, journal_id, type, amount, utc_day) VALUES ($1, $2, $3, 'RELIEF', 5, '2026-01-02')",
-          [uuidv7(), uuidv7(), f.a.starterJournalId],
+        await asActor(pool, {}, async (c) =>
+          sqlState(
+            c.query(
+              "INSERT INTO ledger.grant_record (id, user_id, journal_id, type, amount, utc_day) VALUES ($1, $2, $3, 'RELIEF', 5, '2026-01-02')",
+              [uuidv7(), uuidv7(), await openJournal(c)],
+            ),
+          ),
         ),
       ).toBe("23503");
     });

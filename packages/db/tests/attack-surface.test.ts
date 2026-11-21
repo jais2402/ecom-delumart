@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MINT_ACCOUNT_ID, type ProvisionResult } from "../src/provision";
+import { MINT_ACCOUNT_ID } from "../src/provision";
 import {
   asActor,
   commitState,
@@ -10,21 +10,24 @@ import {
   plant,
   provisionAccount,
   provisionInput,
+  RAW_WRITER,
   sqlState,
   type TestDatabase,
+  type TestUser,
   uuidv7,
 } from "./helpers";
 
 /**
- * One place that states what the web process (app_web, app.user_id = A) cannot do,
+ * One place that states what the web process (app_web, signed in as A) cannot do,
  * whatever SQL it is tricked into running. Each line is a security review finding.
  */
 describe("attack surface: app_web acting as user A", () => {
   let db: TestDatabase;
   let pool: pg.Pool;
-  let a: ProvisionResult;
-  let b: ProvisionResult;
+  let a: TestUser;
+  let b: TestUser;
   let tombstone: Buffer;
+  const group = uuidv7();
   const asA = () => ({ role: "app_web", userId: a.userId });
 
   beforeAll(async () => {
@@ -40,7 +43,6 @@ describe("attack surface: app_web acting as user A", () => {
       "INSERT INTO core.idempotency_record (user_id, command, key, request_hash) VALUES ($1, 'pay', 'k', '\\x00')",
       [b.userId],
     );
-    const group = uuidv7();
     // visibility fixture: an order without journal, session or attempt cannot be created under
     // the money rules (0016), so it is planted with triggers and foreign keys off
     await plant(pool, async (c) => {
@@ -84,8 +86,8 @@ describe("attack surface: app_web acting as user A", () => {
       ]),
       sellerOrders: await countRows(
         c,
-        "SELECT count(*) AS n FROM core.seller_order WHERE buyer_user_id = $1",
-        [b.userId],
+        "SELECT count(*) AS n FROM core.seller_order WHERE order_group_id = $1",
+        [group],
       ),
       addresses: await countRows(c, "SELECT count(*) AS n FROM private.address WHERE user_id = $1", [
         b.userId,
@@ -106,6 +108,12 @@ describe("attack surface: app_web acting as user A", () => {
         b.userId,
       ]),
     ).toBe(1);
+    // and it cannot even name the buyer column of a seller order (purchases are anonymous to sellers)
+    expect(
+      await asActor(pool, asA(), (c) =>
+        sqlState(c.query("SELECT count(*) FROM core.seller_order WHERE buyer_user_id = $1", [b.userId])),
+      ),
+    ).toBe("42501");
   });
 
   it("cannot raise its own role", async () => {
@@ -126,23 +134,26 @@ describe("attack surface: app_web acting as user A", () => {
     expect(state).toBe("42501");
   });
 
-  it("cannot update a wallet (no privilege); nor can app_pay without postings", async () => {
+  it("cannot update a wallet (no privilege), nor can app_pay; a writer the grants missed is refused without postings", async () => {
     const raise = (c: pg.PoolClient) =>
       c.query("UPDATE ledger.wallet SET available_paise = available_paise + 100000 WHERE account_id = $1", [
         a.ledgerAccountId,
       ]);
     expect(await commitState(pool, asA(), raise)).toBe("42501");
-    expect(await commitState(pool, { role: "app_pay", userId: a.userId }, raise)).toBe("23514");
+    expect(await commitState(pool, { role: "app_pay", userId: a.userId }, raise)).toBe("42501");
+    expect(await commitState(pool, { role: RAW_WRITER, userId: a.userId }, raise)).toBe("23514");
   });
 
-  it("cannot add postings to an old journal (no privilege); nor can app_pay", async () => {
+  it("cannot add postings to an old journal (no privilege), nor can app_pay; nor a writer the grants missed", async () => {
     const post = (c: pg.PoolClient) =>
       c.query(
         "INSERT INTO ledger.posting (journal_id, account_id, amount, memo) VALUES ($1, $2, -100000, 'x'), ($1, $3, 100000, 'x')",
         [a.starterJournalId, MINT_ACCOUNT_ID, a.ledgerAccountId],
       );
     expect(await commitState(pool, asA(), post)).toBe("42501");
-    expect(await commitState(pool, { role: "app_pay", userId: a.userId }, post)).toBe("23514");
+    expect(await commitState(pool, { role: "app_pay", userId: a.userId }, post)).toBe("42501");
+    // (refused before the closed-journal rule: the provisioning call checked and sealed it)
+    expect(await commitState(pool, { role: RAW_WRITER, userId: a.userId }, post)).toBe("23514");
   });
 
   it("cannot delete a tombstone", async () => {

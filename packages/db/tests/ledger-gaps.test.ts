@@ -1,12 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-  MINT_ACCOUNT_ID,
-  type ProvisionResult,
-  SINK_ACCOUNT_ID,
-  STARTER_GRANT_PAISE,
-} from "../src/provision";
+import { MINT_ACCOUNT_ID, SINK_ACCOUNT_ID, STARTER_GRANT_PAISE } from "../src/provision";
 import {
   checkout,
   journalPostings,
@@ -25,8 +20,10 @@ import {
   createTestDatabase,
   provisionAccount,
   provisionInput,
+  RAW_WRITER,
   stateOf,
   type TestDatabase,
+  type TestUser,
   uuidv7,
 } from "./helpers";
 
@@ -52,10 +49,12 @@ async function journal(
 describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PURCHASE", () => {
   let db: TestDatabase;
   let pool: pg.Pool;
-  let a: ProvisionResult;
-  let b: ProvisionResult;
+  let a: TestUser;
+  let b: TestUser;
   const web = (): Actor => ({ role: "app_web", userId: a.userId });
   const payRole = (): Actor => ({ role: "app_pay", userId: a.userId });
+  /** a writer the grants did not stop (helpers.ts): the structural rules alone refuse it */
+  const raw = (): Actor => ({ role: RAW_WRITER, userId: a.userId });
   const jobs: Actor = { role: "app_jobs" };
 
   beforeAll(async () => {
@@ -68,7 +67,7 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
     await db.drop();
   });
 
-  describe("A1: app_pay may insert only user-driven journal types; app_web none at all", () => {
+  describe("A1: app_web and app_pay insert no journal at all; admin types only in the job runner", () => {
     for (const type of ["COMPENSATION", "REVERSAL", "ACCOUNT_RETIREMENT"]) {
       for (const role of ["app_web", "app_pay"]) {
         it(`${role} cannot insert a ${type} journal (admin actions run in the job runner)`, async () => {
@@ -100,10 +99,12 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
     });
 
     for (const type of ["STARTER_GRANT", "RELIEF_GRANT", "PURCHASE"]) {
-      it(`app_pay may insert a ${type} journal row; app_web may not`, async () => {
+      it(`neither app_pay nor app_web may insert a ${type} journal row (the command functions write them)`, async () => {
         const insert = "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, $2, 1)";
-        expect(await stateOf(pool, insert, [uuidv7(), type], payRole())).toBe("no error");
+        expect(await stateOf(pool, insert, [uuidv7(), type], payRole())).toBe("42501");
         expect(await stateOf(pool, insert, [uuidv7(), type], web())).toBe("42501");
+        // the row itself is acceptable to the per-row rules (its checks run at commit)
+        expect(await stateOf(pool, insert, [uuidv7(), type], raw())).toBe("no error");
       });
     }
 
@@ -116,6 +117,13 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
         expect(await stateOf(pool, insert, [uuidv7(), type], web())).toBe("42501");
       });
     }
+
+    it("a writer the grants missed cannot create admin journal types either (role rule, 0016)", async () => {
+      const insert = "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, $2, 1)";
+      for (const type of ["COMPENSATION", "REVERSAL", "ACCOUNT_RETIREMENT"]) {
+        expect(await stateOf(pool, insert, [uuidv7(), type], raw()), type).toBe("42501");
+      }
+    });
 
     it("app_jobs may post a COMPENSATION journal crediting one user from MINT", async () => {
       const state = await commitState(pool, jobs, (c) =>
@@ -184,6 +192,7 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
     it("a USER account with postings but no wallet row is rejected at commit", async () => {
       const message = await commitError(pool, {}, async (c) => {
         const userId = uuidv7();
+        await c.query("INSERT INTO auth.users (id) VALUES ($1)", [userId]);
         await c.query("INSERT INTO core.user_profile (id, email_fingerprint) VALUES ($1, $2)", [
           userId,
           randomBytes(32),
@@ -219,7 +228,7 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
 
   describe("A3: MINT is never debited in a PURCHASE journal (no platform coupons yet)", () => {
     it("a PURCHASE journal debiting MINT is rejected at commit, even when balanced and synced", async () => {
-      const message = await commitError(pool, payRole(), (c) =>
+      const mint = (c: pg.PoolClient) =>
         journal(
           c,
           "PURCHASE",
@@ -229,9 +238,9 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
             [SINK_ACCOUNT_ID, 1000],
           ],
           [a.ledgerAccountId],
-        ),
-      );
-      expect(message).toMatch(/PURCHASE journal .* MINT/);
+        );
+      expect(await commitState(pool, payRole(), mint)).toBe("42501");
+      expect(await commitError(pool, raw(), mint)).toMatch(/PURCHASE journal .* MINT/);
     });
 
     it("the owner cannot debit MINT in a PURCHASE journal either", async () => {

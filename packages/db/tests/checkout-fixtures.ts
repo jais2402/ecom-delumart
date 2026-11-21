@@ -7,8 +7,7 @@ import {
   pay,
   type SellerQuote,
 } from "../src/checkout";
-import type { ProvisionResult } from "../src/provision";
-import { inTx, provisionAccount, provisionInput, uuidv7 } from "./helpers";
+import { inTx, provisionAccount, provisionInput, type TestUser, uuidv7 } from "./helpers";
 
 export const RUPEE = 100n;
 export const LAKH = 100_000n * RUPEE;
@@ -16,10 +15,10 @@ export const CRORE = 10_000_000n * RUPEE;
 /** Standard delivery from the default pricing configuration: ₹1,000. */
 export const STANDARD_DELIVERY = 1_000n * RUPEE;
 
-export const user = (pool: pg.Pool): Promise<ProvisionResult> => provisionAccount(pool, provisionInput());
+export const user = (pool: pg.Pool): Promise<TestUser> => provisionAccount(pool, provisionInput());
 
 export interface Seller {
-  owner: ProvisionResult;
+  owner: TestUser;
   companyId: string;
   warehouseId: string;
 }
@@ -169,20 +168,20 @@ export interface Checkout {
 /** Quote + BALANCE attempt (authenticated immediately). */
 export async function checkout(
   pool: pg.Pool,
-  buyer: ProvisionResult,
+  buyer: TestUser,
   products: ProductFixture[],
   speeds: Record<string, "STANDARD" | "EXPRESS" | "ZAP">,
   couponCode?: string,
 ): Promise<Checkout> {
   const session = await createCheckoutSession(pool, {
-    userId: buyer.userId,
+    authSessionId: buyer.authSessionId,
     lines: products.map((p) => ({ productId: p.id })),
     speedBySeller: speeds,
     ...(couponCode ? { couponCode } : {}),
     idempotencyKey: key(),
   });
   const attempt = await createPaymentAttempt(pool, {
-    userId: buyer.userId,
+    authSessionId: buyer.authSessionId,
     sessionId: session.sessionId,
     method: "BALANCE",
   });
@@ -194,9 +193,9 @@ export async function checkout(
   };
 }
 
-export function payFor(pool: pg.Pool, buyer: ProvisionResult, co: Checkout, k = key()): Promise<PayReceipt> {
+export function payFor(pool: pg.Pool, buyer: TestUser, co: Checkout, k = key()): Promise<PayReceipt> {
   return pay(pool, {
-    userId: buyer.userId,
+    authSessionId: buyer.authSessionId,
     sessionId: co.sessionId,
     attemptId: co.attemptId,
     idempotencyKey: k,

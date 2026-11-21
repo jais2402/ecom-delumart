@@ -2,9 +2,10 @@ import type { Pool, PoolClient } from "pg";
 
 /**
  * Application database roles a transaction may run as (SET LOCAL ROLE). app_pay is the
- * money-command role (provisioning, checkout, payment attempts, pay); in production it
- * is a separate login and pool, and app_web is not a member of it, so a connection
- * authenticated as app_web cannot switch to it.
+ * money-command role: it may execute the command functions of migration 0018 (provisioning,
+ * checkout, payment attempts, pay) and writes nothing directly. In production it is a
+ * separate login and pool, and app_web is not a member of it, so a connection authenticated
+ * as app_web cannot switch to it.
  */
 export type AppRole = "app_web" | "app_pay" | "app_jobs";
 
@@ -17,11 +18,14 @@ export interface TransactionOptions {
    */
   role?: AppRole;
   /**
-   * Sets app.user_id for row-level security policies (transaction-local). There is no
-   * company option: the database derives the actor's companies from this user
-   * (core.actor_company_ids(), migration 0012).
+   * The caller's sign-in session id (from the session cookie), set as the transaction-local
+   * app.session_id. The database resolves it to the acting user (core.actor_id(), migration
+   * 0001): a missing, unknown, expired or banned session has no identity. The connection never
+   * names a user, and there is no company option either: the database derives the actor's
+   * companies from that user (core.actor_company_ids(), migration 0012). A session id is a
+   * bearer secret: never log it or put it in an error.
    */
-  userId?: string | null;
+  sessionId?: string | null;
   /** LLD §4 default: 2s. */
   lockTimeout?: string;
   /** LLD §4 default: 5s. */
@@ -50,8 +54,8 @@ export async function withTransaction<T>(
       }
       await client.query(
         `SELECT set_config('lock_timeout', $1, true), set_config('statement_timeout', $2, true),
-                set_config('app.user_id', $3, true)`,
-        [options.lockTimeout ?? "2s", options.statementTimeout ?? "5s", options.userId ?? ""],
+                set_config('app.session_id', $3, true)`,
+        [options.lockTimeout ?? "2s", options.statementTimeout ?? "5s", options.sessionId ?? ""],
       );
       const result = await fn(client);
       await client.query("COMMIT");

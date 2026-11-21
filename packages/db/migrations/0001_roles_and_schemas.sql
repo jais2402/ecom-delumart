@@ -133,10 +133,78 @@ BEGIN
   RAISE EXCEPTION '% is append-only', TG_TABLE_NAME USING ERRCODE = 'insufficient_privilege';
 END $$;
 
--- Row-level security context, set transaction-locally by the data-access layer.
--- Unset or empty settings read as NULL, so a request without them matches no rows.
--- There is deliberately no company setting: a role could set it to any company. Company
--- scope is derived from the acting user in the database (core.actor_company_ids(), 0012).
-CREATE FUNCTION core.app_user_id() RETURNS uuid LANGUAGE sql STABLE AS $$
-  SELECT nullif(current_setting('app.user_id', true), '')::uuid
-$$;
+-- =====================================================================================
+-- Sign-in sessions (the acting user).
+--
+-- Production runs on Supabase, whose auth service owns the schema `auth`: users in
+-- auth.users (id, banned_until, deleted_at, ...) and live sign-in sessions in auth.sessions
+-- (id, user_id, not_after, created_at, updated_at, ...). The block below is a LOCAL / TEST
+-- STAND-IN ONLY: it creates a minimal `auth` schema with exactly those two tables when, and
+-- only when, no `auth` schema exists, so it is a no-op on Supabase. Nothing in this
+-- repository writes auth.* except tests (as the owner), standing in for the auth service.
+-- =====================================================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'auth') THEN
+    CREATE SCHEMA auth;
+    CREATE TABLE auth.users (
+      id           uuid PRIMARY KEY,
+      banned_until timestamptz,
+      deleted_at   timestamptz,
+      created_at   timestamptz NOT NULL DEFAULT now(),
+      updated_at   timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE TABLE auth.sessions (
+      id         uuid PRIMARY KEY,
+      user_id    uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+      not_after  timestamptz,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX sessions_user ON auth.sessions (user_id);
+  END IF;
+END $$;
+
+-- Application roles get nothing on the auth schema: they cannot read users or sessions (a
+-- session id is a bearer secret), let alone write them. Only core.actor_id() reads them.
+REVOKE ALL ON SCHEMA auth FROM PUBLIC, app_web, app_pay, app_jobs, npc_worker, research_ro;
+REVOKE ALL ON ALL TABLES IN SCHEMA auth FROM PUBLIC, app_web, app_pay, app_jobs, npc_worker, research_ro;
+
+-- The acting user, derived from the sign-in session, never from a setting the connection
+-- chooses. The data-access layer puts the caller's session id (a bearer secret from the
+-- session cookie) in the transaction-local setting app.session_id; this function looks it up
+-- in auth.sessions and returns its user only when the session is live (not_after unset or in
+-- the future) and the user is neither banned nor deleted. Anything else - unset, malformed,
+-- unknown, guessed, expired, banned, deleted - is NULL: no identity, so owner-scoped policies
+-- match nothing and user-scoped commands refuse.
+--
+-- Background roles never act as a user: for app_jobs, npc_worker and research_ro the result
+-- is NULL whatever session id they set. Inside this SECURITY DEFINER function current_user is
+-- the owner, so the invoking role is read from the `role` setting (SET ROLE) or, without one,
+-- the login (session_user); neither can be set to a role the connection is not a member of.
+--
+-- Session ids never appear in error messages, outbox payloads or stored results: this
+-- function is the only code that reads app.session_id, and it never raises.
+CREATE FUNCTION core.actor_id() RETURNS uuid
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE
+  raw     text := current_setting('app.session_id', true);
+  invoker text := CASE WHEN COALESCE(current_setting('role', true), 'none') <> 'none'
+                       THEN current_setting('role', true) ELSE session_user::text END;
+  actor   uuid;
+BEGIN
+  IF invoker IN ('app_jobs', 'npc_worker', 'research_ro')
+     OR raw IS NULL
+     OR raw !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+    RETURN NULL;
+  END IF;
+  SELECT s.user_id INTO actor
+    FROM auth.sessions s JOIN auth.users u ON u.id = s.user_id
+   WHERE s.id = raw::uuid
+     AND (s.not_after IS NULL OR s.not_after > clock_timestamp())
+     AND (u.banned_until IS NULL OR u.banned_until <= clock_timestamp())
+     AND u.deleted_at IS NULL;
+  RETURN actor;
+END $$;
+-- There is deliberately no company setting either: company scope is derived from the acting
+-- user in the database (core.actor_company_ids(), 0012).

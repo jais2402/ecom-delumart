@@ -8,6 +8,7 @@ import {
   plant,
   provisionAccount,
   provisionInput,
+  sessionFor,
   stateOf,
   type TestDatabase,
   uuidv7,
@@ -37,14 +38,14 @@ describe("roles, grants and row-level security", () => {
     await db.drop();
   });
 
-  it("RLS: as app_web with app.user_id = A, addresses of user B are invisible", async () => {
+  it("RLS: as app_web signed in as A, addresses of user B are invisible", async () => {
     const rows = await withTransaction(
       pool,
       async (c) => {
         await c.query("SET LOCAL ROLE app_web");
         return (await c.query<{ user_id: string }>("SELECT user_id FROM private.address")).rows;
       },
-      { userId: userA },
+      { sessionId: await sessionFor(pool, userA) },
     );
     expect(rows).toEqual([{ user_id: userA }]);
     const updated = await withTransaction(
@@ -54,12 +55,12 @@ describe("roles, grants and row-level security", () => {
         return (await c.query("UPDATE private.address SET label = 'WORK' WHERE user_id = $1", [userB]))
           .rowCount;
       },
-      { userId: userA },
+      { sessionId: await sessionFor(pool, userA) },
     );
     expect(updated).toBe(0);
   });
 
-  it("RLS: as app_web with app.user_id = A, an address cannot be inserted for user B", async () => {
+  it("RLS: as app_web signed in as A, an address cannot be inserted for user B", async () => {
     const insert =
       "INSERT INTO private.address (id, user_id, kind, label, payload_enc) VALUES ($1, $2, 'REAL', 'HOME', '\\x01')";
     expect(await stateOf(pool, insert, [uuidv7(), userB], { role: "app_web", userId: userA })).toBe("42501");
@@ -68,7 +69,7 @@ describe("roles, grants and row-level security", () => {
     );
   });
 
-  it("RLS: without app.user_id, app_web sees no addresses (fails closed, no error)", async () => {
+  it("RLS: without a sign-in session, app_web sees no addresses (fails closed, no error)", async () => {
     const rows = await withTransaction(pool, async (c) => {
       await c.query("SET LOCAL ROLE app_web");
       return (await c.query("SELECT 1 FROM private.address")).rowCount;
@@ -120,7 +121,7 @@ describe("roles, grants and row-level security", () => {
           sellerOrders: await count("SELECT count(*) AS n FROM core.seller_order"),
         };
       },
-      { userId: a.userId },
+      { sessionId: await sessionFor(pool, a.userId) },
     );
     expect(seen).toEqual({
       bank: 1,
@@ -135,14 +136,14 @@ describe("roles, grants and row-level security", () => {
       groups: 0,
       sellerOrders: 0,
     });
-    // The seller side is the company's owner, derived by the database from app.user_id; a
+    // The seller side is the company's owner, derived by the database from the session; a
     // user who merely names the company in a setting of their own sees nothing.
     const owner = await createProfile(pool);
     await pool.query("INSERT INTO core.company (id, owner_user_id, name) VALUES ($1, $2, 'Shop')", [
       company,
       owner,
     ]);
-    const sellerOrdersSeen = (userId: string, claimedCompany?: string) =>
+    const sellerOrdersSeen = async (userId: string, claimedCompany?: string) =>
       withTransaction(
         pool,
         async (c) => {
@@ -151,7 +152,7 @@ describe("roles, grants and row-level security", () => {
           await c.query("SET LOCAL ROLE app_web");
           return (await c.query("SELECT 1 FROM core.seller_order")).rowCount;
         },
-        { userId },
+        { sessionId: await sessionFor(pool, userId) },
       );
     expect(await sellerOrdersSeen(owner)).toBe(1);
     expect(await sellerOrdersSeen(a.userId, company)).toBe(0);
@@ -168,7 +169,7 @@ describe("roles, grants and row-level security", () => {
         await c.query("SET LOCAL ROLE app_web");
         return (await c.query<{ user_id: string }>("SELECT user_id FROM private.user_secret")).rows;
       },
-      { userId: userA },
+      { sessionId: await sessionFor(pool, userA) },
     );
     expect(rows).toEqual([{ user_id: userA }]);
   });
@@ -261,7 +262,7 @@ describe("roles, grants and row-level security", () => {
     expect(grants.rows).toEqual([]);
   });
 
-  it("ledger grants: read-only for app_web, insert-only for app_pay and app_jobs, wallet updatable, nothing for research_ro", async () => {
+  it("ledger grants: read-only for app_web and app_pay, insert-only for app_jobs, wallet updatable by jobs, nothing for research_ro", async () => {
     const { rows } = await pool.query<{ r: string; t: string; p: string; has: boolean }>(
       `SELECT r, t, p, has_table_privilege(r, t, p) AS has
          FROM unnest(ARRAY['app_web','app_pay','app_jobs','research_ro']) r,
@@ -271,21 +272,21 @@ describe("roles, grants and row-level security", () => {
     const held = rows.filter((x) => x.has).map((x) => `${x.r} ${x.p} ${x.t}`);
     expect(held.sort()).toEqual(
       [
-        "app_web SELECT ledger.journal",
-        "app_web SELECT ledger.posting",
-        "app_web SELECT ledger.grant_record",
-        "app_web SELECT ledger.wallet",
-        ...["app_pay", "app_jobs"].flatMap((r) => [
+        ...["app_web", "app_pay"].flatMap((r) => [
           `${r} SELECT ledger.journal`,
-          `${r} INSERT ledger.journal`,
           `${r} SELECT ledger.posting`,
-          `${r} INSERT ledger.posting`,
           `${r} SELECT ledger.grant_record`,
-          `${r} INSERT ledger.grant_record`,
           `${r} SELECT ledger.wallet`,
-          `${r} INSERT ledger.wallet`,
-          `${r} UPDATE ledger.wallet`,
         ]),
+        "app_jobs SELECT ledger.journal",
+        "app_jobs INSERT ledger.journal",
+        "app_jobs SELECT ledger.posting",
+        "app_jobs INSERT ledger.posting",
+        "app_jobs SELECT ledger.grant_record",
+        "app_jobs INSERT ledger.grant_record",
+        "app_jobs SELECT ledger.wallet",
+        "app_jobs INSERT ledger.wallet",
+        "app_jobs UPDATE ledger.wallet",
       ].sort(),
     );
   });

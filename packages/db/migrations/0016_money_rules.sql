@@ -9,7 +9,8 @@
 --      below ledger.relief_wallet_ceiling_paise() before the grant), and COMPENSATION /
 --      REVERSAL, which only app_jobs (or the owner) may create.
 --  R2  PURCHASE, COMPANY_REGISTRATION, WAREHOUSE_PURCHASE, MEMBERSHIP: exactly one USER
---      account is debited and it is the ledger account of app.user_id; SINK is only
+--      account is debited and it is the ledger account of the acting user (core.actor_id(),
+--      derived from the sign-in session); SINK is only
 --      credited; in PURCHASE every other USER posting is a seller credit, the other
 --      three types credit SINK only.
 --  R3  A PURCHASE journal is referenced at commit by exactly one order group of the
@@ -40,6 +41,18 @@
 -- Every check is a SECURITY DEFINER function (owned by the migration role, so it sees
 -- rows that RLS hides from the caller) run as a deferred constraint trigger, so it
 -- judges the transaction's final state at commit regardless of statement order.
+--
+--  R9  Seals. The deferred checks are a second line: no application role writes these tables
+--      directly any more (0011); the owner-run command functions (0018) write them and fire the
+--      checks synchronously before returning. Because a caller can fire deferred checks early
+--      (SET CONSTRAINTS ALL IMMEDIATE) and then keep writing, each check records a seal for
+--      what it judged - the journal (ledger.journal_seal) or the order group
+--      (core.order_group_seal) - and row-level BEFORE triggers refuse any later child row of a
+--      sealed parent: postings and grant records of a sealed journal; seller orders, lines,
+--      ownership, shipments, coupon redemptions, unit issues and entitlement evidence of a
+--      sealed order group; and any change to their money or reference columns. Later lifecycle
+--      updates by the job runner (seller order status, ownership state, shipment notification
+--      and cancellation, unit revocation) do not touch those columns and stay possible.
 
 -- ---------------------------------------------------------------- fixed amounts
 -- Product rules, not configuration: no configuration row may change what a grant mints.
@@ -81,6 +94,128 @@ CREATE TRIGGER stamp_txid BEFORE INSERT ON core.order_group
   FOR EACH ROW EXECUTE FUNCTION ledger.stamp_journal_txid();
 CREATE TRIGGER stamp_txid BEFORE INSERT ON ledger.ledger_account
   FOR EACH ROW EXECUTE FUNCTION ledger.stamp_journal_txid();
+
+-- ---------------------------------------------------------------- R9: seals
+-- Owner-written only (from inside the check functions); app_jobs may read them.
+CREATE TABLE ledger.journal_seal (
+  journal_id uuid PRIMARY KEY REFERENCES ledger.journal(id),
+  sealed_at  timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE TABLE core.order_group_seal (
+  order_group_id uuid PRIMARY KEY REFERENCES core.order_group(id),
+  sealed_at      timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+ALTER TABLE ledger.journal_seal ENABLE ROW LEVEL SECURITY;
+ALTER TABLE core.order_group_seal ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON ledger.journal_seal, core.order_group_seal
+  FROM PUBLIC, anon, authenticated, app_web, app_pay, app_jobs, npc_worker, research_ro;
+GRANT SELECT ON ledger.journal_seal, core.order_group_seal TO app_jobs;
+CREATE POLICY jobs_read ON ledger.journal_seal FOR SELECT TO app_jobs USING (true);
+CREATE POLICY jobs_read ON core.order_group_seal FOR SELECT TO app_jobs USING (true);
+
+-- The order group a child row belongs to (NULL when it names none).
+CREATE FUNCTION core.group_of_seller_order(so_id uuid) RETURNS uuid
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+  SELECT so.order_group_id FROM core.seller_order so WHERE so.id = so_id
+$$;
+CREATE FUNCTION core.group_of_order_line(line_id uuid) RETURNS uuid
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+  SELECT so.order_group_id FROM core.order_line l JOIN core.seller_order so ON so.id = l.seller_order_id
+   WHERE l.id = line_id
+$$;
+CREATE FUNCTION core.group_is_sealed(group_id uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+  SELECT group_id IS NOT NULL AND EXISTS (SELECT 1 FROM core.order_group_seal s WHERE s.order_group_id = group_id)
+$$;
+CREATE FUNCTION ledger.journal_is_sealed(j_id uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+  SELECT j_id IS NOT NULL AND EXISTS (SELECT 1 FROM ledger.journal_seal s WHERE s.journal_id = j_id)
+$$;
+
+-- BEFORE INSERT OR UPDATE on every child table. Runs for every role, the owner included.
+CREATE FUNCTION core.refuse_sealed_parent() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE
+  sealed  boolean := false;
+  frozen_changed boolean := TG_OP = 'INSERT';
+BEGIN
+  CASE TG_TABLE_NAME
+    WHEN 'posting' THEN
+      sealed := ledger.journal_is_sealed(NEW.journal_id);
+    WHEN 'grant_record' THEN
+      sealed := ledger.journal_is_sealed(NEW.journal_id)
+             OR (TG_OP = 'UPDATE' AND ledger.journal_is_sealed(OLD.journal_id));
+      frozen_changed := true;
+    WHEN 'order_group' THEN
+      sealed := core.group_is_sealed(OLD.id);
+      frozen_changed := to_jsonb(NEW) IS DISTINCT FROM to_jsonb(OLD);
+    WHEN 'seller_order' THEN
+      sealed := core.group_is_sealed(NEW.order_group_id)
+             OR (TG_OP = 'UPDATE' AND core.group_is_sealed(OLD.order_group_id));
+      IF TG_OP = 'UPDATE' THEN
+        frozen_changed := (to_jsonb(NEW) - 'status' - 'qualifies_for_progression')
+                          IS DISTINCT FROM (to_jsonb(OLD) - 'status' - 'qualifies_for_progression');
+      END IF;
+    WHEN 'order_line' THEN
+      sealed := core.group_is_sealed(core.group_of_seller_order(NEW.seller_order_id))
+             OR (TG_OP = 'UPDATE' AND core.group_is_sealed(core.group_of_seller_order(OLD.seller_order_id)));
+      frozen_changed := TG_OP = 'INSERT' OR to_jsonb(NEW) IS DISTINCT FROM to_jsonb(OLD);
+    WHEN 'shipment' THEN
+      sealed := core.group_is_sealed(core.group_of_seller_order(NEW.seller_order_id))
+             OR (TG_OP = 'UPDATE' AND core.group_is_sealed(core.group_of_seller_order(OLD.seller_order_id)));
+      IF TG_OP = 'UPDATE' THEN
+        frozen_changed := (to_jsonb(NEW) - 'delivered_notified' - 'cancelled_at' - 'address_id')
+                          IS DISTINCT FROM (to_jsonb(OLD) - 'delivered_notified' - 'cancelled_at' - 'address_id');
+      END IF;
+    WHEN 'ownership' THEN
+      sealed := core.group_is_sealed(core.group_of_order_line(NEW.order_line_id))
+             OR (TG_OP = 'UPDATE' AND core.group_is_sealed(core.group_of_order_line(OLD.order_line_id)));
+      IF TG_OP = 'UPDATE' THEN
+        frozen_changed := (to_jsonb(NEW) - 'state') IS DISTINCT FROM (to_jsonb(OLD) - 'state');
+      END IF;
+    WHEN 'coupon_redemption' THEN
+      sealed := core.group_is_sealed(NEW.order_group_id)
+             OR (TG_OP = 'UPDATE' AND core.group_is_sealed(OLD.order_group_id));
+      frozen_changed := true;
+    WHEN 'creator_entitlement' THEN
+      sealed := core.group_is_sealed(NEW.evidence_order_group_id);
+      frozen_changed := TG_OP = 'INSERT' OR NEW.evidence_order_group_id IS DISTINCT FROM OLD.evidence_order_group_id;
+    WHEN 'inventory_unit' THEN
+      -- issuing a unit to (or re-pointing it at) a line of a sealed order group
+      IF NEW.order_line_id IS NOT NULL
+         AND (TG_OP = 'INSERT' OR NEW.order_line_id IS DISTINCT FROM OLD.order_line_id
+              OR (NEW.state = 'ISSUED' AND OLD.state IS DISTINCT FROM 'ISSUED')) THEN
+        sealed := core.group_is_sealed(core.group_of_order_line(NEW.order_line_id));
+      END IF;
+      frozen_changed := true;
+  END CASE;
+  IF sealed AND frozen_changed THEN
+    RAISE EXCEPTION '% row refused: its % has already been checked and sealed in this purchase; nothing may be added to it',
+      TG_TABLE_NAME, CASE WHEN TG_TABLE_NAME IN ('posting', 'grant_record') THEN 'journal' ELSE 'order group' END
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER refuse_sealed BEFORE INSERT ON ledger.posting
+  FOR EACH ROW EXECUTE FUNCTION core.refuse_sealed_parent();
+CREATE TRIGGER refuse_sealed BEFORE INSERT OR UPDATE ON ledger.grant_record
+  FOR EACH ROW EXECUTE FUNCTION core.refuse_sealed_parent();
+CREATE TRIGGER refuse_sealed BEFORE UPDATE ON core.order_group
+  FOR EACH ROW EXECUTE FUNCTION core.refuse_sealed_parent();
+CREATE TRIGGER refuse_sealed BEFORE INSERT OR UPDATE ON core.seller_order
+  FOR EACH ROW EXECUTE FUNCTION core.refuse_sealed_parent();
+CREATE TRIGGER refuse_sealed BEFORE INSERT OR UPDATE ON core.order_line
+  FOR EACH ROW EXECUTE FUNCTION core.refuse_sealed_parent();
+CREATE TRIGGER refuse_sealed BEFORE INSERT OR UPDATE ON core.shipment
+  FOR EACH ROW EXECUTE FUNCTION core.refuse_sealed_parent();
+CREATE TRIGGER refuse_sealed BEFORE INSERT OR UPDATE ON core.ownership
+  FOR EACH ROW EXECUTE FUNCTION core.refuse_sealed_parent();
+CREATE TRIGGER refuse_sealed BEFORE INSERT OR UPDATE ON core.coupon_redemption
+  FOR EACH ROW EXECUTE FUNCTION core.refuse_sealed_parent();
+CREATE TRIGGER refuse_sealed BEFORE INSERT OR UPDATE ON core.creator_entitlement
+  FOR EACH ROW EXECUTE FUNCTION core.refuse_sealed_parent();
+CREATE TRIGGER refuse_sealed BEFORE INSERT OR UPDATE ON core.inventory_unit
+  FOR EACH ROW EXECUTE FUNCTION core.refuse_sealed_parent();
 
 -- ---------------------------------------------------------------- references (deferred: checked at commit)
 ALTER TABLE core.order_group
@@ -143,7 +278,7 @@ DECLARE
   user_cr   int;
   user_dr   int;
   user_net  bigint;
-  actor     uuid := nullif(current_setting('app.user_id', true), '')::uuid;
+  actor     uuid := core.actor_id();
   actor_acct uuid;
   debited   uuid;
   grants    int;
@@ -158,6 +293,8 @@ DECLARE
   sink_due  bigint;
 BEGIN
   PERFORM ledger.require_read_committed();
+  -- R9: what is judged here is final; postings or grant records added later are refused
+  INSERT INTO ledger.journal_seal (journal_id) VALUES (NEW.id) ON CONFLICT DO NOTHING;
   SELECT event_type, created_at, order_group_id INTO ev, j_created, j_group FROM ledger.journal WHERE id = NEW.id;
   SELECT count(*),
          count(*) FILTER (WHERE a.type = 'MINT'),
@@ -207,7 +344,7 @@ BEGIN
       FROM ledger.posting p JOIN ledger.ledger_account a ON a.id = p.account_id
      WHERE p.journal_id = NEW.id AND a.type = 'USER' AND p.amount < 0;
     IF actor_acct IS NULL OR debited IS DISTINCT FROM actor_acct THEN
-      RAISE EXCEPTION '% journal % may debit only the acting user''s own account (app.user_id)', ev, NEW.id
+      RAISE EXCEPTION '% journal % may debit only the acting user''s own account (the signed-in session)', ev, NEW.id
         USING ERRCODE = 'check_violation';
     END IF;
     IF EXISTS (SELECT 1 FROM ledger.posting p WHERE p.journal_id = NEW.id AND p.account_id = actor_acct AND p.amount > 0) THEN
@@ -286,7 +423,7 @@ BEGIN
         ev, NEW.id USING ERRCODE = 'check_violation';
     END IF;
     IF credited.user_id IS DISTINCT FROM actor THEN
-      RAISE EXCEPTION '% journal % may credit only the acting user (app.user_id)', ev, NEW.id
+      RAISE EXCEPTION '% journal % may credit only the acting user (the signed-in session)', ev, NEW.id
         USING ERRCODE = 'check_violation';
     END IF;
     IF ev = 'STARTER_GRANT' THEN
@@ -390,7 +527,7 @@ CREATE FUNCTION core.assert_order_group() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp SET lock_timeout = '2s' AS $$
 DECLARE
   g        core.order_group%ROWTYPE;
-  actor    uuid := nullif(current_setting('app.user_id', true), '')::uuid;
+  actor    uuid := core.actor_id();
   j        record;
   s        record;
   a        record;
@@ -417,9 +554,11 @@ DECLARE
   sds      bigint[];
 BEGIN
   PERFORM ledger.require_read_committed();
+  -- R9: what is judged here is final; any later child row of this group is refused
+  INSERT INTO core.order_group_seal (order_group_id) VALUES (NEW.id) ON CONFLICT DO NOTHING;
   SELECT * INTO g FROM core.order_group WHERE id = NEW.id;
   IF g.buyer_user_id IS DISTINCT FROM actor THEN
-    RAISE EXCEPTION 'order group %: the buyer must be the acting user (app.user_id)', g.id USING ERRCODE = 'check_violation';
+    RAISE EXCEPTION 'order group %: the buyer must be the acting user (the signed-in session)', g.id USING ERRCODE = 'check_violation';
   END IF;
 
   -- What can change under a concurrent transaction is locked before it is read (canonical
@@ -909,7 +1048,7 @@ BEGIN
      WHERE NOT EXISTS (
        SELECT 1 FROM ledger.ledger_account a
         WHERE a.id = x.id AND a.type = 'USER'
-          AND (a.user_id = nullif(current_setting('app.user_id', true), '')::uuid
+          AND (a.user_id = core.actor_id()
             OR EXISTS (SELECT 1 FROM ledger.posting p JOIN ledger.journal j ON j.id = p.journal_id
                         WHERE p.account_id = a.id AND j.created_txid = txid_current())
             OR EXISTS (SELECT 1 FROM core.company c JOIN core.product pr ON pr.company_id = c.id
@@ -926,6 +1065,8 @@ BEGIN
 END $$;
 
 REVOKE ALL ON FUNCTION
+  core.refuse_sealed_parent(), core.group_of_seller_order(uuid), core.group_of_order_line(uuid),
+  core.group_is_sealed(uuid), ledger.journal_is_sealed(uuid),
   ledger.assert_admin_journal_role(), ledger.assert_journal_rules(), core.assert_order_group(),
   core.assert_joins_new_group(), core.assert_unit_issue(), core.assert_counters(),
   core.guard_payment_attempt(), core.guard_checkout_session(), core.assert_succeeded_has_order(),

@@ -1,20 +1,16 @@
 -- Closes three ledger gaps.
 --
--- A1. Journal types by role. The money-command role (app_pay) may create only the
---     journals a user's own actions produce; COMPENSATION, REVERSAL and
---     ACCOUNT_RETIREMENT are admin actions and run only in the job runner (app_jobs,
---     whose jobs_all policy is unchanged). Enforced by the row-level-security WITH CHECK
---     on insert, and again by a role check in 0016. app_web inserts no journal at all
---     (no INSERT privilege, 0011).
+-- A1. Journal types by role. No application role inserts journals directly any more: user
+--     journals (STARTER_GRANT, PURCHASE) are written by the owner-run command functions of
+--     0018 for the signed-in actor, which only app_pay may execute; COMPENSATION, REVERSAL and
+--     ACCOUNT_RETIREMENT are admin actions and run only in the job runner (app_jobs, whose
+--     jobs_all policy is unchanged), enforced by a role check in 0016. app_web and app_pay
+--     hold no INSERT privilege on ledger tables (0011).
 --
 --     COMPANY_REGISTRATION, WAREHOUSE_PURCHASE and MEMBERSHIP are NOT allowed yet: nothing
 --     backs them (no company-registration, warehouse or membership purchase records and
---     checks exist), so the money role could use them to burn its own balance and drop
---     below the relief or creator thresholds. Add each type here only together with the
---     table and commit-time check that back it (0016 refuses them for app_pay and app_web
---     as well).
-CREATE POLICY pay_insert ON ledger.journal FOR INSERT TO app_pay
-  WITH CHECK (event_type IN ('STARTER_GRANT','RELIEF_GRANT','PURCHASE'));
+--     checks exist). Add each type only together with the table, command function and
+--     commit-time check that back it (0016 refuses them for app_pay and app_web as well).
 
 -- A2. A posting is never committed without the wallet reflecting it: at commit,
 --     every USER account that received a posting in the transaction must have a

@@ -22,6 +22,13 @@ async function rejects(
   });
 }
 
+/** A user the auth service knows (a profile's id must reference auth.users). */
+async function authUser(c: pg.PoolClient): Promise<string> {
+  const id = uuidv7();
+  await c.query("INSERT INTO auth.users (id) VALUES ($1)", [id]);
+  return id;
+}
+
 describe("business constraints", () => {
   let db: TestDatabase;
   let pool: pg.Pool;
@@ -164,17 +171,20 @@ describe("business constraints", () => {
 
   it("R3.1: duplicate email_fingerprint is rejected", async () => {
     const fp = randomBytes(32);
-    const ins = (c: pg.PoolClient) =>
-      c.query("INSERT INTO core.user_profile (id, email_fingerprint) VALUES ($1, $2)", [uuidv7(), fp]);
+    const ins = async (c: pg.PoolClient) =>
+      c.query("INSERT INTO core.user_profile (id, email_fingerprint) VALUES ($1, $2)", [
+        await authUser(c),
+        fp,
+      ]);
     expect(await rejects(pool, ins, ins)).toBe("23505");
   });
 
   it("R3.1: duplicate phone_fingerprint is rejected (unverified nulls do not collide)", async () => {
     const fp = randomBytes(32);
-    const ins = (c: pg.PoolClient, phone: Buffer | null) =>
+    const ins = async (c: pg.PoolClient, phone: Buffer | null) =>
       c.query(
         "INSERT INTO core.user_profile (id, email_fingerprint, phone_fingerprint) VALUES ($1, $2, $3)",
-        [uuidv7(), randomBytes(32), phone],
+        [await authUser(c), randomBytes(32), phone],
       );
     expect(
       await rejects(
@@ -190,9 +200,9 @@ describe("business constraints", () => {
   });
 
   it("at most one SUPER_ADMIN profile", async () => {
-    const admin = (c: pg.PoolClient) =>
+    const admin = async (c: pg.PoolClient) =>
       c.query("INSERT INTO core.user_profile (id, email_fingerprint, role) VALUES ($1, $2, 'SUPER_ADMIN')", [
-        uuidv7(),
+        await authUser(c),
         randomBytes(32),
       ]);
     expect(await rejects(pool, admin, admin)).toBe("23505");

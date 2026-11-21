@@ -1,8 +1,16 @@
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SINK_ACCOUNT_ID } from "../src/provision";
+import { provisionAccount as provisionAs, SINK_ACCOUNT_ID } from "../src/provision";
 import { withTransaction } from "../src/transaction";
-import { createTestDatabase, provisionAccount, provisionInput, type TestDatabase, uuidv7 } from "./helpers";
+import {
+  createTestDatabase,
+  provisionAccount,
+  provisionInput,
+  sessionFor,
+  type TestDatabase,
+  type TestProvisionInput,
+  uuidv7,
+} from "./helpers";
 
 const STARTER = 100_000_000_000n;
 
@@ -105,7 +113,8 @@ describe("provisionAccount", () => {
     const input = provisionInput();
     if (!input.phoneFingerprint) throw new Error("fixture has a phone");
     await tombstone(input.phoneFingerprint, "PHONE", "30 days");
-    const r = await withLogin(db.url, "app_pay", (p) => provisionAccount(p, input));
+    const authSessionId = await sessionFor(pool, input.userId);
+    const r = await withLogin(db.url, "app_pay", (p) => provisionAs(p, asCall(input, authSessionId)));
     expect(r.created).toBe(true);
     expect(r.walletPaise).toBe(0n);
     expect(r.grantRecordId).toBeNull();
@@ -132,20 +141,25 @@ describe("provisionAccount", () => {
     expect(rows.map((x) => BigInt(x.amount))).toEqual([STARTER]);
   });
 
-  it("provisioning works as app_pay under row-level security (app.user_id set by withTransaction)", async () => {
+  it("provisioning works for a connection logged in as app_pay (the user derived from the session set by withTransaction)", async () => {
     const input = provisionInput();
+    const authSessionId = await sessionFor(pool, input.userId);
     await withLogin(db.url, "app_pay", async (appPayPool) => {
-      const r = await provisionAccount(appPayPool, input);
+      const r = await provisionAs(appPayPool, asCall(input, authSessionId));
       expect(r.created).toBe(true);
+      expect(r.userId).toBe(input.userId);
       expect(r.walletPaise).toBe(STARTER);
-      const again = await provisionAccount(appPayPool, input);
+      const again = await provisionAs(appPayPool, asCall(input, authSessionId));
       expect(again.created).toBe(false);
     });
   });
 
   it("security review: a connection logged in as app_web cannot provision (it cannot become app_pay)", async () => {
     const input = provisionInput();
-    const outcome = await withLogin(db.url, "app_web", (p) => provisionAccount(p, input)).then(
+    const authSessionId = await sessionFor(pool, input.userId);
+    const outcome = await withLogin(db.url, "app_web", (p) =>
+      provisionAs(p, asCall(input, authSessionId)),
+    ).then(
       () => "ok",
       (e: { code?: string }) => e.code ?? "unknown",
     );
@@ -157,6 +171,7 @@ describe("provisionAccount", () => {
 
   it("US-14 concurrency from an existing profile row: 20 parallel calls create exactly one grant", async () => {
     const input = provisionInput();
+    await sessionFor(pool, input.userId); // the auth service knows the user
     await pool.query(
       "INSERT INTO core.user_profile (id, email_fingerprint, phone_fingerprint) VALUES ($1, $2, $3)",
       [input.userId, input.emailFingerprint, input.phoneFingerprint],
@@ -181,6 +196,7 @@ describe("provisionAccount", () => {
 
   it("US-01/US-14 concurrency: 10 simultaneous provisionAccount calls for one user create exactly one of everything", async () => {
     const input = provisionInput();
+    input.authSessionId = await sessionFor(pool, input.userId); // one signed-in session, ten calls
     const results = await Promise.all(
       Array.from({ length: 10 }, (_, i) =>
         // every caller presents different card/alias values; only one may win
@@ -255,7 +271,7 @@ describe("provisionAccount", () => {
           await c.query("SELECT pg_sleep(0.2)"); // hold the lock so the other transaction must wait on it
           return "ok";
         },
-        { userId: buyer.userId },
+        { sessionId: buyer.authSessionId },
       );
 
     const outcomes = await Promise.all([spend(), spend()]);
@@ -294,7 +310,7 @@ describe("provisionAccount", () => {
           );
           await c.query("SELECT pg_sleep(0.2)");
         },
-        { userId: buyer.userId },
+        { sessionId: buyer.authSessionId },
       ).then(
         () => "ok",
         (e: { code?: string }) => e.code ?? "unknown",
@@ -317,6 +333,18 @@ describe("provisionAccount", () => {
     expect(outcome).toBe("23514");
   });
 });
+
+/** The provisioning call for a test input, made with the given sign-in session. */
+function asCall(input: TestProvisionInput, authSessionId: string) {
+  return {
+    authSessionId,
+    emailFingerprint: input.emailFingerprint,
+    phoneFingerprint: input.phoneFingerprint,
+    cardNumber: input.cardNumber,
+    alias: input.alias,
+    upiStyleId: input.upiStyleId,
+  };
+}
 
 function pick(i: ReturnType<typeof provisionInput>) {
   return { cardNumber: i.cardNumber, alias: i.alias, upiStyleId: i.upiStyleId };
