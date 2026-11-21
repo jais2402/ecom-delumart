@@ -1,11 +1,10 @@
 "use client";
 
-import { STARTING_GRANT_PAISE } from "@delulu/core";
-import { ShopLayout, SiteFooter, SiteHeader } from "@delulu/ui";
-import { useRouter } from "next/navigation";
+import { ShopLayout, SiteFooter } from "@delulu/ui";
 import type { ReactNode } from "react";
+import { SessionHeader } from "./SessionHeader";
 
-/** Client wrapper so the header search can navigate; pages stay server components. */
+/** Client wrapper so the header can navigate and show the session; pages stay server components. */
 export function ShopShell({
   children,
   searchDefaultValue,
@@ -13,18 +12,9 @@ export function ShopShell({
   children: ReactNode;
   searchDefaultValue?: string;
 }) {
-  const router = useRouter();
   return (
     <ShopLayout
-      header={
-        <SiteHeader
-          balancePaise={STARTING_GRANT_PAISE}
-          accountHref="/sign-in"
-          cartCount={0}
-          onSearch={(query) => router.push(query ? `/search?q=${encodeURIComponent(query)}` : "/search")}
-          {...(searchDefaultValue !== undefined ? { searchDefaultValue } : {})}
-        />
-      }
+      header={<SessionHeader {...(searchDefaultValue !== undefined ? { searchDefaultValue } : {})} />}
       footer={<SiteFooter />}
     >
       {children}

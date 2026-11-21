@@ -1,7 +1,7 @@
 /**
- * Where the player is in onboarding, kept in memory only (never in the URL or browser storage).
- * A full page reload resets it and sends the player back to the first missing step.
- * When the backend is wired this should be derived from the session instead.
+ * Small in-memory scratch for the onboarding screens (never in the URL or browser storage): the
+ * phone and birthdate just typed, and where to return afterwards. Where the player really is comes
+ * from the server (see gateway.resolveStep); `reached` only drives the demo gateway.
  */
 export const FLOW_PATHS = [
   "/sign-in",
@@ -33,6 +33,18 @@ export const getBirthdate = () => state.birthdate;
 export const setBirthdate = (iso: string) => {
   state.birthdate = iso;
 };
+
+let returnTo: string | null = null;
+
+/** Only same-site paths: "/p/abc" is fine, "//evil.example" and "https://..." are not. */
+export function safeReturnPath(value: string | null | undefined): string | null {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return null;
+  return value;
+}
+export const setReturnTo = (path: string | null) => {
+  returnTo = safeReturnPath(path);
+};
+export const getReturnTo = () => returnTo;
 
 /** Friendly text for a rejected gateway call. */
 export function messageOf(error: unknown): string {

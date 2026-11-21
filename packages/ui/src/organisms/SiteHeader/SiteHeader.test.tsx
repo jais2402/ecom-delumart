@@ -23,4 +23,26 @@ describe("SiteHeader", () => {
     expect(screen.getByRole("banner")).toBeInTheDocument();
     expect(screen.getByRole("search")).toBeInTheDocument();
   });
+  it("signed out: shows Sign in, no balance, and no sign-out button", () => {
+    render(
+      <SiteHeader
+        balancePaise={null}
+        accountLabel="Sign in"
+        accountHref="/sign-in"
+        cartCount={0}
+        onSearch={() => {}}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/sign-in");
+    expect(screen.queryByText(/fictional money/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign out" })).not.toBeInTheDocument();
+  });
+  it("signed in: the Sign out button is keyboard reachable and calls back", async () => {
+    const onSignOut = vi.fn();
+    render(<SiteHeader balancePaise={100n} cartCount={0} onSearch={() => {}} onSignOut={onSignOut} />);
+    const button = screen.getByRole("button", { name: "Sign out" });
+    button.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(onSignOut).toHaveBeenCalledTimes(1);
+  });
 });

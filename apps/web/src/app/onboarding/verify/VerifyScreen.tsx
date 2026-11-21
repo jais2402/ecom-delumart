@@ -4,14 +4,18 @@ import { Alert, CodeForm } from "@delulu/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useGateway } from "../../_lib/gateway-context";
-import { advanceTo, getPhone, messageOf } from "../../_lib/onboarding-flow";
-import { DEMO_PHONE_CODE } from "../../_lib/onboarding-gateway";
+import { describeError } from "../../_lib/api";
+import { devCode } from "../../_lib/api-gateway";
+import { useDevProvider } from "../../_lib/dev-mode";
+import { advanceTo, getPhone } from "../../_lib/onboarding-flow";
 import { useArrival } from "../../_lib/use-arrival";
 
 export function VerifyScreen() {
   const gateway = useGateway();
   const router = useRouter();
   const { ready, headingRef } = useArrival(2);
+  const dev = useDevProvider();
+  const code = devCode();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,7 +27,7 @@ export function VerifyScreen() {
     try {
       await action();
     } catch (err) {
-      setError(messageOf(err));
+      setError(describeError(err));
       throw err;
     } finally {
       setPending(false);
@@ -36,9 +40,11 @@ export function VerifyScreen() {
       pending={pending}
       error={error}
       notice={
-        <Alert tone="info" title="Demo notice">
-          No text message is sent. The demo code is {DEMO_PHONE_CODE}.
-        </Alert>
+        dev && code ? (
+          <Alert tone="info" title="Local development">
+            No text message is sent. The code for this sign-in is {code}.
+          </Alert>
+        ) : undefined
       }
       onSubmit={(code) =>
         guarded(async () => {

@@ -1,12 +1,20 @@
-import { ShoppingCart, User } from "lucide-react";
+import { LogOut, ShoppingCart, User } from "lucide-react";
 import type { ComponentPropsWithRef } from "react";
 import { Icon } from "../../atoms/Icon";
+import { Skeleton } from "../../atoms/Skeleton";
 import { cn } from "../../lib/cn";
 import { BalancePill } from "../../molecules/BalancePill";
 import { SearchBar } from "../../molecules/SearchBar";
 
 export type SiteHeaderProps = Omit<ComponentPropsWithRef<"header">, "children"> & {
-  balancePaise: bigint;
+  /** The balance to show; null hides the pill (signed out, or not known yet). */
+  balancePaise: bigint | null;
+  /** Reserve the pill's space while the balance loads, so the header does not jump. */
+  balanceLoading?: boolean;
+  /** Text of the account link: "Account" when signed in, "Sign in" otherwise. */
+  accountLabel?: string;
+  /** When set, a "Sign out" button is shown. */
+  onSignOut?: () => void;
   cartCount: number;
   onSearch: (query: string) => void;
   searchDefaultValue?: string;
@@ -21,6 +29,9 @@ const iconLink =
 /** Logo, search, balance, cart and account. Stacks into rows below 640px so nothing overflows at 320px. */
 export function SiteHeader({
   balancePaise,
+  balanceLoading = false,
+  accountLabel = "Account",
+  onSignOut,
   cartCount,
   onSearch,
   searchDefaultValue,
@@ -55,15 +66,25 @@ export function SiteHeader({
           </a>
           <a href={accountHref} className={iconLink}>
             <Icon icon={User} />
-            <span className="sr-only sm:not-sr-only">Account</span>
+            <span className="sr-only sm:not-sr-only">{accountLabel}</span>
           </a>
+          {onSignOut ? (
+            <button type="button" onClick={onSignOut} className={iconLink}>
+              <Icon icon={LogOut} />
+              <span className="sr-only sm:not-sr-only">Sign out</span>
+            </button>
+          ) : null}
         </nav>
         <SearchBar
           onSearch={onSearch}
           {...(searchDefaultValue !== undefined ? { defaultValue: searchDefaultValue } : {})}
           className="order-last basis-full sm:order-2 sm:flex-1 sm:basis-0"
         />
-        <BalancePill balancePaise={balancePaise} className="order-last max-w-full flex-wrap sm:order-4" />
+        {balancePaise !== null ? (
+          <BalancePill balancePaise={balancePaise} className="order-last max-w-full flex-wrap sm:order-4" />
+        ) : balanceLoading ? (
+          <Skeleton className="order-last h-11 w-48 max-w-full rounded-pill sm:order-4" />
+        ) : null}
       </div>
     </header>
   );

@@ -3,6 +3,7 @@
 import { Alert, OnboardingLayout, OnboardingProgress } from "@delulu/ui";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { useDevProvider } from "./dev-mode";
 import { GatewayProvider } from "./gateway-context";
 
 const STEP_BY_PATH: Record<string, number> = {
@@ -14,15 +15,20 @@ const STEP_BY_PATH: Record<string, number> = {
   "/onboarding/done": 4,
 };
 
-/** Shared frame for sign-in and onboarding: gateway provider, demo banner and progress. */
+/** Shared frame for sign-in and onboarding: gateway provider, a small note and progress. */
 export function OnboardingShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const dev = useDevProvider();
   const current = STEP_BY_PATH[pathname.replace(/\/$/, "")] ?? 0;
   return (
     <GatewayProvider>
       <OnboardingLayout
         banner={
-          <Alert tone="warning">Demo mode: sign-in is not connected yet. Nothing you enter is saved.</Alert>
+          dev ? (
+            <Alert tone="info">Local development sign-in: no email or text message is really sent.</Alert>
+          ) : (
+            <Alert tone="info">A game account with fictional money. Never enter real card or bank details.</Alert>
+          )
         }
         progress={<OnboardingProgress current={current} />}
       >

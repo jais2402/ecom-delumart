@@ -4,7 +4,8 @@ import { PinSetupForm } from "@delulu/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useGateway } from "../../_lib/gateway-context";
-import { advanceTo, getBirthdate, messageOf } from "../../_lib/onboarding-flow";
+import { describeError } from "../../_lib/api";
+import { advanceTo, getBirthdate } from "../../_lib/onboarding-flow";
 import { useArrival } from "../../_lib/use-arrival";
 
 export function PinScreen() {
@@ -30,7 +31,7 @@ export function PinScreen() {
           advanceTo(5);
           router.push("/onboarding/done");
         } catch (err) {
-          setError(messageOf(err));
+          setError(describeError(err));
         } finally {
           setPending(false);
         }

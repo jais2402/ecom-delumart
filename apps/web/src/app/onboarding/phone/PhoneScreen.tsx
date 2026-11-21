@@ -4,7 +4,8 @@ import { PhoneForm } from "@delulu/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useGateway } from "../../_lib/gateway-context";
-import { advanceTo, messageOf, setPhone } from "../../_lib/onboarding-flow";
+import { describeError } from "../../_lib/api";
+import { advanceTo, setPhone } from "../../_lib/onboarding-flow";
 import { useArrival } from "../../_lib/use-arrival";
 
 export function PhoneScreen() {
@@ -30,7 +31,7 @@ export function PhoneScreen() {
           advanceTo(2);
           router.push("/onboarding/verify");
         } catch (err) {
-          setError(messageOf(err));
+          setError(describeError(err));
         } finally {
           setPending(false);
         }
