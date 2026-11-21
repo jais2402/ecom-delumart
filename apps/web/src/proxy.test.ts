@@ -31,7 +31,7 @@ function pageRoutes(): { path: string; files: string[] }[] {
   return out;
 }
 
-const PRIVATE_SECTIONS = new Set(["account", "cart", "checkout", "orders", "onboarding", "sign-in"]);
+const PRIVATE_SECTIONS = new Set(["account", "cart", "checkout", "orders", "onboarding", "sign-in", "sell"]);
 
 function run(path: string, env = "production") {
   const saved = process.env.NODE_ENV;

@@ -1843,10 +1843,14 @@ describe("money attacks (security review)", () => {
       for (const role of ["app_web", "app_pay", "app_jobs", RAW_WRITER]) {
         const as = { role, userId: s.owner.userId };
         for (const to of ["HIDDEN", "ARCHIVED", "DRAFT"]) {
-          expect(await stateOf(pool, move(published, to), [], as), `${role} PUBLISHED -> ${to}`).toBe("42501");
+          expect(await stateOf(pool, move(published, to), [], as), `${role} PUBLISHED -> ${to}`).toBe(
+            "42501",
+          );
         }
         for (const to of ["PUBLISHED", "NEEDS_REVIEW", "REJECTED"]) {
-          expect(await stateOf(pool, move(screening, to), [], as), `${role} SCREENING -> ${to}`).toBe("42501");
+          expect(await stateOf(pool, move(screening, to), [], as), `${role} SCREENING -> ${to}`).toBe(
+            "42501",
+          );
         }
       }
     });
@@ -1857,9 +1861,10 @@ describe("money attacks (security review)", () => {
          VALUES ('${uuidv7()}', '${s.companyId}', 'USER', '${status}', 'gadgets', 'STANDARD_STOCKED')`;
       for (const role of ["app_web", "app_pay", "app_jobs"]) {
         for (const status of ["DRAFT", "PUBLISHED", "SCREENING", "HIDDEN"]) {
-          expect(await stateOf(pool, insert(status), [], { role, userId: s.owner.userId }), `${role} ${status}`).toBe(
-            "42501",
-          );
+          expect(
+            await stateOf(pool, insert(status), [], { role, userId: s.owner.userId }),
+            `${role} ${status}`,
+          ).toBe("42501");
         }
       }
     });
@@ -1868,7 +1873,12 @@ describe("money attacks (security review)", () => {
       for (const role of ["app_web", "app_jobs", RAW_WRITER]) {
         const as = { role, userId: s.owner.userId };
         expect(
-          await stateOf(pool, "UPDATE core.product SET current_version_id = $2 WHERE id = $1", [draftId, draftV2], as),
+          await stateOf(
+            pool,
+            "UPDATE core.product SET current_version_id = $2 WHERE id = $1",
+            [draftId, draftV2],
+            as,
+          ),
           role,
         ).toBe("42501");
         expect(
@@ -1883,7 +1893,10 @@ describe("money attacks (security review)", () => {
       }
       // even the owner may point it only at one of the product's own versions
       expect(
-        await stateOf(pool, "UPDATE core.product SET current_version_id = $2 WHERE id = $1", [draftId, draftV2]),
+        await stateOf(pool, "UPDATE core.product SET current_version_id = $2 WHERE id = $1", [
+          draftId,
+          draftV2,
+        ]),
       ).toBe("no error");
       expect(
         await stateOf(pool, "UPDATE core.product SET current_version_id = $2 WHERE id = $1", [

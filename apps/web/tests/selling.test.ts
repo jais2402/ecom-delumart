@@ -69,7 +69,8 @@ const getStore = (b: Browser, handle: string) =>
   b.call(store.GET, "GET", `/api/v1/stores/${handle}`, { params: { handle }, cookies: false });
 const balanceOf = async (b: Browser): Promise<bigint> =>
   BigInt(str((await b.call(R.wallet.GET, "GET", "/api/v1/wallet")).json.balancePaise));
-const handle = (): string => `shop-${randomBytes(5).toString("hex")}`;
+const handle = (): string =>
+  `shop-${Array.from(randomBytes(8), (b) => "bcdfghjklmnpqrstvwxz"[b % 20]).join("")}`;
 
 function expectPrivate(res: CallResult): void {
   expect(res.headers.get("cache-control")).toBe("private, no-store");

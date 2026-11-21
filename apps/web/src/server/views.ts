@@ -12,6 +12,11 @@ import type {
   CompanyQuote,
   CompanyReceipt,
   CreatorAccess,
+  Listing,
+  ListingDetail,
+  ListingVersion,
+  ModerationItem,
+  ModerationOutcome,
   OnboardingStatus,
   OrderView,
   PassportProgress,
@@ -22,6 +27,7 @@ import type {
   StatementRow,
   Store,
   Wallet,
+  WarehouseView,
 } from "@delulu/db/runtime";
 
 /**
@@ -132,6 +138,11 @@ export function productView(p: CatalogProduct) {
     sellerName: p.sellerName,
     available: p.available,
     zap: p.zap,
+    sellerKey: p.sellerKey,
+    storeHandle: p.storeHandle,
+    inventoryMode: p.inventoryMode,
+    stockBand: p.stockBand,
+    edition: p.edition && { issued: p.edition.issued, supply: p.edition.supply },
   };
 }
 
@@ -377,4 +388,114 @@ export function companyView(c: Company) {
 
 export function storeView(s: Store) {
   return { handle: s.handle, displayName: s.displayName, description: s.description, tier: s.tier };
+}
+
+// ------------------------------------------------------------------ the studio (owner only)
+
+export function listingVersionView(v: ListingVersion) {
+  return {
+    id: v.versionId,
+    revision: v.revision,
+    name: v.name,
+    hook: v.hook,
+    description: v.description,
+    altText: v.altText,
+    templateId: v.templateId,
+    pricePaise: paise(v.pricePaise),
+    createdAt: iso(v.createdAt),
+  };
+}
+
+const reasonsView = (r: readonly { field: string; code: string }[]) =>
+  r.map((x) => ({ field: x.field, code: x.code }));
+
+export function listingView(l: Listing) {
+  return {
+    id: l.productId,
+    status: l.status,
+    category: l.category,
+    inventoryMode: l.inventoryMode,
+    quantity: l.quantity,
+    offersExpress: l.offersExpress,
+    freeStandardDelivery: l.freeStandardDelivery,
+    approvedNeedsStock: l.approvedNeedsStock,
+    createdAt: iso(l.createdAt),
+    updatedAt: isoOrNull(l.updatedAt),
+    publishedAt: isoOrNull(l.publishedAt),
+    current: l.current && listingVersionView(l.current),
+    live: l.live && listingVersionView(l.live),
+    pending: l.pending && {
+      submissionId: l.pending.submissionId,
+      kind: l.pending.kind,
+      state: l.pending.state,
+      submittedAt: iso(l.pending.submittedAt),
+      reasons: reasonsView(l.pending.reasons),
+      version: listingVersionView(l.pending.version),
+    },
+    lastDecision: l.lastDecision && {
+      kind: l.lastDecision.kind,
+      state: l.lastDecision.state,
+      versionId: l.lastDecision.versionId,
+      reasons: reasonsView(l.lastDecision.reasons),
+      reason: l.lastDecision.reason,
+      decidedBy: l.lastDecision.decidedBy,
+      decidedAt: isoOrNull(l.lastDecision.decidedAt),
+    },
+    moderationReason: l.moderationReason,
+    stock: { available: l.stock.available, issued: l.stock.issued, retired: l.stock.retired },
+    edition: l.edition && { supply: l.edition.supply, issued: l.edition.issued },
+    nextAction: l.nextAction,
+  };
+}
+
+export function listingDetailView(l: ListingDetail) {
+  return {
+    ...listingView(l),
+    versions: l.versions.map((v) => ({
+      ...listingVersionView(v),
+      isCurrent: v.isCurrent,
+      submissions: v.submissions.map((s) => ({
+        kind: s.kind,
+        state: s.state,
+        reasons: reasonsView(s.reasons),
+        reason: s.reason,
+        decidedBy: s.decidedBy,
+        submittedAt: iso(s.submittedAt),
+        decidedAt: isoOrNull(s.decidedAt),
+      })),
+    })),
+    priceHistory: l.priceHistory.map((h) => ({
+      versionId: h.versionId,
+      pricePaise: paise(h.pricePaise),
+      previousPaise: h.previousPaise === null ? null : paise(h.previousPaise),
+      reason: h.reason,
+      changedAt: iso(h.changedAt),
+    })),
+  };
+}
+
+export function warehouseView(w: WarehouseView) {
+  return { id: w.id, kind: w.kind, capacity: w.capacity, used: w.used, zapHub: w.zapHub };
+}
+
+// ------------------------------------------------------------------ Super Admin
+
+export function moderationItemView(i: ModerationItem) {
+  return {
+    submissionId: i.submissionId,
+    productId: i.productId,
+    versionId: i.versionId,
+    kind: i.kind,
+    submittedAt: iso(i.submittedAt),
+    reasons: reasonsView(i.reasons),
+    store: { handle: i.store.handle, displayName: i.store.displayName },
+    category: i.category,
+    inventoryMode: i.inventoryMode,
+    productStatus: i.productStatus,
+    version: listingVersionView(i.version),
+  };
+}
+
+export function moderationOutcomeView(o: ModerationOutcome) {
+  return { outcome: o.outcome, productId: o.productId, versionId: o.versionId ?? null };
 }

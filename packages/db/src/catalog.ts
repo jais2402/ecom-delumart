@@ -115,7 +115,9 @@ export async function catalogProduct(pool: Pool, productId: string): Promise<Cat
  * A product page: the published product, or UNAVAILABLE for a product that was published once and
  * is now hidden or archived (no text: owners' collections show a placeholder), or null.
  */
-export type ProductPage = { status: "AVAILABLE"; product: CatalogProduct } | { status: "UNAVAILABLE"; productId: string };
+export type ProductPage =
+  | { status: "AVAILABLE"; product: CatalogProduct }
+  | { status: "UNAVAILABLE"; productId: string };
 
 export async function catalogProductPage(pool: Pool, productId: string): Promise<ProductPage | null> {
   if (!isUuid(productId)) return null;

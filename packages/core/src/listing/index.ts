@@ -24,7 +24,12 @@ export const LISTING_RULES = {
 } as const;
 
 export type ListingField = "name" | "hook" | "description" | "altText" | "templateId";
-export type ListingProblemCode = "REQUIRED" | "TOO_SHORT" | "TOO_LONG" | "CONTROL_CHARACTERS" | "OUT_OF_RANGE";
+export type ListingProblemCode =
+  | "REQUIRED"
+  | "TOO_SHORT"
+  | "TOO_LONG"
+  | "CONTROL_CHARACTERS"
+  | "OUT_OF_RANGE";
 
 export interface ListingProblem {
   field: ListingField;

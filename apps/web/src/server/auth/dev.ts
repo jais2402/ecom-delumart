@@ -1,10 +1,11 @@
 import "../server-only";
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { normalizeEmail } from "@delulu/core";
 import { uuidv7 } from "@delulu/db/runtime";
 import pg from "pg";
 import { SERVER_CONFIG } from "../config";
 import { env } from "../env";
+import { devUserId } from "./dev-user-id";
 import type { AuthProvider, PhoneCodeResult } from "./types";
 
 /**
@@ -58,14 +59,7 @@ function ownerPool(): pg.Pool {
 /** Process memory is keyed by a hash of the session id, never the id itself. */
 const keyOf = (sessionId: string) => createHash("sha256").update(sessionId).digest("base64url");
 
-/** A stable user id for an email: HMAC(IDENTITY_KEY, …) laid out as an RFC 9562 version 8 uuid. */
-export function devUserId(identityKey: Uint8Array, normalizedEmail: string): string {
-  const bytes = createHmac("sha256", identityKey).update(`dev-auth-user|${normalizedEmail}`).digest();
-  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x80;
-  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
-  const h = bytes.subarray(0, 16).toString("hex");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
-}
+export { devUserId };
 
 function sameCode(a: string, b: string): boolean {
   const x = Buffer.from(a);

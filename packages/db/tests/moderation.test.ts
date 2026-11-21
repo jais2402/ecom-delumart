@@ -16,7 +16,17 @@ import {
   setSystemSwitch,
   submitProduct,
 } from "../src/listing";
-import { CLEAN, checkout, codeOf, count, key, type ProductFixture, payFor, reconcile, user } from "./checkout-fixtures";
+import {
+  CLEAN,
+  checkout,
+  codeOf,
+  count,
+  key,
+  type ProductFixture,
+  payFor,
+  reconcile,
+  user,
+} from "./checkout-fixtures";
 import {
   commitState,
   createTestDatabase,
@@ -88,8 +98,14 @@ describe("listing moderation", () => {
         ["hide", () => hideListing(pool, { ...as(player), productId: live.productId, reason: REASON })],
         ["hide missing", () => hideListing(pool, { ...as(player), productId: uuidv7(), reason: REASON })],
         ["restore", () => restoreListing(pool, { ...as(player), productId: live.productId, reason: REASON })],
-        ["switch", () => setSystemSwitch(pool, { ...as(player), name: "publication", enabled: false, reason: REASON })],
-        ["switch missing", () => setSystemSwitch(pool, { ...as(player), name: "nope", enabled: false, reason: "x" })],
+        [
+          "switch",
+          () => setSystemSwitch(pool, { ...as(player), name: "publication", enabled: false, reason: REASON }),
+        ],
+        [
+          "switch missing",
+          () => setSystemSwitch(pool, { ...as(player), name: "nope", enabled: false, reason: "x" }),
+        ],
       ];
       for (const [name, call] of calls) expect(await codeOf(call()), name).toBe("FORBIDDEN");
       const statements = [
@@ -101,23 +117,37 @@ describe("listing moderation", () => {
       ];
       for (const sql of statements) {
         for (const role of ["app_pay", "app_jobs"]) {
-          expect(await stateOf(pool, sql, [], { role, userId: admin.userId }), `${role}: ${sql}`).toBe("42501");
+          expect(await stateOf(pool, sql, [], { role, userId: admin.userId }), `${role}: ${sql}`).toBe(
+            "42501",
+          );
         }
       }
       expect(await auditRows()).toBe(before);
       expect((await myProduct(pool, { ...as(c.u), productId: l.productId })).status).toBe("NEEDS_REVIEW");
       expect((await myProduct(pool, { ...as(c.u), productId: live.productId })).status).toBe("PUBLISHED");
-      expect(await count(pool, "SELECT count(*) AS n FROM core.system_switch WHERE name = 'publication' AND enabled")).toBe(1);
+      expect(
+        await count(
+          pool,
+          "SELECT count(*) AS n FROM core.system_switch WHERE name = 'publication' AND enabled",
+        ),
+      ).toBe(1);
       await decideListing(pool, { ...as(admin), ...l, decision: "REJECT", reason: REASON });
     });
 
     it("a reason is 5-500 characters with no contact details or links; a bad one writes nothing", async () => {
       const l = await inReview();
       const before = await auditRows();
-      for (const reason of ["no", "x".repeat(501), "write to someone@example.com", "call 98765 43210 now", "see https://x.example"]) {
-        expect(await codeOf(decideListing(pool, { ...as(admin), ...l, decision: "APPROVE", reason })), reason).toBe(
-          "VALIDATION_FAILED",
-        );
+      for (const reason of [
+        "no",
+        "x".repeat(501),
+        "write to someone@example.com",
+        "call 98765 43210 now",
+        "see https://x.example",
+      ]) {
+        expect(
+          await codeOf(decideListing(pool, { ...as(admin), ...l, decision: "APPROVE", reason })),
+          reason,
+        ).toBe("VALIDATION_FAILED");
       }
       expect(await auditRows()).toBe(before);
       expect((await myProduct(pool, { ...as(c.u), productId: l.productId })).status).toBe("NEEDS_REVIEW");
@@ -143,8 +173,11 @@ describe("listing moderation", () => {
       const paged = await moderationQueue(pool, { ...as(admin), pageSize: 1 });
       expect(paged.items).toHaveLength(1);
       const next = await moderationQueue(pool, { ...as(admin), pageSize: 1, cursor: paged.nextCursor });
-      expect(next.items[0]?.submittedAt.getTime()).toBeGreaterThanOrEqual(paged.items[0]?.submittedAt.getTime() ?? 0);
-      for (const l of [first, second]) await decideListing(pool, { ...as(admin), ...l, decision: "REJECT", reason: REASON });
+      expect(next.items[0]?.submittedAt.getTime()).toBeGreaterThanOrEqual(
+        paged.items[0]?.submittedAt.getTime() ?? 0,
+      );
+      for (const l of [first, second])
+        await decideListing(pool, { ...as(admin), ...l, decision: "REJECT", reason: REASON });
     });
 
     it("APPROVE publishes and appends a chained audit row; REJECT shows the owner the reason", async () => {
@@ -169,16 +202,32 @@ describe("listing moderation", () => {
       expect(await auditRows()).toBe(before + 1);
 
       const rejected = await inReview();
-      await decideListing(pool, { ...as(admin), ...rejected, decision: "REJECT", reason: "Shouting names are not allowed." });
+      await decideListing(pool, {
+        ...as(admin),
+        ...rejected,
+        decision: "REJECT",
+        reason: "Shouting names are not allowed.",
+      });
       const owner = await myProduct(pool, { ...as(c.u), productId: rejected.productId });
-      expect(owner).toMatchObject({ status: "REJECTED", moderationReason: "Shouting names are not allowed." });
+      expect(owner).toMatchObject({
+        status: "REJECTED",
+        moderationReason: "Shouting names are not allowed.",
+      });
       expect(owner.lastDecision).toMatchObject({ state: "REJECTED", decidedBy: "SUPER_ADMIN" });
       // a decision names the revision under review: anything else is a CONFLICT
       expect(
         await codeOf(decideListing(pool, { ...as(admin), ...rejected, decision: "APPROVE", reason: REASON })),
       ).toBe("CONFLICT");
       expect(
-        await codeOf(decideListing(pool, { ...as(admin), productId: uuidv7(), versionId: uuidv7(), decision: "APPROVE", reason: REASON })),
+        await codeOf(
+          decideListing(pool, {
+            ...as(admin),
+            productId: uuidv7(),
+            versionId: uuidv7(),
+            decision: "APPROVE",
+            reason: REASON,
+          }),
+        ),
       ).toBe("NOT_FOUND");
     });
   });
@@ -192,15 +241,22 @@ describe("listing moderation", () => {
       await cartAdd(pool, { authSessionId: other.authSessionId, productId: p.productId });
 
       const before = await auditRows();
-      expect(await hideListing(pool, { ...as(admin), productId: p.productId, reason: "Reported as misleading." })).toMatchObject({
+      expect(
+        await hideListing(pool, { ...as(admin), productId: p.productId, reason: "Reported as misleading." }),
+      ).toMatchObject({
         outcome: "HIDDEN",
       });
       expect(await auditRows()).toBe(before + 1);
       expect(await catalogProduct(pool, p.productId)).toBeNull();
-      expect(await catalogProductPage(pool, p.productId)).toEqual({ status: "UNAVAILABLE", productId: p.productId });
+      expect(await catalogProductPage(pool, p.productId)).toEqual({
+        status: "UNAVAILABLE",
+        productId: p.productId,
+      });
       const all = await catalogProducts(pool, { pageSize: 50 });
       expect(all.items.map((i) => i.productId)).not.toContain(p.productId);
-      expect((await storeProducts(pool, { handle: c.handle })).items.map((i) => i.productId)).not.toContain(p.productId);
+      expect((await storeProducts(pool, { handle: c.handle })).items.map((i) => i.productId)).not.toContain(
+        p.productId,
+      );
       expect((await myCart(pool, as(other))).lines[0]?.issue).toBe("UNAVAILABLE");
       expect(
         await codeOf(
@@ -213,15 +269,23 @@ describe("listing moderation", () => {
         ),
       ).toBe("PRODUCT_UNAVAILABLE");
       // the buyer keeps what they bought
-      expect((await myCollection(pool, as(buyer))).map((o) => [o.productId, o.state])).toEqual([[p.productId, "ACTIVE"]]);
+      expect((await myCollection(pool, as(buyer))).map((o) => [o.productId, o.state])).toEqual([
+        [p.productId, "ACTIVE"],
+      ]);
       expect(await myProduct(pool, { ...as(c.u), productId: p.productId })).toMatchObject({
         status: "HIDDEN",
         moderationReason: "Reported as misleading.",
         nextAction: "HIDDEN_BY_MODERATION",
       });
-      expect(await codeOf(hideListing(pool, { ...as(admin), productId: p.productId, reason: REASON }))).toBe("CONFLICT");
+      expect(await codeOf(hideListing(pool, { ...as(admin), productId: p.productId, reason: REASON }))).toBe(
+        "CONFLICT",
+      );
 
-      await restoreListing(pool, { ...as(admin), productId: p.productId, reason: "The report was not upheld." });
+      await restoreListing(pool, {
+        ...as(admin),
+        productId: p.productId,
+        reason: "The report was not upheld.",
+      });
       expect((await catalogProduct(pool, p.productId))?.productId).toBe(p.productId);
       expect((await myCart(pool, as(other))).lines[0]?.issue).toBeNull();
     });
@@ -235,7 +299,9 @@ describe("listing moderation", () => {
       const waiting = (await publishListing(pool, full, { quantity: 2 })).productId;
       expect((await myProduct(pool, { ...as(full.u), productId: waiting })).approvedNeedsStock).toBe(true);
       const before = await auditRows();
-      expect(await setSystemSwitch(pool, { ...as(admin), name: "publication", enabled: false, reason: REASON })).toEqual({
+      expect(
+        await setSystemSwitch(pool, { ...as(admin), name: "publication", enabled: false, reason: REASON }),
+      ).toEqual({
         name: "publication",
         enabled: false,
       });
@@ -252,17 +318,21 @@ describe("listing moderation", () => {
         await setSystemSwitch(pool, { ...as(admin), name: "publication", enabled: false, reason: REASON });
         return r;
       })();
-      expect(await codeOf(decideListing(pool, { ...as(admin), ...l, decision: "APPROVE", reason: REASON }))).toBe(
+      expect(
+        await codeOf(decideListing(pool, { ...as(admin), ...l, decision: "APPROVE", reason: REASON })),
+      ).toBe("PUBLICATION_PAUSED");
+      // an approval waiting for stock is not published either, nor is a hidden listing restored
+      expect(await codeOf(allocateAndPublish(pool, { ...as(full.u), productId: waiting }))).toBe(
         "PUBLICATION_PAUSED",
       );
-      // an approval waiting for stock is not published either, nor is a hidden listing restored
-      expect(await codeOf(allocateAndPublish(pool, { ...as(full.u), productId: waiting }))).toBe("PUBLICATION_PAUSED");
       expect(await codeOf(restoreListing(pool, { ...as(admin), productId: hidden, reason: REASON }))).toBe(
         "PUBLICATION_PAUSED",
       );
-      expect(await codeOf(setSystemSwitch(pool, { ...as(admin), name: "no_such_switch", enabled: true, reason: REASON }))).toBe(
-        "NOT_FOUND",
-      );
+      expect(
+        await codeOf(
+          setSystemSwitch(pool, { ...as(admin), name: "no_such_switch", enabled: true, reason: REASON }),
+        ),
+      ).toBe("NOT_FOUND");
 
       await setSystemSwitch(pool, { ...as(admin), name: "publication", enabled: true, reason: REASON });
       expect(await screen(pool, d.productId, "OK")).toMatchObject({ outcome: "PUBLISHED" });
@@ -278,17 +348,31 @@ describe("listing moderation", () => {
         "UPDATE core.listing_submission SET submitted_at = now() - interval '49 hours' WHERE product_id = $1",
         [d.productId],
       );
-      await pool.query("UPDATE core.system_switch SET updated_at = now() - interval '72 hours' WHERE name = 'publication'");
+      await pool.query(
+        "UPDATE core.system_switch SET updated_at = now() - interval '72 hours' WHERE name = 'publication'",
+      );
       const before = await auditRows();
       expect(await moderationSafetyNet(pool)).toEqual({ paused: true });
-      expect(await count(pool, "SELECT count(*) AS n FROM core.system_switch WHERE name = 'publication' AND enabled")).toBe(0);
-      const { rows } = await pool.query("SELECT actor_id, actor_kind, action FROM audit.audit_log ORDER BY id DESC LIMIT 1");
+      expect(
+        await count(
+          pool,
+          "SELECT count(*) AS n FROM core.system_switch WHERE name = 'publication' AND enabled",
+        ),
+      ).toBe(0);
+      const { rows } = await pool.query(
+        "SELECT actor_id, actor_kind, action FROM audit.audit_log ORDER BY id DESC LIMIT 1",
+      );
       expect(rows[0]).toEqual({ actor_id: null, actor_kind: "SYSTEM", action: "moderation.safety_net" });
       // idempotent
       expect(await moderationSafetyNet(pool)).toEqual({ paused: false });
       expect(await auditRows()).toBe(before + 1);
       // switched back on by the Super Admin: not paused again for the same overdue listing
-      await setSystemSwitch(pool, { ...as(admin), name: "publication", enabled: true, reason: "Clearing the queue now." });
+      await setSystemSwitch(pool, {
+        ...as(admin),
+        name: "publication",
+        enabled: true,
+        reason: "Clearing the queue now.",
+      });
       expect(await moderationSafetyNet(pool)).toEqual({ paused: false });
       await screen(pool, d.productId, "OK");
     });
@@ -304,10 +388,15 @@ describe("listing moderation", () => {
     it("a product is not published without its stock, whoever writes it", async () => {
       const d = await createDraft(pool, { ...as(c.u), draft: draftInput() });
       const publish = (x: pg.PoolClient) =>
-        x.query("UPDATE core.product SET status = 'PUBLISHED', published_at = now() WHERE id = $1", [d.productId]);
+        x.query("UPDATE core.product SET status = 'PUBLISHED', published_at = now() WHERE id = $1", [
+          d.productId,
+        ]);
       expect(await commitState(pool, raw(), publish)).toBe("42501");
       expect(await commitState(pool, {}, publish)).toBe("23514");
-      const exc = await createDraft(pool, { ...as(c.u), draft: draftInput({ inventoryMode: "EXCLUSIVE", quantity: 2 }) });
+      const exc = await createDraft(pool, {
+        ...as(c.u),
+        draft: draftInput({ inventoryMode: "EXCLUSIVE", quantity: 2 }),
+      });
       // units but no edition record, or fewer units than the supply: refused at commit
       const units = (x: pg.PoolClient, n: number) =>
         x.query(
@@ -319,8 +408,13 @@ describe("listing moderation", () => {
         await units(x, n);
         await x.query("UPDATE core.warehouse SET used = used + $2 WHERE id = $1", [c.warehouseId, n]);
         await x.query("UPDATE core.product SET available_units = $2 WHERE id = $1", [exc.productId, n]);
-        if (edition) await x.query("INSERT INTO core.exclusive_edition (product_id, supply) VALUES ($1, 2)", [exc.productId]);
-        await x.query("UPDATE core.product SET status = 'PUBLISHED', published_at = now() WHERE id = $1", [exc.productId]);
+        if (edition)
+          await x.query("INSERT INTO core.exclusive_edition (product_id, supply) VALUES ($1, 2)", [
+            exc.productId,
+          ]);
+        await x.query("UPDATE core.product SET status = 'PUBLISHED', published_at = now() WHERE id = $1", [
+          exc.productId,
+        ]);
       };
       expect(await commitState(pool, {}, (x) => stockAndPublish(x, 2, false))).toBe("23514");
       expect(await commitState(pool, {}, (x) => stockAndPublish(x, 1, true))).toBe("23514");
@@ -331,14 +425,17 @@ describe("listing moderation", () => {
       const p = await publishListing(pool, c, { quantity: 1 });
       const exc = await publishListing(pool, c, { inventoryMode: "EXCLUSIVE", quantity: 2 });
       const other = await creator(pool, items);
-      const addUnit = (warehouse: string, product: string, serial: number | null) => async (x: pg.PoolClient) => {
-        await x.query(
-          "INSERT INTO core.inventory_unit (id, product_id, warehouse_id, serial, state) VALUES ($1, $2, $3, $4, 'AVAILABLE')",
-          [uuidv7(), product, warehouse, serial],
-        );
-        await x.query("UPDATE core.warehouse SET used = used + 1 WHERE id = $1", [warehouse]);
-        await x.query("UPDATE core.product SET available_units = available_units + 1 WHERE id = $1", [product]);
-      };
+      const addUnit =
+        (warehouse: string, product: string, serial: number | null) => async (x: pg.PoolClient) => {
+          await x.query(
+            "INSERT INTO core.inventory_unit (id, product_id, warehouse_id, serial, state) VALUES ($1, $2, $3, $4, 'AVAILABLE')",
+            [uuidv7(), product, warehouse, serial],
+          );
+          await x.query("UPDATE core.warehouse SET used = used + 1 WHERE id = $1", [warehouse]);
+          await x.query("UPDATE core.product SET available_units = available_units + 1 WHERE id = $1", [
+            product,
+          ]);
+        };
       // beyond capacity
       expect(
         await commitState(pool, raw(), async (x) => {
@@ -357,17 +454,36 @@ describe("listing moderation", () => {
       const exc = await publishListing(pool, c, { inventoryMode: "EXCLUSIVE", quantity: 2 });
       const id = exc.productId;
       for (const who of [raw(), {}]) {
-        expect(await stateOf(pool, "UPDATE core.product SET exclusive_supply = 3 WHERE id = $1", [id], who)).toBe("23514");
-        expect(await stateOf(pool, "UPDATE core.exclusive_edition SET supply = 3 WHERE product_id = $1", [id], who)).toBe(
-          "23514",
-        );
         expect(
-          await stateOf(pool, "INSERT INTO core.exclusive_edition (product_id, supply) VALUES ($1, 2)", [id], who),
+          await stateOf(pool, "UPDATE core.product SET exclusive_supply = 3 WHERE id = $1", [id], who),
+        ).toBe("23514");
+        expect(
+          await stateOf(
+            pool,
+            "UPDATE core.exclusive_edition SET supply = 3 WHERE product_id = $1",
+            [id],
+            who,
+          ),
+        ).toBe("23514");
+        expect(
+          await stateOf(
+            pool,
+            "INSERT INTO core.exclusive_edition (product_id, supply) VALUES ($1, 2)",
+            [id],
+            who,
+          ),
         ).toBe("23505");
-        expect(await stateOf(pool, "DELETE FROM core.exclusive_edition WHERE product_id = $1", [id], who)).toBe("23001");
+        expect(
+          await stateOf(pool, "DELETE FROM core.exclusive_edition WHERE product_id = $1", [id], who),
+        ).toBe("23001");
       }
       expect(
-        await stateOf(pool, "UPDATE core.product_version SET name = 'Changed' WHERE id = $1", [exc.live?.versionId], raw()),
+        await stateOf(
+          pool,
+          "UPDATE core.product_version SET name = 'Changed' WHERE id = $1",
+          [exc.live?.versionId],
+          raw(),
+        ),
       ).toBe("23514");
       expect(await stateOf(pool, "DELETE FROM core.product WHERE id = $1", [id], raw())).toBe("23001");
     });

@@ -90,7 +90,12 @@ describe("player listings", () => {
     });
 
     it("US-08: a draft keeps its fields as a first revision; nothing is public", async () => {
-      const d = await create(c, { name: "Pocket Thunderstorm", hook: null, quantity: 3, offersExpress: true });
+      const d = await create(c, {
+        name: "Pocket Thunderstorm",
+        hook: null,
+        quantity: 3,
+        offersExpress: true,
+      });
       expect(d).toMatchObject({
         status: "DRAFT",
         category: "impossible-tech",
@@ -103,7 +108,12 @@ describe("player listings", () => {
         nextAction: "SUBMIT",
         stock: { available: 0, issued: 0, retired: 0 },
       });
-      expect(d.current).toMatchObject({ revision: 1, name: "Pocket Thunderstorm", hook: null, pricePaise: 50_000n });
+      expect(d.current).toMatchObject({
+        revision: 1,
+        name: "Pocket Thunderstorm",
+        hook: null,
+        pricePaise: 50_000n,
+      });
       expect(await catalogProduct(pool, d.productId)).toBeNull();
       expect(await catalogProductPage(pool, d.productId)).toBeNull();
     });
@@ -122,7 +132,11 @@ describe("player listings", () => {
         { pricePaise: 1_000_000_000n * RUPEE },
         { inventoryMode: "EXCLUSIVE" as const, quantity: 1 },
       ];
-      for (const o of ok) expect(await codeOf(create(c, o)), JSON.stringify(o, (_, v) => String(v))).toBe("ok");
+      for (const o of ok)
+        expect(
+          await codeOf(create(c, o)),
+          JSON.stringify(o, (_, v) => String(v)),
+        ).toBe("ok");
       const bad = [
         { name: "ab" },
         { name: "x".repeat(81) },
@@ -141,7 +155,10 @@ describe("player listings", () => {
         { name: "Moon\u0007Lamp" },
       ];
       for (const o of bad) {
-        expect(await codeOf(create(c, o)), JSON.stringify(o, (_, v) => String(v))).toBe("VALIDATION_FAILED");
+        expect(
+          await codeOf(create(c, o)),
+          JSON.stringify(o, (_, v) => String(v)),
+        ).toBe("VALIDATION_FAILED");
       }
       // clean up: the studio's private cap is shared with the cap test below
       for (const l of (await myProducts(pool, { ...as(c), status: "DRAFT", pageSize: 50 })).items) {
@@ -151,9 +168,9 @@ describe("player listings", () => {
 
     it("US-08: the studio needs creator access and a registered company", async () => {
       const nobody = await user(pool);
-      expect(await codeOf(createDraft(pool, { authSessionId: nobody.authSessionId, draft: draftInput() }))).toBe(
-        "CREATOR_LOCKED",
-      );
+      expect(
+        await codeOf(createDraft(pool, { authSessionId: nobody.authSessionId, draft: draftInput() })),
+      ).toBe("CREATOR_LOCKED");
       const passportOnly = await user(pool);
       const { completePassport } = await import("./selling-fixtures");
       await completePassport(pool, passportOnly, items);
@@ -169,7 +186,12 @@ describe("player listings", () => {
         productId: d.productId,
         changes: { name: "Moon Lamp Mk II", hook: null, pricePaise: 700n * RUPEE, quantity: 4 },
       });
-      expect(e.current).toMatchObject({ revision: 2, name: "Moon Lamp Mk II", hook: null, pricePaise: 70_000n });
+      expect(e.current).toMatchObject({
+        revision: 2,
+        name: "Moon Lamp Mk II",
+        hook: null,
+        pricePaise: 70_000n,
+      });
       expect(e.quantity).toBe(4);
       expect(e.versions.map((v) => [v.revision, v.isCurrent])).toEqual([
         [2, true],
@@ -205,7 +227,9 @@ describe("player listings", () => {
       expect(page2.items.map((l) => l.productId)).toEqual([ids[0]]);
       expect(page2.nextCursor).toBeNull();
       const screening = await myProducts(pool, { ...as(fresh), status: "SCREENING" });
-      expect(screening.items.map((l) => [l.productId, l.nextAction])).toEqual([[ids[0], "WAIT_FOR_SCREENING"]]);
+      expect(screening.items.map((l) => [l.productId, l.nextAction])).toEqual([
+        [ids[0], "WAIT_FOR_SCREENING"],
+      ]);
       await screen(pool, ids[0] ?? "", "OK");
     });
   });
@@ -240,9 +264,9 @@ describe("player listings", () => {
         "submissionId",
         "versionId",
       ]);
-      expect(await codeOf(updateDraft(pool, { ...as(c), productId: d.productId, changes: { name: "Later" } }))).toBe(
-        "NOT_EDITABLE",
-      );
+      expect(
+        await codeOf(updateDraft(pool, { ...as(c), productId: d.productId, changes: { name: "Later" } })),
+      ).toBe("NOT_EDITABLE");
       expect(await codeOf(submit(c, d.productId))).toBe("NOT_EDITABLE");
       expect(await codeOf(deleteDraft(pool, { ...as(c), productId: d.productId }))).toBe("NOT_EDITABLE");
 
@@ -270,21 +294,19 @@ describe("player listings", () => {
       await submit(c, d.productId);
       const versionId = d.current?.versionId ?? "";
       for (const role of ["app_web", "app_pay"]) {
-        const state = await pool
-          .connect()
-          .then(async (cl) => {
-            try {
-              await cl.query("BEGIN");
-              await cl.query(`SET LOCAL ROLE ${role}`);
-              await cl.query("SELECT core.screening_apply($1, $2, 'OK', '[]')", [d.productId, versionId]);
-              return "no error";
-            } catch (e) {
-              return (e as { code?: string }).code ?? "?";
-            } finally {
-              await cl.query("ROLLBACK");
-              cl.release();
-            }
-          });
+        const state = await pool.connect().then(async (cl) => {
+          try {
+            await cl.query("BEGIN");
+            await cl.query(`SET LOCAL ROLE ${role}`);
+            await cl.query("SELECT core.screening_apply($1, $2, 'OK', '[]')", [d.productId, versionId]);
+            return "no error";
+          } catch (e) {
+            return (e as { code?: string }).code ?? "?";
+          } finally {
+            await cl.query("ROLLBACK");
+            cl.release();
+          }
+        });
         expect(state, role).toBe("42501");
       }
       expect((await detail(c, d.productId)).status).toBe("SCREENING");
@@ -321,7 +343,11 @@ describe("player listings", () => {
       const r = await detail(c, d.productId);
       expect(r).toMatchObject({ status: "NEEDS_REVIEW", nextAction: "WAIT_FOR_REVIEW" });
       expect(r.pending?.reasons).toContainEqual({ field: "name", code: "CAPS" });
-      const e = await updateDraft(pool, { ...as(c), productId: d.productId, changes: { name: "Moon Lamp Deluxe" } });
+      const e = await updateDraft(pool, {
+        ...as(c),
+        productId: d.productId,
+        changes: { name: "Moon Lamp Deluxe" },
+      });
       expect(e).toMatchObject({ status: "DRAFT", pending: null });
       expect(e.versions[1]?.submissions[0]).toMatchObject({ state: "WITHDRAWN", decidedBy: "OWNER" });
       await deleteDraft(pool, { ...as(c), productId: d.productId });
@@ -361,9 +387,10 @@ describe("player listings", () => {
          VALUES ($1, $2, $3, $4, 'FIRST', 'SCREENING')`,
         [uuidv7(), eleventh.productId, eleventh.current?.versionId, fresh.companyId],
       );
-      await pool.query("UPDATE core.product SET status = 'SCREENING', pending_version_id = current_version_id WHERE id = $1", [
-        eleventh.productId,
-      ]);
+      await pool.query(
+        "UPDATE core.product SET status = 'SCREENING', pending_version_id = current_version_id WHERE id = $1",
+        [eleventh.productId],
+      );
       expect(await screen(pool, eleventh.productId, "OK")).toMatchObject({ outcome: "NEEDS_STOCK" });
       const r = await detail(fresh, eleventh.productId);
       expect(r).toMatchObject({ status: "DRAFT", approvedNeedsStock: true, nextAction: "ALLOCATE_STOCK" });
@@ -371,9 +398,11 @@ describe("player listings", () => {
         "PUBLISH_LIMIT",
       );
       expect(
-        await count(pool, "SELECT count(*) AS n FROM core.product WHERE company_id = $1 AND status = 'PUBLISHED'", [
-          fresh.companyId,
-        ]),
+        await count(
+          pool,
+          "SELECT count(*) AS n FROM core.product WHERE company_id = $1 AND status = 'PUBLISHED'",
+          [fresh.companyId],
+        ),
       ).toBe(10);
     });
   });
@@ -391,7 +420,11 @@ describe("player listings", () => {
         [exc.productId],
       );
       expect(rows.map((r) => r.serial)).toEqual(Array.from({ length: 40 }, (_, i) => i + 1));
-      expect(await count(pool, "SELECT count(*) AS n FROM core.exclusive_edition WHERE product_id = $1", [exc.productId])).toBe(1);
+      expect(
+        await count(pool, "SELECT count(*) AS n FROM core.exclusive_edition WHERE product_id = $1", [
+          exc.productId,
+        ]),
+      ).toBe(1);
 
       expect(await codeOf(restockProduct(pool, { ...as(c), productId: std.productId, quantity: 1 }))).toBe(
         "CAPACITY_EXCEEDED",
@@ -418,11 +451,21 @@ describe("player listings", () => {
       const c = await creator(pool, items);
       const exc = await publishListing(pool, c, { inventoryMode: "EXCLUSIVE", quantity: 40 });
       const id = exc.productId;
-      expect(await codeOf(restockProduct(pool, { ...as(c), productId: id, quantity: 1 }))).toBe("NOT_EDITABLE");
+      expect(await codeOf(restockProduct(pool, { ...as(c), productId: id, quantity: 1 }))).toBe(
+        "NOT_EDITABLE",
+      );
       expect(
-        await codeOf(updateDraft(pool, { ...as(c), productId: id, changes: { quantity: 50, inventoryMode: "STANDARD_STOCKED" } })),
+        await codeOf(
+          updateDraft(pool, {
+            ...as(c),
+            productId: id,
+            changes: { quantity: 50, inventoryMode: "STANDARD_STOCKED" },
+          }),
+        ),
       ).toBe("NOT_EDITABLE");
-      expect(await codeOf(allocateAndPublish(pool, { ...as(c), productId: id, quantity: 10 }))).toBe("NOT_EDITABLE");
+      expect(await codeOf(allocateAndPublish(pool, { ...as(c), productId: id, quantity: 10 }))).toBe(
+        "NOT_EDITABLE",
+      );
       await setProductPrice(pool, { ...as(c), productId: id, pricePaise: 900n * RUPEE });
       await reviseProduct(pool, { ...as(c), productId: id, revision: { name: "Exclusive Moon" } });
       await screen(pool, id, "OK");
@@ -431,16 +474,22 @@ describe("player listings", () => {
       expect(after).toMatchObject({ inventoryMode: "EXCLUSIVE", quantity: 40, edition: { supply: 40 } });
       expect(after.live).toMatchObject({ name: "Exclusive Moon", pricePaise: 90_000n });
       // and not as the owner of the database either
-      expect(await codeOf(pool.query("UPDATE core.product SET exclusive_supply = 41 WHERE id = $1", [id]))).toBe("23514");
       expect(
-        await codeOf(pool.query("UPDATE core.product SET inventory_mode = 'STANDARD_STOCKED' WHERE id = $1", [id])),
+        await codeOf(pool.query("UPDATE core.product SET exclusive_supply = 41 WHERE id = $1", [id])),
       ).toBe("23514");
-      expect(await codeOf(pool.query("UPDATE core.exclusive_edition SET supply = 41 WHERE product_id = $1", [id]))).toBe(
-        "23514",
-      );
-      expect(await codeOf(pool.query("INSERT INTO core.exclusive_edition (product_id, supply) VALUES ($1, 40)", [id]))).toBe(
-        "23505",
-      );
+      expect(
+        await codeOf(
+          pool.query("UPDATE core.product SET inventory_mode = 'STANDARD_STOCKED' WHERE id = $1", [id]),
+        ),
+      ).toBe("23514");
+      expect(
+        await codeOf(pool.query("UPDATE core.exclusive_edition SET supply = 41 WHERE product_id = $1", [id])),
+      ).toBe("23514");
+      expect(
+        await codeOf(
+          pool.query("INSERT INTO core.exclusive_edition (product_id, supply) VALUES ($1, 40)", [id]),
+        ),
+      ).toBe("23505");
       // retiring units lowers what can ever be sold, and says so; the edition record stays at 40
       const retired = await retireUnits(pool, { ...as(c), productId: id, quantity: 5 });
       expect(retired).toMatchObject({ retired: 5, sellableSupply: 35 });
@@ -459,14 +508,21 @@ describe("player listings", () => {
       const exc = await create(c, { inventoryMode: "EXCLUSIVE", quantity: 5 });
       await submit(c, exc.productId);
       expect(await screen(pool, exc.productId, "OK")).toMatchObject({ outcome: "NEEDS_STOCK" });
-      expect(await codeOf(allocateAndPublish(pool, { ...as(c), productId: exc.productId }))).toBe("CAPACITY_EXCEEDED");
-      expect(await codeOf(allocateAndPublish(pool, { ...as(c), productId: exc.productId, quantity: 6 }))).toBe(
-        "VALIDATION_FAILED",
+      expect(await codeOf(allocateAndPublish(pool, { ...as(c), productId: exc.productId }))).toBe(
+        "CAPACITY_EXCEEDED",
       );
+      expect(
+        await codeOf(allocateAndPublish(pool, { ...as(c), productId: exc.productId, quantity: 6 })),
+      ).toBe("VALIDATION_FAILED");
       expect((await detail(c, exc.productId)).quantity).toBe(5);
       await retireUnits(pool, { ...as(c), productId: big.productId, quantity: 1 });
       const p = await allocateAndPublish(pool, { ...as(c), productId: exc.productId, quantity: 3 });
-      expect(p).toMatchObject({ status: "PUBLISHED", quantity: 3, approvedNeedsStock: false, edition: { supply: 3 } });
+      expect(p).toMatchObject({
+        status: "PUBLISHED",
+        quantity: 3,
+        approvedNeedsStock: false,
+        edition: { supply: 3 },
+      });
       expect(p.live?.versionId).toBe(exc.current?.versionId);
       expect(await warehouse(c)).toEqual({ capacity: 100, used: 100 });
       expect(p.priceHistory).toEqual([expect.objectContaining({ reason: "PUBLISHED", previousPaise: null })]);
@@ -501,22 +557,30 @@ describe("player listings", () => {
     it("revise: the approved version stays live until the revision is approved; a rejected revision changes nothing", async () => {
       const c = await creator(pool, items);
       const p = await publishListing(pool, c, { name: "Original Moon" });
-      const r = await reviseProduct(pool, { ...as(c), productId: p.productId, revision: { name: "Revised Moon" } });
+      const r = await reviseProduct(pool, {
+        ...as(c),
+        productId: p.productId,
+        revision: { name: "Revised Moon" },
+      });
       expect(r).toMatchObject({ status: "PUBLISHED", nextAction: "WAIT_FOR_REVISION" });
       expect(r.pending).toMatchObject({ kind: "REVISION", state: "SCREENING" });
       expect((await catalogProduct(pool, p.productId))?.name).toBe("Original Moon");
       expect(await screen(pool, p.productId, "OK")).toMatchObject({ outcome: "REVISED" });
       expect((await catalogProduct(pool, p.productId))?.name).toBe("Revised Moon");
 
-      await reviseProduct(pool, { ...as(c), productId: p.productId, revision: { description: "Buy it at moonlamp.shop for less money." } });
+      await reviseProduct(pool, {
+        ...as(c),
+        productId: p.productId,
+        revision: { description: "Buy it at moonlamp.shop for less money." },
+      });
       expect(await screen(pool, p.productId)).toMatchObject({ outcome: "REJECTED" });
       const after = await detail(c, p.productId);
       expect(after.live?.name).toBe("Revised Moon");
       expect(after.live?.description).not.toMatch(/moonlamp/);
       expect(after.lastDecision).toMatchObject({ kind: "REVISION", state: "REJECTED" });
-      expect(await codeOf(reviseProduct(pool, { ...as(c), productId: p.productId, revision: { name: "x" } }))).toBe(
-        "VALIDATION_FAILED",
-      );
+      expect(
+        await codeOf(reviseProduct(pool, { ...as(c), productId: p.productId, revision: { name: "x" } })),
+      ).toBe("VALIDATION_FAILED");
     });
 
     it("a price-only change is live at once, recorded in the price history, and an older quote is re-derived at pay", async () => {
@@ -532,14 +596,19 @@ describe("player listings", () => {
         ["PUBLISHED", 50_000n, null],
       ]);
       expect(await codeOf(payFor(pool, buyer, before))).toBe("CART_CHANGED");
-      expect(await codeOf(setProductPrice(pool, { ...as(c), productId: p.productId, pricePaise: 650n * RUPEE + 1n }))).toBe(
-        "VALIDATION_FAILED",
-      );
+      expect(
+        await codeOf(
+          setProductPrice(pool, { ...as(c), productId: p.productId, pricePaise: 650n * RUPEE + 1n }),
+        ),
+      ).toBe("VALIDATION_FAILED");
       // a revision approved after the price changed goes live at the live price
       await reviseProduct(pool, { ...as(c), productId: p.productId, revision: { name: "Repriced Moon" } });
       await setProductPrice(pool, { ...as(c), productId: p.productId, pricePaise: 700n * RUPEE });
       await screen(pool, p.productId, "OK");
-      expect(await catalogProduct(pool, p.productId)).toMatchObject({ name: "Repriced Moon", pricePaise: 70_000n });
+      expect(await catalogProduct(pool, p.productId)).toMatchObject({
+        name: "Repriced Moon",
+        pricePaise: 70_000n,
+      });
     });
 
     it("archive retires the remaining units, frees their slots and takes the listing off sale; buyers keep theirs", async () => {
@@ -551,8 +620,16 @@ describe("player listings", () => {
       expect(a).toMatchObject({ status: "ARCHIVED", stock: { available: 0, issued: 1, retired: 4 } });
       expect(await warehouse(c)).toEqual({ capacity: 100, used: 0 });
       expect(await catalogProduct(pool, p.productId)).toBeNull();
-      expect(await catalogProductPage(pool, p.productId)).toEqual({ status: "UNAVAILABLE", productId: p.productId });
-      expect(await count(pool, "SELECT count(*) AS n FROM core.ownership WHERE product_id = $1 AND user_id = $2", [p.productId, buyer.userId])).toBe(1);
+      expect(await catalogProductPage(pool, p.productId)).toEqual({
+        status: "UNAVAILABLE",
+        productId: p.productId,
+      });
+      expect(
+        await count(pool, "SELECT count(*) AS n FROM core.ownership WHERE product_id = $1 AND user_id = $2", [
+          p.productId,
+          buyer.userId,
+        ]),
+      ).toBe(1);
       expect(await codeOf(archiveProduct(pool, { ...as(c), productId: p.productId }))).toBe("NOT_EDITABLE");
       expect(await codeOf(deleteDraft(pool, { ...as(c), productId: p.productId }))).toBe("NOT_EDITABLE");
     });
@@ -584,17 +661,27 @@ describe("player listings", () => {
           "INSERT INTO core.inventory_unit (id, product_id, warehouse_id, state) VALUES ($1, $2, $3, 'AVAILABLE')",
           [hubUnit, p.productId, hub],
         );
-        await tx.query("UPDATE core.product SET available_units = available_units + 1 WHERE id = $1", [p.productId]);
+        await tx.query("UPDATE core.product SET available_units = available_units + 1 WHERE id = $1", [
+          p.productId,
+        ]);
       });
       const ws = await setZapHub(pool, { ...as(c), warehouseId: hub, enabled: true });
       expect(ws.filter((w) => w.zapHub).map((w) => w.id)).toEqual([hub]);
       expect((await catalogProduct(pool, p.productId))?.zap).toBe(true);
       await cartAdd(pool, { authSessionId: buyer.authSessionId, productId: p.productId });
       expect((await myCart(pool, { authSessionId: buyer.authSessionId })).lines[0]?.zapAvailable).toBe(true);
-      const receipt = await payFor(pool, buyer, await checkout(pool, buyer, [asFixture(p)], { [c.companyId]: "ZAP" }));
+      const receipt = await payFor(
+        pool,
+        buyer,
+        await checkout(pool, buyer, [asFixture(p)], { [c.companyId]: "ZAP" }),
+      );
       expect(receipt.orderGroupId).toBeDefined();
       expect(
-        (await pool.query<{ state: string }>("SELECT state FROM core.inventory_unit WHERE id = $1", [hubUnit])).rows[0]?.state,
+        (
+          await pool.query<{ state: string }>("SELECT state FROM core.inventory_unit WHERE id = $1", [
+            hubUnit,
+          ])
+        ).rows[0]?.state,
       ).toBe("ISSUED");
       // the hub is empty now: no more Zap
       expect((await catalogProduct(pool, p.productId))?.zap).toBe(false);
@@ -608,10 +695,18 @@ describe("player listings", () => {
 
     it("a player product sells end to end: the seller gets the price less the 5% fee; the owner cannot buy their own", async () => {
       const c = await creator(pool, items);
-      const p = await publishListing(pool, c, { pricePaise: 1_000n * RUPEE, quantity: 2, inventoryMode: "EXCLUSIVE" });
+      const p = await publishListing(pool, c, {
+        pricePaise: 1_000n * RUPEE,
+        quantity: 2,
+        inventoryMode: "EXCLUSIVE",
+      });
       const buyer = await user(pool);
       const sellerBefore = await wallet(pool, c.u.ledgerAccountId);
-      const receipt = await payFor(pool, buyer, await checkout(pool, buyer, [asFixture(p)], { [c.companyId]: "STANDARD" }));
+      const receipt = await payFor(
+        pool,
+        buyer,
+        await checkout(pool, buyer, [asFixture(p)], { [c.companyId]: "STANDARD" }),
+      );
       expect(receipt.orderGroupId).toBeDefined();
       expect(await wallet(pool, c.u.ledgerAccountId)).toBe(sellerBefore + 95_000n);
       const d = await detail(c, p.productId);
@@ -659,7 +754,12 @@ describe("player listings", () => {
       expect(store.items.map((i) => i.productId)).toEqual([p.productId]);
       expect((await storeProducts(pool, { handle: "no-such-store" })).items).toEqual([]);
       const seed = await catalogProduct(pool, items[0]?.id ?? "");
-      expect(seed).toMatchObject({ sellerKey: "SEED", storeHandle: null, stockBand: "UNLIMITED", edition: null });
+      expect(seed).toMatchObject({
+        sellerKey: "SEED",
+        storeHandle: null,
+        stockBand: "UNLIMITED",
+        edition: null,
+      });
     });
   });
 
@@ -672,16 +772,28 @@ describe("player listings", () => {
       const asB = as(b);
       const calls: [string, () => Promise<unknown>][] = [
         ["my_product", () => myProduct(pool, { ...asB, productId: draft.productId })],
-        ["update", () => updateDraft(pool, { ...asB, productId: draft.productId, changes: { name: "Mine now" } })],
+        [
+          "update",
+          () => updateDraft(pool, { ...asB, productId: draft.productId, changes: { name: "Mine now" } }),
+        ],
         ["delete", () => deleteDraft(pool, { ...asB, productId: draft.productId })],
         ["submit", () => submitProduct(pool, { ...asB, productId: draft.productId })],
-        ["revise", () => reviseProduct(pool, { ...asB, productId: live.productId, revision: { name: "Mine now" } })],
-        ["price", () => setProductPrice(pool, { ...asB, productId: live.productId, pricePaise: 100n * RUPEE })],
+        [
+          "revise",
+          () => reviseProduct(pool, { ...asB, productId: live.productId, revision: { name: "Mine now" } }),
+        ],
+        [
+          "price",
+          () => setProductPrice(pool, { ...asB, productId: live.productId, pricePaise: 100n * RUPEE }),
+        ],
         ["restock", () => restockProduct(pool, { ...asB, productId: live.productId, quantity: 1 })],
         ["retire", () => retireUnits(pool, { ...asB, productId: live.productId, quantity: 1 })],
         ["allocate", () => allocateAndPublish(pool, { ...asB, productId: draft.productId })],
         ["archive", () => archiveProduct(pool, { ...asB, productId: live.productId })],
-        ["shipping", () => setProductShipping(pool, { ...asB, productId: live.productId, offersExpress: true })],
+        [
+          "shipping",
+          () => setProductShipping(pool, { ...asB, productId: live.productId, offersExpress: true }),
+        ],
         ["zap", () => setZapHub(pool, { ...asB, warehouseId: a.warehouseId, enabled: true })],
       ];
       for (const [name, call] of calls) expect(await codeOf(call()), name).toBe("NOT_FOUND");
@@ -695,7 +807,9 @@ describe("player listings", () => {
         await cl.query("SELECT set_config('app.session_id', $1, true)", [b.u.authSessionId]);
         await cl.query("SET LOCAL ROLE app_web");
         const seen = await cl.query("SELECT 1 FROM core.product WHERE id = $1", [draft.productId]);
-        const versions = await cl.query("SELECT 1 FROM core.product_version WHERE product_id = $1", [draft.productId]);
+        const versions = await cl.query("SELECT 1 FROM core.product_version WHERE product_id = $1", [
+          draft.productId,
+        ]);
         expect([seen.rowCount, versions.rowCount]).toEqual([0, 0]);
       } finally {
         await cl.query("ROLLBACK");

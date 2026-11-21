@@ -3,13 +3,7 @@ import type pg from "pg";
 import { createPaymentAttempt } from "../src/checkout";
 import { companyQuote, registerCompany } from "../src/company";
 import { applyScreening, pendingScreenings, type ScreeningOutcome } from "../src/jobs";
-import {
-  createDraft,
-  type DraftInput,
-  type ListingDetail,
-  myProduct,
-  submitProduct,
-} from "../src/listing";
+import { createDraft, type DraftInput, type ListingDetail, myProduct, submitProduct } from "../src/listing";
 import { type ProductFixture, RUPEE, user } from "./checkout-fixtures";
 import type { TestUser } from "./helpers";
 import { uuidv7 } from "./helpers";

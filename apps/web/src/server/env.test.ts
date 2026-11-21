@@ -162,3 +162,48 @@ describe("server configuration", () => {
     });
   });
 });
+
+describe("job runner configuration", () => {
+  it("DATABASE_URL_JOBS and JOBS_SIGNING_KEY are optional; without them the server runs no jobs", () => {
+    const env = parseEnv(valid());
+    expect(env.databaseUrlJobs).toBeNull();
+    expect(env.jobsSigningKey).toBeNull();
+    const jobsKey = key();
+    const set = parseEnv(
+      valid({
+        DATABASE_URL_JOBS: "postgres://app_jobs:pw@127.0.0.1:5432/delulu_dev",
+        JOBS_SIGNING_KEY: jobsKey,
+      }),
+    );
+    expect(set.databaseUrlJobs).toBe("postgres://app_jobs:pw@127.0.0.1:5432/delulu_dev");
+    expect(set.jobsSigningKey).toEqual(Buffer.from(jobsKey, "hex"));
+  });
+
+  it("the jobs login is never the owner, and the signing key is a distinct 32-byte key", () => {
+    expect(() =>
+      parseEnv(valid({ DATABASE_URL_JOBS: "postgres://postgres:other@127.0.0.1:5432/delulu_dev" })),
+    ).toThrow(/DATABASE_URL_JOBS must not log in as the owner/);
+    expect(() => parseEnv(valid({ JOBS_SIGNING_KEY: "abc" }))).toThrow(/JOBS_SIGNING_KEY/);
+    const shared = key();
+    expect(() => parseEnv(valid({ FIELD_KEY: shared, JOBS_SIGNING_KEY: shared }))).toThrow(/distinct/);
+  });
+
+  it("production refuses a placeholder signing key, never echoing it", () => {
+    const placeholder = "0000000000000000000000000000000000000000000000000000000000000004";
+    let message = "";
+    try {
+      parseEnv(
+        valid({
+          NODE_ENV: "production",
+          AUTH_PROVIDER: "supabase",
+          DATABASE_URL_OWNER: undefined,
+          JOBS_SIGNING_KEY: placeholder,
+        }),
+      );
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain("JOBS_SIGNING_KEY is a placeholder");
+    expect(message).not.toContain(placeholder);
+  });
+});

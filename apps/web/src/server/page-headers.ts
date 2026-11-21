@@ -21,6 +21,7 @@ export const PRIVATE_PAGE_PREFIXES = [
   "/orders",
   "/onboarding",
   "/sign-in",
+  "/sell",
 ] as const;
 export const PRIVATE_PAGE_CACHE = "private, no-store";
 

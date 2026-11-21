@@ -144,7 +144,9 @@ type Json = Record<string, unknown>;
 const date = (v: unknown): Date => new Date(String(v));
 const dateOrNull = (v: unknown): Date | null => (v === null || v === undefined ? null : date(v));
 const reasonsOf = (v: unknown): FieldCode[] =>
-  Array.isArray(v) ? v.map((r) => ({ field: String((r as Json).field), code: String((r as Json).code) })) : [];
+  Array.isArray(v)
+    ? v.map((r) => ({ field: String((r as Json).field), code: String((r as Json).code) }))
+    : [];
 
 function versionOf(v: unknown): ListingVersion | null {
   if (v === null || v === undefined) return null;
@@ -349,14 +351,19 @@ export function reviseProduct(
 ): Promise<ListingDetail> {
   requireUuid(input.productId, "productId");
   const v = input.revision;
-  return productCommand(pool, input.authSessionId, "SELECT core.product_revise($1, $2, $3, $4, $5, $6) AS r", [
-    input.productId,
-    v.name ?? null,
-    v.hook === undefined ? null : (v.hook ?? ""),
-    v.description ?? null,
-    v.altText ?? null,
-    v.templateId ?? null,
-  ]);
+  return productCommand(
+    pool,
+    input.authSessionId,
+    "SELECT core.product_revise($1, $2, $3, $4, $5, $6) AS r",
+    [
+      input.productId,
+      v.name ?? null,
+      v.hook === undefined ? null : (v.hook ?? ""),
+      v.description ?? null,
+      v.altText ?? null,
+      v.templateId ?? null,
+    ],
+  );
 }
 
 export function setProductPrice(
@@ -553,7 +560,10 @@ export function restoreListing(
 ): Promise<ModerationOutcome> {
   requireUuid(input.productId, "productId");
   return asWeb(pool, input.authSessionId, (c) =>
-    one<ModerationOutcome>(c, "SELECT core.admin_listing_restore($1, $2) AS r", [input.productId, input.reason]),
+    one<ModerationOutcome>(c, "SELECT core.admin_listing_restore($1, $2) AS r", [
+      input.productId,
+      input.reason,
+    ]),
   );
 }
 

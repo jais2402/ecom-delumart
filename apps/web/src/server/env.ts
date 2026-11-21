@@ -121,7 +121,9 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
       .filter((k): k is string => k !== undefined)
       .map((k) => k.toLowerCase());
     if (new Set(keys).size !== keys.length) {
-      problems.push("IDENTITY_KEY, CARD_KEY, PIN_PEPPER, FIELD_KEY and JOBS_SIGNING_KEY must be distinct keys");
+      problems.push(
+        "IDENTITY_KEY, CARD_KEY, PIN_PEPPER, FIELD_KEY and JOBS_SIGNING_KEY must be distinct keys",
+      );
     }
     if (v.DATABASE_URL_OWNER) {
       const owner = loginOf(v.DATABASE_URL_OWNER);

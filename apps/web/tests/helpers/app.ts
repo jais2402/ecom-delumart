@@ -18,6 +18,7 @@ export const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgr
 const TEST_LOGINS = [
   { login: "delulu_web_test_login", role: "app_web" },
   { login: "delulu_pay_test_login", role: "app_pay" },
+  { login: "delulu_jobs_test_login", role: "app_jobs" },
 ] as const;
 /** Fresh for every test run; the logins are dropped again when the test file ends. */
 const TEST_LOGIN_PASSWORD = randomBytes(18).toString("hex");
@@ -74,6 +75,8 @@ export function setTestEnv(dbUrl: string, overrides: Record<string, string | und
     DATABASE_URL_WEB: urlAs(dbUrl, TEST_LOGINS[0].login),
     DATABASE_URL_PAY: urlAs(dbUrl, TEST_LOGINS[1].login),
     DATABASE_URL_OWNER: dbUrl,
+    DATABASE_URL_JOBS: urlAs(dbUrl, TEST_LOGINS[2].login),
+    JOBS_SIGNING_KEY: randomBytes(32).toString("hex"),
     IDENTITY_KEY: randomBytes(32).toString("hex"),
     CARD_KEY: randomBytes(32).toString("hex"),
     PIN_PEPPER: randomBytes(32).toString("hex"),
@@ -137,7 +140,7 @@ export async function startTestApp(
 
 /** Every secret the server holds, for "never in a response" assertions. */
 export function serverSecrets(): string[] {
-  return ["IDENTITY_KEY", "CARD_KEY", "PIN_PEPPER", "FIELD_KEY"].flatMap((k) => {
+  return ["IDENTITY_KEY", "CARD_KEY", "PIN_PEPPER", "FIELD_KEY", "JOBS_SIGNING_KEY"].flatMap((k) => {
     const hex = process.env[k] ?? "";
     return [hex, Buffer.from(hex, "hex").toString("base64")];
   });
