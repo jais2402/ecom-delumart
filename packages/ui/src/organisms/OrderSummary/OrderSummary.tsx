@@ -10,6 +10,12 @@ export type OrderSummaryProps = Omit<ComponentPropsWithRef<"section">, "children
   deliveryFeePaise: bigint;
   /** Computed by the pricing function, never here. */
   totalPaise: bigint;
+  /** Balance after paying; null or omitted hides the row. A negative value shows the shortfall. */
+  balanceAfterPaise?: bigint | null;
+  /** True while newer totals are loading: the current ones stay visible and are marked busy. */
+  loading?: boolean;
+  /** Under the totals, e.g. the checkout button. */
+  footer?: ReactNode;
 };
 
 function Row({ label, children, strong }: { label: string; children: ReactNode; strong?: boolean }) {
@@ -26,12 +32,16 @@ export function OrderSummary({
   discountPaise,
   deliveryFeePaise,
   totalPaise,
+  balanceAfterPaise,
+  loading = false,
+  footer,
   className,
   ...props
 }: OrderSummaryProps) {
   return (
     <section
       aria-label="Order summary"
+      aria-busy={loading || undefined}
       className={cn(
         "flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 font-body",
         className,
@@ -41,7 +51,12 @@ export function OrderSummary({
       <Heading level={2} size="sm">
         Order summary
       </Heading>
-      <dl className="flex flex-col gap-2 text-base">
+      <dl
+        className={cn(
+          "flex flex-col gap-2 text-base",
+          loading && "opacity-60 transition-opacity duration-fast",
+        )}
+      >
         <Row label="Items">
           <Price amountPaise={itemsTotalPaise} display="exact" />
         </Row>
@@ -61,8 +76,18 @@ export function OrderSummary({
         <Row label="Total" strong>
           <Price amountPaise={totalPaise} display="exact" />
         </Row>
+        {balanceAfterPaise === null || balanceAfterPaise === undefined ? null : balanceAfterPaise >= 0n ? (
+          <Row label="Balance after">
+            <Price amountPaise={balanceAfterPaise} display="exact" />
+          </Row>
+        ) : (
+          <Row label="Short by">
+            <Price amountPaise={-balanceAfterPaise} display="exact" className="text-danger" />
+          </Row>
+        )}
       </dl>
       <FictionLabel>Fictional money</FictionLabel>
+      {footer}
     </section>
   );
 }

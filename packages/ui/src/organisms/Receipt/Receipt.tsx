@@ -14,6 +14,8 @@ export type ReceiptProps = Omit<ComponentPropsWithRef<"section">, "children"> & 
   discountPaise?: bigint;
   deliveryFeePaise: bigint;
   totalPaise: bigint;
+  /** Payment status in words, e.g. "Paid". Shown in the receipt header when given. */
+  paymentStatus?: string;
 };
 
 export function Receipt({
@@ -24,6 +26,7 @@ export function Receipt({
   discountPaise,
   deliveryFeePaise,
   totalPaise,
+  paymentStatus,
   className,
   ...props
 }: ReceiptProps) {
@@ -42,6 +45,12 @@ export function Receipt({
         </Heading>
         <p className="font-mono text-sm text-fg">Order {reference}</p>
         {placedAt ? <p className="text-sm text-fg-muted">{placedAt}</p> : null}
+        {paymentStatus ? (
+          <p className="text-sm text-fg">
+            <span className="text-fg-muted">Payment: </span>
+            <strong>{paymentStatus}</strong>
+          </p>
+        ) : null}
       </header>
       <ul className="divide-y divide-border border-y border-border">
         {lines.map((line) => (

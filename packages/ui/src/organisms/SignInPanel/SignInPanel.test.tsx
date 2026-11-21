@@ -47,4 +47,10 @@ describe("SignInPanel", () => {
     rerender(<SignInPanel onGoogle={noop} onEmailSubmit={noop} error="Try again later." />);
     expect(screen.getByRole("alert")).toHaveTextContent("Try again later.");
   });
+  it("says no email is sent when the local development provider is active", () => {
+    render(<SignInPanel onGoogle={noop} onEmailSubmit={noop} devMode />);
+    expect(screen.getByText("Local development sign-in: no email is sent.")).toBeInTheDocument();
+    expect(screen.queryByText(/We email you/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in locally" })).toBeInTheDocument();
+  });
 });

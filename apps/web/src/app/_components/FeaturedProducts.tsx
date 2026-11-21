@@ -3,9 +3,10 @@
 import { ProductGrid } from "@delulu/ui";
 import { CATEGORIES } from "../../data/seed-catalog";
 import type { ProductResponse } from "../_lib/api";
-import { featuredAcrossPrices, toGridItem } from "../_lib/catalog";
+import { featuredAcrossPrices } from "../_lib/catalog";
 import { usePublicCatalog } from "../_lib/use-public-catalog";
 import { LoadingBlock } from "./LoadState";
+import { toShopGridItem } from "./shop-items";
 
 /** The home page's product grid; see usePublicCatalog for why it can fill in after load. */
 export function FeaturedProducts({ initial }: { initial: readonly ProductResponse[] }) {
@@ -19,5 +20,5 @@ export function FeaturedProducts({ initial }: { initial: readonly ProductRespons
           products,
           CATEGORIES.map((c) => c.slug),
         );
-  return <ProductGrid items={picked.map(toGridItem)} label="Featured products" />;
+  return <ProductGrid items={picked.map(toShopGridItem)} label="Featured products" />;
 }

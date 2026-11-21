@@ -278,3 +278,64 @@ export interface CollectionItem {
   state: string;
   acquiredAt: string;
 }
+
+/** Cart API bodies (money fields are decimal strings). */
+export type LineIssue = "UNAVAILABLE" | "SOLD_OUT" | "ALREADY_OWNED" | "SELF_PURCHASE";
+
+export interface CartLineResponse {
+  productId: string;
+  versionId: string;
+  name: string;
+  hook: string | null;
+  altText: string;
+  templateId: number;
+  pricePaise: string;
+  category: string;
+  available: boolean;
+  offersExpress: boolean;
+  zapAvailable: boolean;
+  freeStandardDelivery: boolean;
+  issue: LineIssue | null;
+  addedAt: string;
+}
+
+export interface CartGroupResponse {
+  sellerKey: string;
+  sellerName: string;
+  lines: CartLineResponse[];
+}
+
+export interface PreviewSeller {
+  sellerKey: string;
+  sellerName: string;
+  speed: Speed;
+  speedsOffered: Speed[];
+  productIds: string[];
+  itemTotalPaise: string;
+  sellerDiscountPaise: string;
+  platformDiscountPaise: string;
+  deliveryFeePaise: string;
+  totalPaise: string;
+}
+
+export interface PreviewResponse {
+  sellers: PreviewSeller[];
+  totalPaise: string;
+  balancePaise: string | null;
+  balanceAfterPaise: string | null;
+  couponCode: string | null;
+  couponError: string | null;
+  issues: { productId: string; issue: LineIssue }[];
+}
+
+export interface CartResponse {
+  lineCount: number;
+  maxLines: number;
+  groups: CartGroupResponse[];
+  preview: PreviewResponse | null;
+  previewError: string | null;
+}
+
+export interface CartMergeResponse extends CartResponse {
+  skipped: { productId: string; reason: string }[];
+}

@@ -4,11 +4,13 @@ import { SignInPanel } from "@delulu/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { describeError } from "../../_lib/api";
+import { useDevProvider } from "../../_lib/dev-mode";
 import { useGateway } from "../../_lib/gateway-context";
 import { getReturnTo, messageOf, safeReturnPath, setReturnTo } from "../../_lib/onboarding-flow";
 import { useArrival } from "../../_lib/use-arrival";
 
-export function SignInScreen() {
+export function SignInScreen({ devProvider = false }: { devProvider?: boolean }) {
+  const devSeen = useDevProvider();
   const gateway = useGateway();
   const router = useRouter();
   const { ready, headingRef } = useArrival(0);
@@ -38,6 +40,7 @@ export function SignInScreen() {
     <SignInPanel
       headingRef={headingRef}
       pending={pending}
+      devMode={devProvider || devSeen}
       error={error}
       onGoogle={async () => {
         setError(null);

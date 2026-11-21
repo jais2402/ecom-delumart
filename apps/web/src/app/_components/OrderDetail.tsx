@@ -4,7 +4,7 @@ import { Alert, Badge, Button, EmptyState, Heading, Receipt, Text, TrackingTimel
 import { useEffect, useState } from "react";
 import type { OrderResponse } from "../_lib/api";
 import { parsePaise } from "../_lib/money";
-import { formatWhen, orderTotals, statusLabel, trackingStages } from "../_lib/orders";
+import { deliveryStatus, formatWhen, orderTotals, trackingStages } from "../_lib/orders";
 import { errorCode, useApiGet } from "../_lib/use-api";
 import { ErrorBlock, LoadingBlock } from "./LoadState";
 import { PageHeading } from "./PageHeading";
@@ -82,34 +82,51 @@ export function OrderDetail({ id, justPaid = false }: { id: string; justPaid?: b
           reference={order.paymentReference}
           placedAt={formatWhen(order.createdAt)}
           lines={lines}
+          paymentStatus="Paid"
           itemsTotalPaise={totals.items}
           discountPaise={totals.discount}
           deliveryFeePaise={totals.delivery}
           totalPaise={totals.total}
         />
         <div className="flex flex-col gap-6">
-          {order.sellerOrders.map((so) => (
-            <section
-              key={so.id}
-              aria-label={`Tracking for ${so.sellerName ?? "DeluluMart Originals"}`}
-              className="flex flex-col gap-2"
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <Heading level={2} size="sm">
-                  Tracking
+          {order.sellerOrders.map((so) => {
+            const delivery = deliveryStatus(so.shipment, now);
+            const seller = so.sellerName ?? "DeluluMart Originals";
+            return (
+              <section
+                key={so.id}
+                aria-label={`Delivery from ${seller}`}
+                className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4"
+              >
+                <Heading level={2} size="sm" className="break-words">
+                  Sold by {seller}
                 </Heading>
-                <Badge tone={so.status === "DELIVERED" ? "success" : "info"}>{statusLabel(so.status)}</Badge>
-              </div>
-              <Text size="sm" muted>
-                Sold by {so.sellerName ?? "DeluluMart Originals"}
-              </Text>
-              {so.shipment ? (
-                <TrackingTimeline stages={trackingStages(so.shipment, now)} />
-              ) : (
-                <Text muted>Shipping details will appear here.</Text>
-              )}
-            </section>
-          ))}
+                <ul className="list-disc pl-5 text-base text-fg">
+                  {so.lines.map((line) => (
+                    <li key={line.id} className="break-words">
+                      {line.name}
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Heading level={3} size="sm">
+                    Tracking
+                  </Heading>
+                  <Badge tone={delivery.tone}>{delivery.label}</Badge>
+                  {delivery.detail ? (
+                    <Text as="span" size="sm" muted>
+                      {delivery.detail}
+                    </Text>
+                  ) : null}
+                </div>
+                {so.shipment ? (
+                  <TrackingTimeline stages={trackingStages(so.shipment, now)} />
+                ) : (
+                  <Text muted>Shipping details will appear here.</Text>
+                )}
+              </section>
+            );
+          })}
         </div>
       </div>
       <div className="flex flex-wrap gap-2">

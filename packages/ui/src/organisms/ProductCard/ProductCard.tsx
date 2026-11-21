@@ -1,5 +1,5 @@
 import { Zap } from "lucide-react";
-import { type ComponentPropsWithRef, useId } from "react";
+import { type ComponentPropsWithRef, type ReactNode, useId } from "react";
 import { Badge } from "../../atoms/Badge";
 import { Heading, type HeadingLevel } from "../../atoms/Heading";
 import { Icon } from "../../atoms/Icon";
@@ -23,6 +23,11 @@ export type ProductCardProps = Omit<ComponentPropsWithRef<"article">, "children"
   zapEligible?: boolean;
   /** Semantic level of the product name; pick the level below the surrounding heading. */
   headingLevel?: HeadingLevel;
+  /**
+   * Controls shown under the price, e.g. an "Add to cart" button. They sit above the card's
+   * stretched link, so they stay clickable and keyboard reachable on their own.
+   */
+  actions?: ReactNode;
 };
 
 /** The whole card is one link named after the product; price and store are its description. */
@@ -38,6 +43,7 @@ export function ProductCard({
   stock,
   zapEligible = false,
   headingLevel = 3,
+  actions,
   className,
   ...props
 }: ProductCardProps) {
@@ -81,6 +87,7 @@ export function ProductCard({
             {storeName}
           </span>
         </p>
+        {actions ? <div className="relative z-10 flex flex-col gap-2">{actions}</div> : null}
       </div>
     </article>
   );

@@ -2,6 +2,7 @@
 
 import { SiteHeader } from "@delulu/ui";
 import { useRouter } from "next/navigation";
+import { useCart } from "../_lib/cart-store";
 import { signOut, useSession } from "../_lib/session-store";
 
 /**
@@ -12,6 +13,7 @@ import { signOut, useSession } from "../_lib/session-store";
 export function SessionHeader({ searchDefaultValue }: { searchDefaultValue?: string }) {
   const router = useRouter();
   const session = useSession();
+  const cart = useCart();
   const signedIn = session.status === "signedIn";
   return (
     <SiteHeader
@@ -19,7 +21,7 @@ export function SessionHeader({ searchDefaultValue }: { searchDefaultValue?: str
       balanceLoading={session.status === "loading"}
       accountHref={signedIn ? "/account" : "/sign-in"}
       accountLabel={signedIn ? "Account" : "Sign in"}
-      cartCount={0}
+      cartCount={cart.count}
       onSearch={(query) => router.push(query ? `/search?q=${encodeURIComponent(query)}` : "/search")}
       {...(signedIn
         ? {

@@ -5,7 +5,21 @@ import type { QuoteResponse, Speed } from "./api";
  * priced quotes (public amounts and ids, nothing secret) are kept in memory and mirrored to
  * sessionStorage so a reload of the checkout page still works. Never put a PIN or code here.
  */
+export interface CartCheckoutGroup {
+  sellerKey: string;
+  sellerName: string;
+  itemNames: string[];
+}
+
+/** Present when the session was created from the cart: what the review step lists. */
+export interface CartCheckoutInfo {
+  groups: CartCheckoutGroup[];
+  couponCode: string | null;
+}
+
 export interface CheckoutContext {
+  /** Set for a checkout that started from the cart (several items, maybe several sellers). */
+  cart?: CartCheckoutInfo;
   productId: string;
   productName: string;
   category: string;

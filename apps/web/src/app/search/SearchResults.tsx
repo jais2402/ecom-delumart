@@ -3,8 +3,8 @@
 import { Heading, ProductGrid, SearchBar } from "@delulu/ui";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
+import { toShopGridItem } from "../_components/shop-items";
 import type { ProductResponse } from "../_lib/api";
-import { toGridItem } from "../_lib/catalog";
 import { usePublicCatalog } from "../_lib/use-public-catalog";
 
 export function SearchResults({ products: initial }: { products: readonly ProductResponse[] }) {
@@ -17,7 +17,7 @@ export function SearchResults({ products: initial }: { products: readonly Produc
     if (!needle) return [];
     return products
       .filter((product) => `${product.name} ${product.hook ?? ""}`.toLowerCase().includes(needle))
-      .map(toGridItem);
+      .map(toShopGridItem);
   }, [products, query]);
 
   function search(next: string) {

@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { CATEGORIES } from "../../../data/seed-catalog";
 import { ShopShell } from "../../_components/ShopShell";
-import { toGridItem } from "../../_lib/catalog";
+import { toShopGridItem } from "../../_components/shop-items";
 import { loadCatalog } from "../../_lib/catalog-server";
 import { CategoryBrowser } from "./CategoryBrowser";
 
@@ -28,7 +28,7 @@ export default async function CategoryPage({ params }: { params: Promise<{ categ
   const { category } = await params;
   const found = CATEGORIES.find((entry) => entry.slug === category);
   if (!found) notFound();
-  const items = (await loadCatalog(found.slug)).map(toGridItem);
+  const items = (await loadCatalog(found.slug)).map(toShopGridItem);
 
   return (
     <ShopShell>

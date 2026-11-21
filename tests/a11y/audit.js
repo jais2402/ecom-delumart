@@ -1,5 +1,19 @@
 const { chromium } = require('playwright');
-const pages = ['/', '/c/impossible-tech', '/p/monsoon-in-a-jar', '/search?q=jar', '/design-system'];
+// Run against a dev server (AUTH_PROVIDER=dev):  BASE_URL=http://localhost:3000 node tests/a11y/audit.js
+const BASE = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+// path, whether it needs a signed-in account, and whether the cart is filled first
+const pages = [
+  { path: '/' },
+  { path: '/c/impossible-tech' },
+  { path: '/p/{product}' },
+  { path: '/search?q=jar' },
+  { path: '/design-system' },
+  { path: '/sign-in' },
+  { path: '/cart', cart: true },
+  { path: '/cart', signedIn: true, cart: true, label: '/cart (signed in)' },
+  { path: '/account', signedIn: true },
+  { path: '/account/profile', signedIn: true },
+];
 const sizes = [[1280, 900], [360, 800]];
 const schemes = ['light', 'dark'];
 const pageFn = () => {
@@ -68,37 +82,100 @@ const pageFn = () => {
   out.landmarks.skip = !!document.querySelector('a[href^="#"]');
   return out;
 };
+const rand = () => Math.random().toString(36).slice(2, 10);
+
+// A real product id from the public catalog route (the seed's addresses are not stable).
+async function discoverProducts() {
+  const response = await fetch(BASE + '/api/v1/catalog?limit=50');
+  if (!response.ok) throw new Error('catalog route answered ' + response.status + ' (is the dev server up and seeded?)');
+  const { items } = await response.json();
+  const ready = items.filter((p) => p.available);
+  if (ready.length < 2) throw new Error('the catalog has fewer than two available products');
+  return ready;
+}
+
+// Sign in through the dev flow and finish onboarding with API calls from the page itself, so the
+// browser holds the session cookie. Returns once /api/v1/me reports a finished account.
+async function signInAndOnboard(page) {
+  await page.goto(BASE + '/');
+  await page.evaluate(async ({ email, phone }) => {
+    const post = async (path, body, token) => {
+      const r = await fetch(path, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf-token': token }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(path + ' ' + r.status + ' ' + (await r.text()).slice(0, 120));
+      return r.json();
+    };
+    const token = (await (await fetch('/api/v1/auth/csrf', { credentials: 'same-origin' })).json()).csrfToken;
+    await post('/api/v1/auth/dev/sign-in', { email }, token);
+    await post('/api/v1/onboarding/phone', { phone }, token);
+    await post('/api/v1/onboarding/phone/verify', { code: '000000' }, token);
+    await post('/api/v1/onboarding/birthdate', { birthdate: '1995-06-15' }, token);
+    const created = await post('/api/v1/onboarding/provision', {}, token);
+    await post('/api/v1/cards/' + created.card.id + '/pin', { pin: '482915' }, token);
+  }, { email: `audit-${rand()}@example.com`, phone: `+91 9${String(Math.floor(Math.random() * 1e9)).padStart(9, '0')}` });
+}
+
+async function addToServerCart(page, productId) {
+  await page.evaluate(async (id) => {
+    const token = (await (await fetch('/api/v1/auth/csrf', { credentials: 'same-origin' })).json()).csrfToken;
+    const r = await fetch('/api/v1/cart/lines', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf-token': token }, body: JSON.stringify({ productId: id }) });
+    if (!r.ok) throw new Error('cart add ' + r.status);
+  }, productId);
+}
+
 (async () => {
+  const products = await discoverProducts();
   const browser = await chromium.launch();
-  const total = {};
+  let failures = 0;
   for (const scheme of schemes) for (const [w, h] of sizes) {
-    const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme });
-    const page = await ctx.newPage();
-    for (const p of pages) {
-      await page.goto('http://localhost:3200' + p, { waitUntil: 'networkidle' });
-      const key = `${p} ${w} ${scheme}`;
-      const r = await page.evaluate(pageFn);
-      const focus = [];
-      await page.evaluate(() => document.activeElement && document.activeElement.blur());
-      for (let i = 0; i < 15; i++) {
-        await page.keyboard.press('Tab');
-        const f = await page.evaluate(() => { const e = document.activeElement; if (!e || e === document.body) return null; const s = getComputedStyle(e); const rect = e.getBoundingClientRect(); return { t: e.tagName + ' ' + (e.textContent || e.getAttribute('aria-label') || '').trim().slice(0, 25), ol: s.outlineStyle, ow: s.outlineWidth, bs: s.boxShadow, w: rect.width, h: rect.height, fw: (() => { const a = e.closest('article'); if (!a) return false; const as = getComputedStyle(a); return as.outlineStyle !== 'none' && parseFloat(as.outlineWidth) > 0; })() }; });
-        if (!f) { focus.push('NOFOCUS@' + i); continue; }
-        if (i === 0 && !/skip|main|content/i.test(f.t)) focus.push('first stop not skip link: ' + f.t);
-        if (i === 0 && f.h < 43.5) focus.push('skip link focused height ' + f.h);
-        const visible = (f.ol !== 'none' && parseFloat(f.ow) > 0 && f.ol !== 'none') || (f.bs && f.bs !== 'none') || f.fw;
-        if (!visible) focus.push(`no focus indicator: ${f.t} (${f.ol} ${f.ow})`);
+    for (const signedIn of [false, true]) {
+      const list = pages.filter((p) => !!p.signedIn === signedIn);
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme, baseURL: BASE });
+      const page = await ctx.newPage();
+      if (signedIn) {
+        await signInAndOnboard(page);
+        await addToServerCart(page, products[0].id);
+        await addToServerCart(page, products[1].id);
+      } else {
+        // the signed-out cart is product ids in localStorage
+        await ctx.addInitScript((ids) => { try { if (!localStorage.getItem('dm.cart.v1')) localStorage.setItem('dm.cart.v1', JSON.stringify(ids)); } catch {} }, [products[0].id, products[1].id]);
       }
-      const issues = [];
-      if (r.overflow) issues.push('OVERFLOW ' + r.overflow);
-      r.names.forEach((x) => issues.push(x)); r.h.forEach((x) => issues.push('HEAD ' + x));
-      r.touch.forEach((x) => issues.push('TOUCH ' + x)); r.contrast.forEach((x) => issues.push('CONTRAST ' + x));
-      focus.forEach((x) => issues.push('FOCUS ' + x));
-      const L = r.landmarks; if (L.main !== 1) issues.push('LM main=' + L.main); if (!L.banner) issues.push('LM banner missing'); if (!L.footer) issues.push('LM footer=' + L.footer); L.unlabelledNavs.forEach((x) => issues.push('LM unlabelled nav ' + x));
-      console.log(`== ${key}: ${issues.length} issues (contrast nodes ${r.n} min ${r.min && r.min.toFixed(2)})`);
-      issues.slice(0, +process.env.MAX || 12).forEach((x) => console.log('   ' + x));
+      for (const entry of list) {
+        const p = entry.path.replace('{product}', products[0].id);
+        await page.goto(BASE + p, { waitUntil: 'networkidle' });
+        // client screens fill in after the first paint: wait for a heading and for loading to settle
+        await page.getByRole('heading', { level: 1 }).first().waitFor();
+        await page.waitForLoadState('networkidle');
+        if (entry.cart) await page.waitForSelector('button[aria-label^="Remove "]');
+        const key = `${entry.label || p} ${w} ${scheme}`;
+        const r = await page.evaluate(pageFn);
+        const focus = [];
+        // screens that move focus to their heading on arrival start tabbing after it, not at the skip link
+        const startedOnHeading = await page.evaluate(() => !!document.activeElement && /^H[1-6]$/.test(document.activeElement.tagName));
+        await page.evaluate(() => document.activeElement && document.activeElement.blur());
+        for (let i = 0; i < 15; i++) {
+          await page.keyboard.press('Tab');
+          const f = await page.evaluate(() => { const e = document.activeElement; if (!e || e === document.body) return null; const s = getComputedStyle(e); const rect = e.getBoundingClientRect(); return { t: e.tagName + ' ' + (e.textContent || e.getAttribute('aria-label') || '').trim().slice(0, 25), ol: s.outlineStyle, ow: s.outlineWidth, bs: s.boxShadow, w: rect.width, h: rect.height, fw: (() => { const a = e.closest('article'); if (!a) return false; const as = getComputedStyle(a); return as.outlineStyle !== 'none' && parseFloat(as.outlineWidth) > 0; })() }; });
+          // focus left the page (a short page, or the dev-only Next.js overlay): nothing more to check
+          if (!f || /^NEXTJS-PORTAL/.test(f.t)) break;
+          if (i === 0 && !startedOnHeading && !/skip|main|content/i.test(f.t)) focus.push('first stop not skip link: ' + f.t);
+          if (i === 0 && !startedOnHeading && f.h < 43.5) focus.push('skip link focused height ' + f.h);
+          const visible = (f.ol !== 'none' && parseFloat(f.ow) > 0 && f.ol !== 'none') || (f.bs && f.bs !== 'none') || f.fw;
+          if (!visible) focus.push(`no focus indicator: ${f.t} (${f.ol} ${f.ow})`);
+        }
+        const issues = [];
+        if (r.overflow) issues.push('OVERFLOW ' + r.overflow);
+        r.names.forEach((x) => issues.push(x)); r.h.forEach((x) => issues.push('HEAD ' + x));
+        r.touch.forEach((x) => issues.push('TOUCH ' + x)); r.contrast.forEach((x) => issues.push('CONTRAST ' + x));
+        focus.forEach((x) => issues.push('FOCUS ' + x));
+        const L = r.landmarks; if (L.main !== 1) issues.push('LM main=' + L.main); if (!L.banner) issues.push('LM banner missing'); if (!L.footer) issues.push('LM footer=' + L.footer); L.unlabelledNavs.forEach((x) => issues.push('LM unlabelled nav ' + x));
+        failures += issues.length;
+        console.log(`== ${key}: ${issues.length} issues (contrast nodes ${r.n} min ${r.min && r.min.toFixed(2)})`);
+        issues.slice(0, +process.env.MAX || 12).forEach((x) => console.log('   ' + x));
+      }
+      await ctx.close();
     }
-    await ctx.close();
   }
   await browser.close();
-})();
+  console.log(`\nTotal issues: ${failures}`);
+  if (failures) process.exitCode = 1;
+})().catch((error) => { console.error(error); process.exit(1); });

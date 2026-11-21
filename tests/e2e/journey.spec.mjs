@@ -122,7 +122,7 @@ try {
   await step("sign in with a fresh email", async () => {
     await page.getByRole("heading", { level: 1 }).waitFor();
     await page.getByLabel("Email address").fill(EMAIL);
-    await page.getByRole("button", { name: "Email me a sign-in link" }).click();
+    await page.getByRole("button", { name: /Email me a sign-in link|Sign in locally/ }).click();
     await page.waitForURL(/\/onboarding\/phone/);
     await noOverflow(page, "/onboarding/phone");
   });

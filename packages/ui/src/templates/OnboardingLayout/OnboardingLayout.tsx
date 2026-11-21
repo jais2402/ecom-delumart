@@ -28,12 +28,14 @@ export function OnboardingLayout({
       </a>
       {banner ? <div className="border-b border-border bg-surface px-4 py-2">{banner}</div> : null}
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col gap-6 px-4 py-6">
-        <a
-          href={homeHref}
-          className="inline-flex min-h-touch items-center self-start font-display text-2xl font-bold text-action"
-        >
-          DeluluMart
-        </a>
+        <header className="self-start">
+          <a
+            href={homeHref}
+            className="inline-flex min-h-touch items-center font-display text-2xl font-bold text-action"
+          >
+            DeluluMart
+          </a>
+        </header>
         {progress}
         <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 outline-none">
           {children}

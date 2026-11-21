@@ -30,6 +30,8 @@ export type SignInPanelProps = Omit<ComponentPropsWithRef<"div">, "children" | "
   /** Extra content under the confirmation message. */
   afterSent?: ReactNode;
   headingRef?: Ref<HTMLHeadingElement>;
+  /** True when sign-in is the local development provider: no email is sent, so the copy says so. */
+  devMode?: boolean;
 };
 
 export function SignInPanel({
@@ -41,6 +43,7 @@ export function SignInPanel({
   onUseDifferentEmail,
   afterSent,
   headingRef,
+  devMode = false,
   className,
   ...props
 }: SignInPanelProps) {
@@ -98,12 +101,18 @@ export function SignInPanel({
       >
         Continue with Google
       </Button>
-      <p className="text-center font-body text-sm text-fg-muted">or use an email link</p>
+      <p className="text-center font-body text-sm text-fg-muted">
+        {devMode ? "or sign in with any email address" : "or use an email link"}
+      </p>
       <form noValidate onSubmit={submit} className="flex flex-col gap-4">
         <FormField
           label="Email address"
           required
-          hint="We email you a one-time sign-in link. No password."
+          hint={
+            devMode
+              ? "Local development sign-in: no email is sent."
+              : "We email you a one-time sign-in link. No password."
+          }
           error={fieldError}
         >
           {(control) => (
@@ -122,7 +131,7 @@ export function SignInPanel({
           )}
         </FormField>
         <Button type="submit" size="lg" loading={pending}>
-          Email me a sign-in link
+          {devMode ? "Sign in locally" : "Email me a sign-in link"}
         </Button>
       </form>
     </div>

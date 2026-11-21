@@ -28,4 +28,39 @@ describe("OrderSummary", () => {
     expect(screen.getByText("Free")).toBeInTheDocument();
     expect(container.querySelectorAll("dt")).toHaveLength(container.querySelectorAll("dd").length);
   });
+  it("shows the balance after paying, or the shortfall when it is negative", () => {
+    const { rerender } = render(
+      <OrderSummary
+        itemsTotalPaise={100n}
+        deliveryFeePaise={0n}
+        totalPaise={100n}
+        balanceAfterPaise={900n}
+      />,
+    );
+    expect(screen.getByText("Balance after")).toBeInTheDocument();
+    rerender(
+      <OrderSummary
+        itemsTotalPaise={100n}
+        deliveryFeePaise={0n}
+        totalPaise={100n}
+        balanceAfterPaise={-50n}
+      />,
+    );
+    expect(screen.queryByText("Balance after")).not.toBeInTheDocument();
+    expect(screen.getByText("Short by")).toBeInTheDocument();
+  });
+  it("keeps totals visible and marks the region busy while loading, and renders a footer", () => {
+    render(
+      <OrderSummary
+        itemsTotalPaise={100n}
+        deliveryFeePaise={0n}
+        totalPaise={100n}
+        loading
+        footer={<button type="button">Check out</button>}
+      />,
+    );
+    expect(screen.getByRole("region", { name: "Order summary" })).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByText("Total")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check out" })).toBeInTheDocument();
+  });
 });

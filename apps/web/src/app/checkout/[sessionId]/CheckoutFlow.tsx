@@ -10,6 +10,7 @@ import {
   EmptyState,
   FictionLabel,
   Heading,
+  OrderGroupReview,
   OrderSummary,
   PaymentMethodOption,
   Price,
@@ -30,6 +31,7 @@ import {
   type ReceiptResponse,
   type Speed,
 } from "../../_lib/api";
+import { markCartChanged, refreshCart } from "../../_lib/cart-store";
 import {
   type CheckoutContext,
   clearCheckoutContext,
@@ -100,7 +102,7 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
   // Other delivery speeds are separate quotes. Ask for them once; a refusal means "not offered".
   const alternativesAsked = useRef(false);
   useEffect(() => {
-    if (!ok || !ctx || alternativesAsked.current) return;
+    if (!ok || !ctx || ctx.cart || alternativesAsked.current) return;
     alternativesAsked.current = true;
     const current = ctx;
     void (async () => {
@@ -139,11 +141,11 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
       <Shell>
         <EmptyState
           title="This checkout is no longer available"
-          description="Quotes last five minutes. Pick the product again to get a fresh price."
+          description="Quotes last five minutes. Start again from your cart or the product to get a fresh price."
           action={
             <Button asChild>
-              <a href={ctx ? `/p/${ctx.productId}` : "/"}>
-                {ctx ? "Back to the product" : "Back to the shop"}
+              <a href={ctx?.cart ? "/cart" : ctx ? `/p/${ctx.productId}` : "/"}>
+                {ctx?.cart ? "Back to your cart" : ctx ? "Back to the product" : "Back to the shop"}
               </a>
             </Button>
           }
@@ -153,8 +155,11 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
   }
 
   const quote = ctx.quotes[ctx.speed] as QuoteResponse;
+  const cartInfo = ctx.cart;
   const seller = sellerOf(quote, ctx.sellerId);
   if (!seller) return null;
+  // a cart checkout chose its speeds on the cart page, so it starts at the payment step
+  const view: Step = cartInfo && step === "speed" ? "payment" : step;
   const total = parsePaise(quote.totalPaise);
   const balance = session.balancePaise;
   const balanceAfter = balance === null ? null : balance - total;
@@ -209,6 +214,18 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
       return;
     }
     const nothingMoved = "No fictional money moved.";
+    const lineIssue = new Set([
+      "CART_CHANGED",
+      "SOLD_OUT",
+      "PRODUCT_UNAVAILABLE",
+      "ALREADY_OWNED",
+      "SELF_PURCHASE",
+    ]);
+    if (cartInfo && (lineIssue.has(err.code) || Array.isArray(err.details.issues))) {
+      // all-or-nothing: nothing was charged; the cart shows which lines changed
+      void markCartChanged().then(() => router.replace("/cart"));
+      return;
+    }
     switch (err.code) {
       case "CART_CHANGED":
       case "PRICE_CHANGED":
@@ -226,7 +243,9 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
             short !== null && short > 0n
               ? `This order costs more than your balance. ${nothingMoved}`
               : `Your balance does not cover this order. ${nothingMoved}`,
-          link: { href: `/c/${ctx?.category ?? ""}`, label: "Browse cheaper items" },
+          link: cartInfo
+            ? { href: "/cart", label: "Back to your cart" }
+            : { href: `/c/${ctx?.category ?? ""}`, label: "Browse cheaper items" },
         });
         return;
       }
@@ -243,10 +262,14 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
           tone: "warning",
           title: "This quote expired",
           text: `Quotes last five minutes. ${nothingMoved}`,
-          action: {
-            label: "Start again with a new price",
-            run: () => void requote(ctx?.speed ?? "STANDARD", "Here is your new quote."),
-          },
+          ...(cartInfo
+            ? { link: { href: "/cart", label: "Back to your cart" } }
+            : {
+                action: {
+                  label: "Start again with a new price",
+                  run: () => void requote(ctx?.speed ?? "STANDARD", "Here is your new quote."),
+                },
+              }),
         });
         return;
       case "BUSY":
@@ -314,6 +337,7 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
       clearCheckoutContext(sessionId);
       markJustPaid(receipt.orderId);
       void refreshSession();
+      void refreshCart();
       router.replace(`/orders/${receipt.orderId}`);
     } catch (err) {
       working.current = false;
@@ -410,7 +434,23 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
     if (ctx) update({ ...ctx, speed });
   }
 
-  const summary = (
+  const summary = cartInfo ? (
+    <section
+      aria-label="Your items"
+      className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4"
+    >
+      <Heading level={2} size="sm">
+        Your items
+      </Heading>
+      <Text>
+        {cartInfo.groups.reduce((n, g) => n + g.itemNames.length, 0)} items from {cartInfo.groups.length}{" "}
+        {cartInfo.groups.length === 1 ? "seller" : "sellers"}
+      </Text>
+      <a className="inline-flex min-h-touch items-center text-action underline" href="/cart">
+        Change your cart
+      </a>
+    </section>
+  ) : (
     <section
       aria-label="Your item"
       className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4"
@@ -434,7 +474,7 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
           <Heading level={1} size="lg">
             Checkout
           </Heading>
-          <CheckoutSteps current={STEP_INDEX[step]} />
+          <CheckoutSteps current={STEP_INDEX[view]} />
         </div>
       }
       summary={summary}
@@ -489,7 +529,7 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
           />
         ) : null}
 
-        {phase === "idle" && step === "speed" ? (
+        {phase === "idle" && view === "speed" ? (
           <form
             className="flex flex-col gap-3"
             onSubmit={(event) => {
@@ -531,7 +571,7 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
           </form>
         ) : null}
 
-        {phase === "idle" && step === "payment" ? (
+        {phase === "idle" && view === "payment" ? (
           <form
             className="flex flex-col gap-3"
             onSubmit={(event) => {
@@ -573,9 +613,15 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
               </a>
             ) : null}
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" onClick={() => setStep("speed")}>
-                Back
-              </Button>
+              {cartInfo ? (
+                <Button asChild variant="secondary">
+                  <a href="/cart">Back to cart</a>
+                </Button>
+              ) : (
+                <Button type="button" variant="secondary" onClick={() => setStep("speed")}>
+                  Back
+                </Button>
+              )}
               <Button type="submit" size="lg" className="flex-1">
                 Review your order
               </Button>
@@ -583,28 +629,49 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
           </form>
         ) : null}
 
-        {phase === "idle" && step === "review" ? (
+        {phase === "idle" && view === "review" ? (
           <div className="flex flex-col gap-4">
             <Heading level={2} size="md" tabIndex={-1} ref={stepHeading}>
               Review your order
             </Heading>
-            <OrderSummary
-              itemsTotalPaise={parsePaise(seller.listPaise)}
-              discountPaise={
-                parsePaise(seller.sellerDiscountPaise) + parsePaise(seller.platformDiscountPaise)
-              }
-              deliveryFeePaise={parsePaise(seller.deliveryFeePaise)}
-              totalPaise={total}
-            />
+            {cartInfo ? (
+              <OrderGroupReview
+                totalPaise={total}
+                groups={quote.sellers.map((q) => {
+                  const info = cartInfo.groups.find((g) => g.sellerKey === q.sellerId);
+                  return {
+                    sellerId: q.sellerId,
+                    sellerName: info?.sellerName ?? "DeluluMart Originals",
+                    speedName: SPEED_COPY[q.speed].name,
+                    itemNames: info?.itemNames ?? [],
+                    deliveryFeePaise: parsePaise(q.deliveryFeePaise),
+                    totalPaise: parsePaise(q.totalPaise),
+                  };
+                })}
+              />
+            ) : (
+              <OrderSummary
+                itemsTotalPaise={parsePaise(seller.listPaise)}
+                discountPaise={
+                  parsePaise(seller.sellerDiscountPaise) + parsePaise(seller.platformDiscountPaise)
+                }
+                deliveryFeePaise={parsePaise(seller.deliveryFeePaise)}
+                totalPaise={total}
+              />
+            )}
             <dl className="flex flex-col gap-1 rounded-lg border border-border bg-surface p-4 text-base">
-              <div className="flex justify-between gap-3">
-                <dt className="text-fg-muted">Item</dt>
-                <dd className="text-right text-fg">{ctx.productName}</dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-fg-muted">Delivery</dt>
-                <dd className="text-fg">{SPEED_COPY[ctx.speed].name}</dd>
-              </div>
+              {cartInfo ? null : (
+                <>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-fg-muted">Item</dt>
+                    <dd className="text-right text-fg">{ctx.productName}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-fg-muted">Delivery</dt>
+                    <dd className="text-fg">{SPEED_COPY[ctx.speed].name}</dd>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between gap-3">
                 <dt className="text-fg-muted">Pay with</dt>
                 <dd className="text-fg">{effectiveMethod === "CARD" ? cardAlias : "Bank balance"}</dd>
@@ -627,9 +694,9 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
             <FictionLabel>Fictional money. No real card or bank details are used.</FictionLabel>
             {balanceAfter !== null && balanceAfter < 0n ? (
               <Alert tone="danger" title="This costs more than your balance">
-                Pick something cheaper.{" "}
-                <a className="text-action underline" href={`/c/${ctx.category}`}>
-                  Browse cheaper items
+                {cartInfo ? "Remove something from your cart." : "Pick something cheaper."}{" "}
+                <a className="text-action underline" href={cartInfo ? "/cart" : `/c/${ctx.category}`}>
+                  {cartInfo ? "Back to your cart" : "Browse cheaper items"}
                 </a>
               </Alert>
             ) : null}

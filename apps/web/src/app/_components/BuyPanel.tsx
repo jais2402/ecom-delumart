@@ -9,6 +9,7 @@ import { saveCheckoutContext } from "../_lib/checkout-context";
 import { parsePaiseOrNull } from "../_lib/money";
 import { nextOnboardingPath, useSession } from "../_lib/session-store";
 import { requestQuote } from "../_lib/start-checkout";
+import { AddToCartButton } from "./AddToCartButton";
 
 interface Overlay {
   owned: string[];
@@ -119,28 +120,36 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
         <Alert tone="warning">Buying from creator shops is not open from this page yet.</Alert>
       ) : null}
 
-      {owned ? (
-        <>
-          <Button size="lg" disabled aria-describedby="owned-hint">
-            Already in your collection
+      <div className="flex flex-col gap-3">
+        {owned ? (
+          <>
+            <Button size="lg" disabled aria-describedby="owned-hint">
+              Already in your collection
+            </Button>
+            <Text as="span" size="sm" muted id="owned-hint">
+              Each product can be owned once.{" "}
+              <a className="text-action underline" href="/account/collection">
+                See your collection
+              </a>
+            </Text>
+          </>
+        ) : (
+          <Button
+            size="lg"
+            loading={pending}
+            disabled={unavailable || sellerId === null}
+            onClick={() => void buyNow()}
+          >
+            Buy now
           </Button>
-          <Text as="span" size="sm" muted id="owned-hint">
-            Each product can be owned once.{" "}
-            <a className="text-action underline" href="/account/collection">
-              See your collection
-            </a>
-          </Text>
-        </>
-      ) : (
-        <Button
-          size="lg"
-          loading={pending}
-          disabled={unavailable || sellerId === null}
-          onClick={() => void buyNow()}
-        >
-          Buy now
-        </Button>
-      )}
+        )}
+        <AddToCartButton
+          productId={product.id}
+          name={product.name}
+          available={product.available}
+          owned={owned}
+        />
+      </div>
     </div>
   );
 }

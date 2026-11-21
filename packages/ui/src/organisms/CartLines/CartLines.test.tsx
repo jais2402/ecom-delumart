@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { CartLines } from "./CartLines";
+import { CartLines, type CartSellerGroup } from "./CartLines";
 
 const groups = [
   {
@@ -32,5 +32,37 @@ describe("CartLines", () => {
   it("shows an empty state", () => {
     render(<CartLines groups={[]} onRemove={() => {}} />);
     expect(screen.getByRole("heading", { name: "Your cart is empty" })).toBeInTheDocument();
+  });
+  it("marks a line with an issue, names the reason and ties it to the remove button", async () => {
+    const withIssue = [
+      {
+        sellerId: "s1",
+        sellerName: "Cloud Nine Emporium",
+        lines: [
+          {
+            id: "l1",
+            name: "Pocket Comet",
+            hue: 220,
+            quantity: 1,
+            unitPricePaise: 500_00n,
+            issue: "Sold out.",
+          },
+        ],
+      },
+    ];
+    render(<CartLines groups={withIssue} onRemove={() => {}} />);
+    expect(screen.getByText("Sold out.")).toBeInTheDocument();
+    const remove = screen.getByRole("button", { name: "Remove Pocket Comet from cart" });
+    expect(remove).toHaveAccessibleDescription("Sold out.");
+    expect(remove.closest("li")).toHaveAttribute("data-issue", "true");
+  });
+  it("renders a group footer and an empty-state action", () => {
+    const withFooter: CartSellerGroup[] = [
+      { ...groups[0], footer: <p>Delivery choice</p> } as CartSellerGroup,
+    ];
+    const { rerender } = render(<CartLines groups={withFooter} onRemove={() => {}} />);
+    expect(screen.getByText("Delivery choice")).toBeInTheDocument();
+    rerender(<CartLines groups={[]} onRemove={() => {}} emptyAction={<a href="/">Shop</a>} />);
+    expect(screen.getByRole("link", { name: "Shop" })).toBeInTheDocument();
   });
 });

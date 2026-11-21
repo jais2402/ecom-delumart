@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 import { ProductCard } from "./ProductCard";
 
 const base = {
@@ -29,5 +30,22 @@ describe("ProductCard", () => {
   it("gives the product art a name when alt text is provided", () => {
     render(<ProductCard {...base} imageAlt="A glass jar full of clouds" />);
     expect(screen.getByRole("img", { name: "A glass jar full of clouds" })).toBeInTheDocument();
+  });
+  it("renders actions as their own controls, not inside the product link", async () => {
+    const onAdd = vi.fn();
+    render(
+      <ProductCard
+        {...base}
+        actions={
+          <button type="button" onClick={onAdd}>
+            Add Monsoon in a Jar to cart
+          </button>
+        }
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Add Monsoon in a Jar to cart" });
+    expect(screen.getByRole("link", { name: "Monsoon in a Jar" })).not.toContainElement(button);
+    await userEvent.click(button);
+    expect(onAdd).toHaveBeenCalledTimes(1);
   });
 });

@@ -28,4 +28,10 @@ describe("Receipt", () => {
     rerender(<Receipt {...props} discountPaise={50_00n} />);
     expect(screen.getByText("Discount")).toBeInTheDocument();
   });
+  it("shows the payment status in words when given", () => {
+    const { rerender } = render(<Receipt {...props} />);
+    expect(screen.queryByText("Payment:")).not.toBeInTheDocument();
+    rerender(<Receipt {...props} paymentStatus="Paid" />);
+    expect(screen.getByText("Paid")).toBeInTheDocument();
+  });
 });
