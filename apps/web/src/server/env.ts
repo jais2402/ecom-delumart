@@ -26,6 +26,13 @@ export interface Env {
   trustedProxyHops: number;
   /** Tests and local development only (refused in production): multiplies every rate limit. */
   rateLimitMultiplier: number;
+  /**
+   * The job runner's login (database role app_jobs). Null: this server runs no jobs and
+   * POST /api/internal/jobs/run answers 503.
+   */
+  databaseUrlJobs: string | null;
+  /** The key the scheduler signs POST /api/internal/jobs/run with (HMAC-SHA-256). Null: disabled. */
+  jobsSigningKey: Buffer | null;
 }
 
 /**
@@ -37,9 +44,11 @@ const EXAMPLE_KEYS: ReadonlySet<string> = new Set([
   "0000000000000000000000000000000000000000000000000000000000000001",
   "0000000000000000000000000000000000000000000000000000000000000002",
   "0000000000000000000000000000000000000000000000000000000000000003",
+  "0000000000000000000000000000000000000000000000000000000000000004",
 ]);
 
 const KEY_NAMES = ["IDENTITY_KEY", "CARD_KEY", "PIN_PEPPER", "FIELD_KEY"] as const;
+const OPTIONAL_KEY_NAMES = ["JOBS_SIGNING_KEY"] as const;
 
 function placeholderKey(hex: string): boolean {
   const lower = hex.toLowerCase();
@@ -71,6 +80,8 @@ const schema = z.object({
   DATABASE_URL_WEB: postgresUrl,
   DATABASE_URL_PAY: postgresUrl,
   DATABASE_URL_OWNER: postgresUrl.optional(),
+  DATABASE_URL_JOBS: postgresUrl.optional(),
+  JOBS_SIGNING_KEY: hexKey.optional(),
   IDENTITY_KEY: hexKey,
   CARD_KEY: hexKey,
   PIN_PEPPER: hexKey,
@@ -106,9 +117,11 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
   } else {
     const v = parsed.data;
     const production = v.NODE_ENV === "production";
-    const keys = [v.IDENTITY_KEY, v.CARD_KEY, v.PIN_PEPPER, v.FIELD_KEY].map((k) => k.toLowerCase());
+    const keys = [v.IDENTITY_KEY, v.CARD_KEY, v.PIN_PEPPER, v.FIELD_KEY, v.JOBS_SIGNING_KEY]
+      .filter((k): k is string => k !== undefined)
+      .map((k) => k.toLowerCase());
     if (new Set(keys).size !== keys.length) {
-      problems.push("IDENTITY_KEY, CARD_KEY, PIN_PEPPER and FIELD_KEY must be distinct keys");
+      problems.push("IDENTITY_KEY, CARD_KEY, PIN_PEPPER, FIELD_KEY and JOBS_SIGNING_KEY must be distinct keys");
     }
     if (v.DATABASE_URL_OWNER) {
       const owner = loginOf(v.DATABASE_URL_OWNER);
@@ -116,6 +129,8 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
         problems.push("DATABASE_URL_WEB must not log in as the owner");
       if (loginOf(v.DATABASE_URL_PAY) === owner)
         problems.push("DATABASE_URL_PAY must not log in as the owner");
+      if (v.DATABASE_URL_JOBS && loginOf(v.DATABASE_URL_JOBS) === owner)
+        problems.push("DATABASE_URL_JOBS must not log in as the owner");
     }
     if (production && v.AUTH_PROVIDER === "dev") {
       problems.push("AUTH_PROVIDER 'dev' is refused when NODE_ENV is production");
@@ -126,6 +141,14 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     if (production) {
       for (const name of KEY_NAMES) {
         if (placeholderKey(v[name])) {
+          problems.push(
+            `${name} is a placeholder (an example value or one repeated byte); generate a random key`,
+          );
+        }
+      }
+      for (const name of OPTIONAL_KEY_NAMES) {
+        const value = v[name];
+        if (value !== undefined && placeholderKey(value)) {
           problems.push(
             `${name} is a placeholder (an example value or one repeated byte); generate a random key`,
           );
@@ -149,6 +172,8 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
         appOrigin: v.APP_ORIGIN.replace(/\/$/, ""),
         trustedProxyHops: Number(v.TRUSTED_PROXY_HOPS ?? "0"),
         rateLimitMultiplier: Number(v.RATE_LIMIT_MULTIPLIER ?? "1"),
+        databaseUrlJobs: v.DATABASE_URL_JOBS ?? null,
+        jobsSigningKey: v.JOBS_SIGNING_KEY ? Buffer.from(v.JOBS_SIGNING_KEY, "hex") : null,
       };
     }
   }
