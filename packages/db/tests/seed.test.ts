@@ -131,6 +131,12 @@ describe("seed catalog loader", () => {
       sellerName: "DeluluMart Originals",
       available: true,
       zap: true,
+      // 0038: the seller key, store, inventory mode, stock band and edition of every catalog row
+      sellerKey: "SEED",
+      storeHandle: null,
+      inventoryMode: "UNLIMITED_SEED",
+      stockBand: "UNLIMITED",
+      edition: null,
     });
     expect((await catalogProduct(pool, seedProductId("monsoon-in-a-jar")))?.pricePaise).toBe(
       100_000_000_000n,

@@ -1,4 +1,4 @@
-import { LogOut, ShoppingCart, User } from "lucide-react";
+import { LogOut, ShoppingCart, Store, User } from "lucide-react";
 import type { ComponentPropsWithRef } from "react";
 import { Icon } from "../../atoms/Icon";
 import { Skeleton } from "../../atoms/Skeleton";
@@ -21,6 +21,8 @@ export type SiteHeaderProps = Omit<ComponentPropsWithRef<"header">, "children"> 
   homeHref?: string;
   cartHref?: string;
   accountHref?: string;
+  /** When set, a "Sell" link is shown (to the creator access page). */
+  sellHref?: string;
 };
 
 const iconLink =
@@ -38,6 +40,7 @@ export function SiteHeader({
   homeHref = "/",
   cartHref = "/cart",
   accountHref = "/account",
+  sellHref,
   className,
   ...props
 }: SiteHeaderProps) {
@@ -64,6 +67,12 @@ export function SiteHeader({
               {cartCount}
             </span>
           </a>
+          {sellHref ? (
+            <a href={sellHref} className={iconLink}>
+              <Icon icon={Store} />
+              <span className="sr-only sm:not-sr-only">Sell</span>
+            </a>
+          ) : null}
           <a href={accountHref} className={iconLink}>
             <Icon icon={User} />
             <span className="sr-only sm:not-sr-only">{accountLabel}</span>

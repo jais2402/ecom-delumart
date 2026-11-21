@@ -10,6 +10,7 @@ import { parsePaiseOrNull } from "../_lib/money";
 import { nextOnboardingPath, useSession } from "../_lib/session-store";
 import { requestQuote } from "../_lib/start-checkout";
 import { AddToCartButton } from "./AddToCartButton";
+import { SaveToggle } from "./SaveToggle";
 
 interface Overlay {
   owned: string[];
@@ -149,6 +150,12 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
           available={product.available}
           owned={owned}
         />
+        <div className="flex items-center gap-2">
+          <SaveToggle productId={product.id} name={product.name} />
+          <Text as="span" size="sm" muted>
+            Save it to find it later.
+          </Text>
+        </div>
       </div>
     </div>
   );

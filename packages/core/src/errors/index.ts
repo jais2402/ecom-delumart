@@ -50,6 +50,17 @@ export const ERROR_CODES = [
   // relief grant: not claimable now (balance, already claimed today); lifetime cap reached
   "RELIEF_NOT_ELIGIBLE",
   "RELIEF_LIMIT",
+  // player listings (US-08, US-29): the action needs a registered company; the studio's private
+  // drafts or the store's published listings are at their cap; the warehouse has no room; the
+  // listing is not in a state this change applies to; the store's submissions for the UTC day are
+  // used up; publication is switched off
+  "COMPANY_FEE_REQUIRED",
+  "DRAFT_LIMIT",
+  "PUBLISH_LIMIT",
+  "CAPACITY_EXCEEDED",
+  "NOT_EDITABLE",
+  "SUBMISSION_LIMIT",
+  "PUBLICATION_PAUSED",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

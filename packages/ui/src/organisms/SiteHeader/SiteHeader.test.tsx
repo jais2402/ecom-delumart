@@ -45,4 +45,10 @@ describe("SiteHeader", () => {
     await userEvent.keyboard("{Enter}");
     expect(onSignOut).toHaveBeenCalledTimes(1);
   });
+  it("shows a Sell link only when given an address for it", () => {
+    const { rerender } = render(<SiteHeader balancePaise={null} cartCount={0} onSearch={() => {}} />);
+    expect(screen.queryByRole("link", { name: "Sell" })).not.toBeInTheDocument();
+    rerender(<SiteHeader balancePaise={null} cartCount={0} onSearch={() => {}} sellHref="/sell" />);
+    expect(screen.getByRole("link", { name: "Sell" })).toHaveAttribute("href", "/sell");
+  });
 });

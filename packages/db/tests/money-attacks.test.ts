@@ -1449,14 +1449,11 @@ describe("money attacks (security review)", () => {
           [uuidv7(), s.companyId],
         );
       expect(await claiming(buyer, s.companyId, (c) => sqlState(hugeFlat(c)))).toBe("42501");
-      const hidden = await claiming(
-        buyer,
-        s.companyId,
-        async (c) =>
-          (await c.query("UPDATE core.product SET status = 'ARCHIVED' WHERE id = $1", [crorePiece.id]))
-            .rowCount,
+      // 0035: no application role writes core.product at all (the listing commands do)
+      const hidden = await claiming(buyer, s.companyId, (c) =>
+        sqlState(c.query("UPDATE core.product SET status = 'ARCHIVED' WHERE id = $1", [crorePiece.id])),
       );
-      expect(hidden).toBe(0);
+      expect(hidden).toBe("42501");
     });
 
     it("naming a victim's company gives no read of its private coupons, drafts or seller orders", async () => {
@@ -1504,7 +1501,9 @@ describe("money attacks (security review)", () => {
       const draft = (company: string) =>
         `INSERT INTO core.product (id, company_id, seller_type, status, category, inventory_mode)
          VALUES ('${uuidv7()}', '${company}', 'USER', 'DRAFT', 'gadgets', 'STANDARD_STOCKED')`;
-      expect(await stateOf(pool, draft(s.companyId), [], web(s.owner))).toBe("no error");
+      // 0035: drafts are created only through core.draft_create, which derives the company from
+      // the session; a direct insert is refused even on one's own company
+      expect(await stateOf(pool, draft(s.companyId), [], web(s.owner))).toBe("42501");
       expect(await stateOf(pool, draft(other.companyId), [], web(s.owner))).toBe("42501");
     });
 
@@ -1834,82 +1833,63 @@ describe("money attacks (security review)", () => {
       ).toBe("23514");
     });
 
-    it("app_web (the owner) may only move DRAFT -> SCREENING and PUBLISHED -> ARCHIVED", async () => {
+    it("0035: no application role moves a product's status: only the listing commands (the owner) do", async () => {
       const owner = web(s.owner);
-      for (const to of ["PUBLISHED", "NEEDS_REVIEW", "REJECTED", "HIDDEN", "ARCHIVED"]) {
-        expect(await stateOf(pool, move(draftId, to), [], owner), `DRAFT -> ${to}`).toBe("42501");
+      for (const to of ["SCREENING", "PUBLISHED", "NEEDS_REVIEW", "REJECTED", "HIDDEN", "ARCHIVED"]) {
+        expect(await stateOf(pool, move(draftId, to), [], owner), `app_web DRAFT -> ${to}`).toBe("42501");
       }
-      expect(await stateOf(pool, move(draftId, "SCREENING"), [], owner)).toBe("no error");
       const published = await atStatus("PUBLISHED");
-      for (const to of ["HIDDEN", "DRAFT", "SCREENING", "REJECTED"]) {
-        expect(await stateOf(pool, move(published, to), [], owner), `PUBLISHED -> ${to}`).toBe("42501");
-      }
-      expect(await stateOf(pool, move(published, "ARCHIVED"), [], owner)).toBe("no error");
       const screening = await atStatus("SCREENING");
-      for (const to of ["PUBLISHED", "NEEDS_REVIEW", "REJECTED", "DRAFT"]) {
-        expect(await stateOf(pool, move(screening, to), [], owner), `SCREENING -> ${to}`).toBe("42501");
+      for (const role of ["app_web", "app_pay", "app_jobs", RAW_WRITER]) {
+        const as = { role, userId: s.owner.userId };
+        for (const to of ["HIDDEN", "ARCHIVED", "DRAFT"]) {
+          expect(await stateOf(pool, move(published, to), [], as), `${role} PUBLISHED -> ${to}`).toBe("42501");
+        }
+        for (const to of ["PUBLISHED", "NEEDS_REVIEW", "REJECTED"]) {
+          expect(await stateOf(pool, move(screening, to), [], as), `${role} SCREENING -> ${to}`).toBe("42501");
+        }
       }
-      // the screening job and moderation (app_jobs) set them
-      for (const to of ["PUBLISHED", "NEEDS_REVIEW", "REJECTED"]) {
-        expect(await stateOf(pool, move(screening, to), [], { role: "app_jobs" }), to).toBe("no error");
-      }
-      expect(await stateOf(pool, move(published, "HIDDEN"), [], { role: "app_jobs" })).toBe("no error");
     });
 
-    it("app_web creates products only as DRAFT", async () => {
+    it("0035: no application role creates products", async () => {
       const insert = (status: string) =>
         `INSERT INTO core.product (id, company_id, seller_type, status, category, inventory_mode)
          VALUES ('${uuidv7()}', '${s.companyId}', 'USER', '${status}', 'gadgets', 'STANDARD_STOCKED')`;
-      expect(await stateOf(pool, insert("DRAFT"), [], web(s.owner))).toBe("no error");
-      for (const status of ["PUBLISHED", "SCREENING", "HIDDEN"]) {
-        expect(await stateOf(pool, insert(status), [], web(s.owner)), status).toBe("42501");
+      for (const role of ["app_web", "app_pay", "app_jobs"]) {
+        for (const status of ["DRAFT", "PUBLISHED", "SCREENING", "HIDDEN"]) {
+          expect(await stateOf(pool, insert(status), [], { role, userId: s.owner.userId }), `${role} ${status}`).toBe(
+            "42501",
+          );
+        }
       }
     });
 
-    it("current_version_id changes only with a status move the role may make, and only to a version of the product", async () => {
-      const owner = web(s.owner);
+    it("current_version_id is set only by the listing commands, and only to a version of the product", async () => {
+      for (const role of ["app_web", "app_jobs", RAW_WRITER]) {
+        const as = { role, userId: s.owner.userId };
+        expect(
+          await stateOf(pool, "UPDATE core.product SET current_version_id = $2 WHERE id = $1", [draftId, draftV2], as),
+          role,
+        ).toBe("42501");
+        expect(
+          await stateOf(
+            pool,
+            "UPDATE core.product SET status = 'SCREENING', current_version_id = $2 WHERE id = $1",
+            [draftId, draftV2],
+            as,
+          ),
+          role,
+        ).toBe("42501");
+      }
+      // even the owner may point it only at one of the product's own versions
       expect(
-        await stateOf(
-          pool,
-          "UPDATE core.product SET current_version_id = $2 WHERE id = $1",
-          [draftId, draftV2],
-          owner,
-        ),
-      ).toBe("42501");
-      expect(
-        await stateOf(
-          pool,
-          "UPDATE core.product SET status = 'SCREENING', current_version_id = $2 WHERE id = $1",
-          [draftId, draftV2],
-          owner,
-        ),
+        await stateOf(pool, "UPDATE core.product SET current_version_id = $2 WHERE id = $1", [draftId, draftV2]),
       ).toBe("no error");
       expect(
-        await stateOf(
-          pool,
-          "UPDATE core.product SET status = 'SCREENING', current_version_id = $2 WHERE id = $1",
-          [draftId, crorePiece.versionId],
-          owner,
-        ),
-      ).toBe("23514");
-      // the screening job may switch the version, but only to one of the product's own
-      expect(
-        await stateOf(
-          pool,
-          "UPDATE core.product SET current_version_id = $2 WHERE id = $1",
-          [draftId, draftV2],
-          {
-            role: "app_jobs",
-          },
-        ),
-      ).toBe("no error");
-      expect(
-        await stateOf(
-          pool,
-          "UPDATE core.product SET current_version_id = $2 WHERE id = $1",
-          [draftId, crorePiece.versionId],
-          { role: "app_jobs" },
-        ),
+        await stateOf(pool, "UPDATE core.product SET current_version_id = $2 WHERE id = $1", [
+          draftId,
+          crorePiece.versionId,
+        ]),
       ).toBe("23514");
     });
   });
@@ -3095,6 +3075,12 @@ describe("money attacks (security review)", () => {
       // actor's own cart of 0028 (no money, stock or price authority)
       expect(fns.rows.map((r) => r.f)).toEqual([
         "core.actor_id()",
+        // 0037: Super Admin moderation (each refuses anyone but the Super Admin; no money moves)
+        "core.admin_listing_decide(uuid,uuid,text,text)",
+        "core.admin_listing_hide(uuid,text)",
+        "core.admin_listing_restore(uuid,text)",
+        "core.admin_moderation_queue(uuid,integer)",
+        "core.admin_set_switch(text,boolean,text)",
         "core.cart_add(uuid)",
         "core.cart_clear()",
         "core.cart_merge(uuid[])",
@@ -3104,6 +3090,10 @@ describe("money attacks (security review)", () => {
         "core.create_coupon(uuid,text,bigint,bigint,timestamp with time zone,timestamp with time zone,integer,boolean,text)",
         // 0032: the actor's own creator access, passport and saves (no money moves)
         "core.creator_access()",
+        // 0036: the owner's studio and stock commands (the database derives the company; no money moves)
+        "core.draft_create(text,text,text,text,integer,text,bigint,text,integer,boolean,boolean)",
+        "core.draft_delete(uuid)",
+        "core.draft_update(uuid,text,text,text,text,integer,text,bigint,text,integer,boolean,boolean)",
         "core.is_published_version(uuid)",
         "core.my_cart()",
         "core.my_collection()",
@@ -3111,6 +3101,8 @@ describe("money attacks (security review)", () => {
         "core.my_company()",
         "core.my_order(uuid)",
         "core.my_orders(uuid,integer)",
+        "core.my_product(uuid)",
+        "core.my_products(text,uuid,integer)",
         "core.my_saves(uuid,integer)",
         "core.my_statement(bigint,integer)",
         "core.my_wallet()",
@@ -3119,6 +3111,16 @@ describe("money attacks (security review)", () => {
         "core.passport_progress()",
         "core.passport_record_quiz(boolean,text)",
         "core.passport_submit_concept(text,text)",
+        "core.product_allocate_and_publish(uuid,integer)",
+        "core.product_archive(uuid)",
+        "core.product_restock(uuid,integer)",
+        "core.product_retire_units(uuid,integer)",
+        "core.product_revise(uuid,text,text,text,text,integer)",
+        "core.product_set_price(uuid,bigint)",
+        "core.product_set_shipping(uuid,boolean,boolean)",
+        "core.product_submit(uuid)",
+        // 0038: a public "unavailable" answer for a hidden or archived product page
+        "core.product_unavailable(uuid)",
         // fifth review (0031): the database rate counter, hit by the server before a call
         "core.rate_hit(text,bytea,integer,integer)",
         // 0033: the actor's own relief status
@@ -3127,9 +3129,11 @@ describe("money attacks (security review)", () => {
         "core.save_product(uuid)",
         "core.set_coupon_status(uuid,text)",
         "core.store_by_handle(text)",
+        "core.store_products(text,uuid,integer)",
         "core.unsave_product(uuid)",
         "core.update_profile(text,jsonb,boolean)",
         "core.update_store(text,text)",
+        "core.warehouse_set_zap_hub(uuid,boolean)",
       ]);
     });
 
@@ -3176,8 +3180,13 @@ describe("money attacks (security review)", () => {
       expect(by("app_jobs")).toEqual([
         "core.identity_is_tombstoned(bytea,bytea)",
         "core.is_published_version(uuid)",
+        // 0037: the moderation safety net (pauses publication; writes a SYSTEM audit row)
+        "core.moderation_safety_net()",
         "core.purge_idempotency_records()",
         "core.rate_purge(interval)", // fifth review (0031): expired rate counter windows
+        // 0036: the screening job reads the queue and applies its verdicts
+        "core.screening_apply(uuid,uuid,text,jsonb)",
+        "core.screening_pending(integer)",
         "ops.terminate_stuck_money_sessions(interval)",
       ]);
       expect(by("npc_worker")).toEqual(["core.is_published_version(uuid)"]);

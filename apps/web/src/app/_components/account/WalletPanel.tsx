@@ -16,6 +16,7 @@ import { formatWhen } from "../../_lib/orders";
 import { useApiGet } from "../../_lib/use-api";
 import { ErrorBlock, LoadingBlock } from "../LoadState";
 import { PageHeading } from "../PageHeading";
+import { ReliefSection } from "./ReliefSection";
 
 interface Page {
   items: StatementItem[];
@@ -97,6 +98,14 @@ export function WalletPanel() {
           </Text>
         </section>
       ) : null}
+
+      <ReliefSection
+        variant="wallet"
+        onClaimed={() => {
+          wallet.reload();
+          setTick((n) => n + 1);
+        }}
+      />
 
       <section aria-labelledby="statement" className="flex flex-col gap-3">
         <Heading level={2} size="md" id="statement">

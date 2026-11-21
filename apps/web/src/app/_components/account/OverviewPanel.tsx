@@ -8,6 +8,8 @@ import { useApiGet } from "../../_lib/use-api";
 import { ErrorBlock, LoadingBlock } from "../LoadState";
 import { PageHeading } from "../PageHeading";
 import { OrderRow } from "./OrderRow";
+import { ReliefSection } from "./ReliefSection";
+import { SellingSummary } from "./SellingSummary";
 
 export function OverviewPanel() {
   const wallet = useApiGet<WalletResponse>("/api/v1/wallet");
@@ -56,6 +58,10 @@ export function OverviewPanel() {
           </div>
         </section>
       ) : null}
+
+      <ReliefSection variant="overview" onClaimed={wallet.reload} />
+
+      <SellingSummary />
 
       <section aria-labelledby="recent-orders" className="flex flex-col gap-3">
         <Heading level={2} size="md" id="recent-orders">

@@ -19,6 +19,7 @@ export function SessionHeader({ searchDefaultValue }: { searchDefaultValue?: str
     <SiteHeader
       balancePaise={signedIn ? session.balancePaise : null}
       balanceLoading={session.status === "loading"}
+      sellHref="/sell"
       accountHref={signedIn ? "/account" : "/sign-in"}
       accountLabel={signedIn ? "Account" : "Sign in"}
       cartCount={cart.count}
