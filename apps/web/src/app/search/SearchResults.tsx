@@ -1,31 +1,24 @@
 "use client";
 
 import { Heading, ProductGrid, SearchBar } from "@delulu/ui";
-import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
-import type { SeedProduct } from "../../data/seed-catalog";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useMemo } from "react";
+import type { ProductResponse } from "../_lib/api";
 import { toGridItem } from "../_lib/catalog";
 
-export function SearchResults({
-  initialQuery,
-  products,
-}: {
-  initialQuery: string;
-  products: readonly SeedProduct[];
-}) {
+export function SearchResults({ products }: { products: readonly ProductResponse[] }) {
   const router = useRouter();
-  const [query, setQuery] = useState(initialQuery);
+  const query = useSearchParams().get("q") ?? "";
 
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
     return products
-      .filter((product) => `${product.name} ${product.hook}`.toLowerCase().includes(needle))
+      .filter((product) => `${product.name} ${product.hook ?? ""}`.toLowerCase().includes(needle))
       .map(toGridItem);
   }, [products, query]);
 
   function search(next: string) {
-    setQuery(next);
     router.replace(next ? `/search?q=${encodeURIComponent(next)}` : "/search");
   }
 
@@ -36,7 +29,8 @@ export function SearchResults({
       </Heading>
       <SearchBar
         label="Search products"
-        defaultValue={initialQuery}
+        key={query}
+        defaultValue={query}
         onSearch={search}
         className="max-w-reading"
       />

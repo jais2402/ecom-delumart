@@ -1,20 +1,21 @@
 import type { Metadata } from "next";
-import { SEED_PRODUCTS } from "../../data/seed-catalog";
+import { Suspense } from "react";
 import { ShopShell } from "../_components/ShopShell";
+import { loadCatalog } from "../_lib/catalog-server";
 import { SearchResults } from "./SearchResults";
 
 export const metadata: Metadata = { title: "Search" };
 
-export default async function SearchPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ q?: string | string[] }>;
-}) {
-  const { q } = await searchParams;
-  const query = (Array.isArray(q) ? q[0] : q) ?? "";
+/** Static and cacheable: the query is read in the browser, so the HTML is the same for everyone. */
+export const revalidate = 60;
+
+export default async function SearchPage() {
+  const products = await loadCatalog();
   return (
-    <ShopShell searchDefaultValue={query}>
-      <SearchResults key={query} initialQuery={query} products={SEED_PRODUCTS} />
+    <ShopShell>
+      <Suspense fallback={null}>
+        <SearchResults products={products} />
+      </Suspense>
     </ShopShell>
   );
 }

@@ -1,30 +1,40 @@
 import { FictionLabel, Heading, ProductGrid, Text } from "@delulu/ui";
 import type { Metadata } from "next";
-import { CATEGORIES, SEED_PRODUCTS, type SeedProduct } from "../data/seed-catalog";
+import { CATEGORIES } from "../data/seed-catalog";
 import { ShopShell } from "./_components/ShopShell";
+import type { ProductResponse } from "./_lib/api";
 import { toGridItem } from "./_lib/catalog";
+import { loadCatalog } from "./_lib/catalog-server";
+import { parsePaise } from "./_lib/money";
 
 export const metadata: Metadata = { title: "Buy things that don't exist" };
+
+/** Public page, rebuilt at most once a minute; it never contains anything about a signed-in person. */
+export const revalidate = 60;
+
+const byPrice = (a: ProductResponse, b: ProductResponse) => {
+  const x = parsePaise(a.pricePaise);
+  const y = parsePaise(b.pricePaise);
+  return x < y ? -1 : x > y ? 1 : 0;
+};
 
 /**
  * Two products per category: one from the lower quarter and one from the upper
  * quarter of that category's prices, so the grid shows a spread rather than the
  * cheapest items. Shown cheapest first.
  */
-function featuredAcrossPrices() {
+function featuredAcrossPrices(products: readonly ProductResponse[]) {
   return CATEGORIES.flatMap((category) => {
-    const sorted = SEED_PRODUCTS.filter((product) => product.category === category.slug).sort(
-      (a, b) => a.priceRupees - b.priceRupees,
-    );
+    const sorted = products.filter((product) => product.category === category.slug).sort(byPrice);
     const picks = [sorted[Math.floor(sorted.length * 0.25)], sorted[Math.floor(sorted.length * 0.8)]];
-    return picks.filter((product): product is SeedProduct => product !== undefined);
+    return picks.filter((product): product is ProductResponse => product !== undefined);
   })
-    .sort((a, b) => a.priceRupees - b.priceRupees)
+    .sort(byPrice)
     .map(toGridItem);
 }
 
-export default function HomePage() {
-  const featured = featuredAcrossPrices();
+export default async function HomePage() {
+  const featured = featuredAcrossPrices(await loadCatalog());
 
   return (
     <ShopShell>

@@ -33,6 +33,6 @@ export function toGridItem(product: ProductResponse): ProductGridItem {
     pricePaise: parsePaise(product.pricePaise),
     storeName: storeNameOf(product),
     zapEligible: product.zap,
-    stock: product.available ? "in-stock" : "out-of-stock",
+    stock: product.available ? { state: "in-stock" } : { state: "sold-out" },
   };
 }

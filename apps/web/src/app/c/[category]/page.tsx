@@ -3,14 +3,11 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { CATEGORIES } from "../../../data/seed-catalog";
 import { ShopShell } from "../../_components/ShopShell";
-import { productsIn, toGridItem } from "../../_lib/catalog";
+import { toGridItem } from "../../_lib/catalog";
+import { loadCatalog } from "../../_lib/catalog-server";
 import { CategoryBrowser } from "./CategoryBrowser";
 
-export const dynamicParams = false;
-
-export function generateStaticParams() {
-  return CATEGORIES.map((category) => ({ category: category.slug }));
-}
+export const revalidate = 60;
 
 export async function generateMetadata({
   params,
@@ -26,7 +23,7 @@ export default async function CategoryPage({ params }: { params: Promise<{ categ
   const { category } = await params;
   const found = CATEGORIES.find((entry) => entry.slug === category);
   if (!found) notFound();
-  const items = productsIn(found.slug).map(toGridItem);
+  const items = (await loadCatalog(found.slug)).map(toGridItem);
 
   return (
     <ShopShell>

@@ -1,36 +1,27 @@
-import { rupees } from "@delulu/core";
-import {
-  Breadcrumbs,
-  Button,
-  DeliveryOption,
-  FictionLabel,
-  Heading,
-  PriceBlock,
-  ProductArt,
-  StockBadge,
-  Text,
-} from "@delulu/ui";
+import { Breadcrumbs, FictionLabel, Heading, PriceBlock, ProductArt, Text } from "@delulu/ui";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { SEED_PRODUCTS } from "../../../data/seed-catalog";
+import { BuyPanel } from "../../_components/BuyPanel";
 import { ShopShell } from "../../_components/ShopShell";
 import { categoryName, storeNameOf } from "../../_lib/catalog";
+import { loadProduct } from "../../_lib/catalog-server";
+import { parsePaise } from "../../_lib/money";
 
-export const dynamicParams = false;
-
-export function generateStaticParams() {
-  return SEED_PRODUCTS.map((product) => ({ id: product.id }));
-}
+/** Public and cacheable. Ownership and balance are added in the browser by BuyPanel. */
+export const revalidate = 60;
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const product = SEED_PRODUCTS.find((entry) => entry.id === id);
-  return { title: product ? product.name : "Product", ...(product ? { description: product.hook } : {}) };
+  const product = await loadProduct(id);
+  return {
+    title: product ? product.name : "Product",
+    ...(product?.hook ? { description: product.hook } : {}),
+  };
 }
 
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const product = SEED_PRODUCTS.find((entry) => entry.id === id);
+  const product = await loadProduct(id);
   if (!product) notFound();
 
   return (
@@ -44,7 +35,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
       />
       <div className="mt-4 grid items-start gap-6 md:grid-cols-2">
         <ProductArt
-          hue={product.templateHue}
+          hue={product.templateId}
           seed={product.name}
           alt={product.altText}
           className="rounded-lg"
@@ -53,55 +44,16 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           <Heading level={1} size="lg">
             {product.name}
           </Heading>
-          <Text size="lg">{product.hook}</Text>
+          {product.hook ? <Text size="lg">{product.hook}</Text> : null}
           <Text muted>{product.description}</Text>
-          <div className="flex flex-wrap items-center gap-2">
-            <StockBadge state="in-stock" />
-            <Text as="span" size="sm" muted>
-              Sold by {storeNameOf(product)}
-            </Text>
-          </div>
+          <Text as="span" size="sm" muted>
+            Sold by {storeNameOf(product)}
+          </Text>
           <div className="flex flex-col gap-1">
-            <PriceBlock amountPaise={rupees(product.priceRupees)} display="exact" />
+            <PriceBlock amountPaise={parsePaise(product.pricePaise)} display="exact" />
             <FictionLabel>Fictional money</FictionLabel>
           </div>
-
-          <fieldset className="flex flex-col gap-2">
-            <legend className="mb-1 font-display text-xl font-bold text-fg">Delivery options</legend>
-            <DeliveryOption
-              name="delivery"
-              value="standard"
-              defaultChecked
-              speedName="Standard"
-              arrival="Arrives in 24 hours"
-              feePaise={rupees(1000)}
-            />
-            <DeliveryOption
-              name="delivery"
-              value="express"
-              speedName="Express"
-              arrival="Arrives in 2 hours"
-              feePaise={rupees(10_000)}
-            />
-            {product.zapEligible ? (
-              <DeliveryOption
-                name="delivery"
-                value="zap"
-                speedName="Zap"
-                arrival="Arrives in 10 minutes"
-                feePaise={rupees(50_000)}
-              />
-            ) : null}
-          </fieldset>
-
-          <div className="flex flex-col gap-2">
-            <Button disabled aria-describedby="add-to-cart-hint" size="lg">
-              Add to cart
-            </Button>
-            <Text as="span" size="sm" muted id="add-to-cart-hint">
-              Shopping opens when sign-in is connected
-            </Text>
-          </div>
+          <BuyPanel product={product} />
         </div>
       </div>
     </ShopShell>
