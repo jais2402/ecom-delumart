@@ -10,6 +10,8 @@ export const SERVER_CONFIG = {
     webMax: 5,
     /** app_pay pool: money commands. */
     payMax: 5,
+    /** app_jobs pool: the job runner. */
+    jobsMax: 2,
     /** Owner pool of the dev sign-in provider only. */
     ownerMax: 2,
     idleTimeoutMs: 10_000,
@@ -55,6 +57,10 @@ export const SERVER_CONFIG = {
     reliefActor: { scope: "relief.claim.actor", by: "actor", limit: 10, windowSeconds: 60 },
     /** Company quotes, registrations and store edits per account. */
     companyActor: { scope: "company.write.actor", by: "actor", limit: 10, windowSeconds: 60 },
+    /** Studio writes (drafts, submissions, prices, stock, shipping, Zap hub) per account. */
+    studioActor: { scope: "studio.write.actor", by: "actor", limit: 30, windowSeconds: 60 },
+    /** Super Admin moderation calls per account. */
+    adminActor: { scope: "admin.write.actor", by: "actor", limit: 60, windowSeconds: 60 },
   },
   phone: {
     /** The only code the dev provider accepts (there is no SMS in development). */
@@ -84,6 +90,17 @@ export const SERVER_CONFIG = {
     pageSizeMax: 50,
     maxCartLines: 20,
     maxOverlayProducts: 100,
+  },
+  jobs: {
+    /** A signed jobs request is accepted for this long after its timestamp (and as far ahead). */
+    signatureMaxAgeSeconds: 60,
+    /** Default and largest time one run may spend (LLD §9: 45 s). */
+    defaultBudgetMs: 45_000,
+    maxBudgetMs: 45_000,
+    /** Screenings read per batch. */
+    screeningBatch: 20,
+    /** The development-only inline run after a submission. */
+    inlineBudgetMs: 5_000,
   },
   fieldEncryption: {
     /** Key id written in front of every ciphertext (LLD §5.6); FIELD_KEY is key 1. */

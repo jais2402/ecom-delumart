@@ -78,6 +78,13 @@ const STATUS: Record<ErrorCode, number> = {
   HANDLE_RESERVED: 409,
   RELIEF_NOT_ELIGIBLE: 409,
   RELIEF_LIMIT: 409,
+  COMPANY_FEE_REQUIRED: 403,
+  DRAFT_LIMIT: 409,
+  PUBLISH_LIMIT: 409,
+  CAPACITY_EXCEEDED: 409,
+  NOT_EDITABLE: 409,
+  SUBMISSION_LIMIT: 429,
+  PUBLICATION_PAUSED: 503,
   RATE_LIMITED: 429,
   BUSY: 503,
   MAINTENANCE: 503,
@@ -91,6 +98,7 @@ const RETRYABLE: ReadonlySet<ApiErrorCode> = new Set([
   "RATE_LIMITED",
   "PAYMENT_PENDING",
   "MAINTENANCE",
+  "PUBLICATION_PAUSED",
 ]);
 
 /** Detail keys that may reach the client; anything else a DomainError carries is dropped. */
