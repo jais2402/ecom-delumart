@@ -457,7 +457,7 @@ try {
   await step("S's listing shows 4 available and 1 sold", async () => {
     await seller.goto(`/studio/${first.id}`);
     await seller.getByText(/4 available · 1 sold/).waitFor();
-    await seller.goto("/studio");
+    await seller.goto("/studio/products");
     await seller.getByRole("heading", { level: 1, name: "Your products" }).waitFor();
     const row = seller.getByRole("row", { name: new RegExp(NAME1) });
     await row.getByText("4 / 1").waitFor();

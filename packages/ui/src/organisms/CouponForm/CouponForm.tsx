@@ -171,6 +171,8 @@ export function CouponForm({
             <Input
               {...c}
               type="datetime-local"
+              // The browser moves focus to the inner date fields, so the outer input needs its own ring.
+              className="focus:outline-2 focus:outline-solid focus:outline-focus focus:outline-offset-2 focus-within:outline-2 focus-within:outline-solid focus-within:outline-focus focus-within:outline-offset-2"
               value={f.startsAt}
               onChange={(e) => set("startsAt", e.target.value)}
             />
@@ -181,6 +183,8 @@ export function CouponForm({
             <Input
               {...c}
               type="datetime-local"
+              // The browser moves focus to the inner date fields, so the outer input needs its own ring.
+              className="focus:outline-2 focus:outline-solid focus:outline-focus focus:outline-offset-2 focus-within:outline-2 focus-within:outline-solid focus-within:outline-focus focus-within:outline-offset-2"
               value={f.endsAt}
               onChange={(e) => set("endsAt", e.target.value)}
             />

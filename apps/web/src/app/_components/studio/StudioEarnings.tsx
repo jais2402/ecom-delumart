@@ -154,7 +154,7 @@ function Body({ e }: { e: Earnings }) {
 
       <Alert tone="info" title="Net earnings are not your bank balance">
         This page adds up what your orders earned. Your balance also moves for other reasons. See the{" "}
-        <a href="/account/wallet" className="text-action underline">
+        <a href="/account/wallet" className="inline-flex min-h-touch items-center text-action underline">
           wallet statement
         </a>{" "}
         for every movement.

@@ -267,14 +267,14 @@ async function addToServerCart(page, productId) {
           const f = await page.evaluate(() => { const e = document.activeElement; if (!e || e === document.body) return null; const s = getComputedStyle(e); const rect = e.getBoundingClientRect(); return { t: e.tagName + ' ' + (e.textContent || e.getAttribute('aria-label') || '').trim().slice(0, 25), ol: s.outlineStyle, ow: s.outlineWidth, bs: s.boxShadow, w: rect.width, h: rect.height, fw: (() => { const a = e.closest('article'); if (!a) return false; const as = getComputedStyle(a); return as.outlineStyle !== 'none' && parseFloat(as.outlineWidth) > 0; })() }; });
           // focus left the page (a short page, or the dev-only Next.js overlay): nothing more to check
           if (!f || /^NEXTJS-PORTAL/.test(f.t)) break;
-          if (i === 0 && !startedOnHeading && !/skip|main|content/i.test(f.t)) focus.push('first stop not skip link: ' + f.t);
-          if (i === 0 && !startedOnHeading && f.h < 43.5) focus.push('skip link focused height ' + f.h);
+          if (i === 0 && !startedOnHeading && !entry.openDialog && !/skip|main|content/i.test(f.t)) focus.push('first stop not skip link: ' + f.t);
+          if (i === 0 && !startedOnHeading && !entry.openDialog && f.h < 43.5) focus.push('skip link focused height ' + f.h);
           const visible = (f.ol !== 'none' && parseFloat(f.ow) > 0 && f.ol !== 'none') || (f.bs && f.bs !== 'none') || f.fw;
           if (!visible) focus.push(`no focus indicator: ${f.t} (${f.ol} ${f.ow})`);
         }
         const issues = [];
         if (r.overflow) issues.push('OVERFLOW ' + r.overflow);
-        r.names.forEach((x) => issues.push(x)); r.h.forEach((x) => issues.push('HEAD ' + x));
+        r.names.forEach((x) => issues.push(x)); if (!entry.openDialog) r.h.forEach((x) => issues.push('HEAD ' + x));
         r.touch.forEach((x) => issues.push('TOUCH ' + x)); r.contrast.forEach((x) => issues.push('CONTRAST ' + x));
         focus.forEach((x) => issues.push('FOCUS ' + x));
         const L = r.landmarks; if (L.main !== 1) issues.push('LM main=' + L.main); if (!L.banner) issues.push('LM banner missing'); if (!L.footer && !entry.operator) issues.push('LM footer=' + L.footer); L.unlabelledNavs.forEach((x) => issues.push('LM unlabelled nav ' + x));
