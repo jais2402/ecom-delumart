@@ -9,8 +9,10 @@ const securityHeaders = [
 ];
 
 const config: NextConfig = {
-  transpilePackages: ["@delulu/ui", "@delulu/core"],
+  transpilePackages: ["@delulu/ui", "@delulu/core", "@delulu/db"],
   poweredByHeader: false,
+  // next dev would otherwise write apps/web/AGENTS.md on every start
+  agentRules: false,
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

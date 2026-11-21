@@ -33,6 +33,9 @@ export const ERROR_CODES = [
   "CARD_NOT_OWNED",
   "MERCHANT_NOT_ALLOWED",
   "MAINTENANCE",
+  // API access (LLD §8.3): no live sign-in session; a phone code that did not verify
+  "AUTH_REQUIRED",
+  "PHONE_CODE_FAILED",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
