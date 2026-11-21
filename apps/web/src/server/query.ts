@@ -13,6 +13,15 @@ export const limitParam = z
 /** `?cursor=<uuid>&limit=` */
 export const uuidPageQuery = z.object({ cursor: z.uuid().optional(), limit: limitParam });
 
+/** `?cursor=<order reference>&limit=` for the seller's orders (0055: an opaque reference, never an id). */
+export const orderRefPageQuery = z.object({
+  cursor: z
+    .string()
+    .regex(/^SO-[A-Z2-9]{16}$/)
+    .optional(),
+  limit: limitParam,
+});
+
 /** `?cursor=<posting id>&limit=` for the statement (posting ids are bigint). */
 export const bigintPageQuery = z.object({
   cursor: z

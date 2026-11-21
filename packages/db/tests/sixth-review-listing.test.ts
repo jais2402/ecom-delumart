@@ -185,7 +185,15 @@ describe("sixth security review: listing submissions", () => {
     it("admin_status: the switch, overdue counts, open report cases and appeals, for the Super Admin only", async () => {
       const s = await adminStatus(pool, as(admin));
       expect(Object.keys(s).sort()).toEqual(
-        ["moderationOverdue", "needsReview", "openAppeals", "openReportCases", "publication"].sort(),
+        // seventh review (0057): screeningStalled reported separately
+        [
+          "moderationOverdue",
+          "needsReview",
+          "openAppeals",
+          "openReportCases",
+          "publication",
+          "screeningStalled",
+        ].sort(),
       );
       expect(s.publication.enabled).toBe(true);
       expect(s.moderationOverdue.thresholdHours).toBe(48);

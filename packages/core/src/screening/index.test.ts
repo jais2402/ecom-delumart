@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { HANDLE_AGREEMENT_CASES } from "./handle-cases";
 import {
   foldHandle,
+  GENERIC_HANDLE_WORDS,
   isLookalikeHandle,
   normaliseForScreening,
+  PROTECTED_HANDLE_WORDS,
   RESERVED_HANDLES,
   type ScreenCode,
   type ScreenVerdict,
@@ -225,36 +227,94 @@ describe("look-alike store handles (sixth security review, minor 6)", () => {
     },
   );
 
-  it("folds 0→o, 1/i/l→l, 3→e, 4→a, 5→s, 7→t, 8→b and drops hyphens", () => {
+  it("folds 0→o, 1/i/l→l, 3→e, 4→a, 5→s, 7→t, 8→b, drops hyphens, reads rn as m and collapses repeated letters", () => {
     expect(foldHandle("de1ulumart")).toBe(foldHandle("delulumart"));
     expect(foldHandle("deluiumart")).toBe(foldHandle("delulumart"));
-    expect(foldHandle("0-1-i-l-3-4-5-7-8")).toBe("ollleastb");
+    // seventh review (minor 4): rn→m and repeated letters (the run 'llll' is one 'l')
+    expect(foldHandle("0-1-i-l-3-4-5-7-8")).toBe("oleastb");
+    expect(foldHandle("delulurnart")).toBe(foldHandle("delulumart"));
+    expect(foldHandle("dellulumart")).toBe(foldHandle("delulumart"));
+    expect(foldHandle("adrnin")).toBe(foldHandle("admin"));
   });
 
-  it("property: every reserved handle, any of its confusable spellings, and any handle with it as a token, is refused", () => {
-    const reverse: Record<string, string[]> = {
-      o: ["0"],
-      l: ["1", "i"],
-      i: ["1", "l"],
-      e: ["3"],
-      a: ["4"],
-      s: ["5"],
-      t: ["7"],
-      b: ["8"],
-    };
-    const spelling = fc
-      .constantFrom(...RESERVED_HANDLES)
+  it("the protected and generic word lists cover the reserved list; protected words are the brand and authority words", () => {
+    const all = new Set([...PROTECTED_HANDLE_WORDS, ...GENERIC_HANDLE_WORDS]);
+    for (const h of RESERVED_HANDLES) expect(all.has(h), h).toBe(true);
+    for (const w of [
+      "delulu",
+      "delulumart",
+      "admin",
+      "administrator",
+      "official",
+      "support",
+      "staff",
+      "moderator",
+      "security",
+      "verified",
+      "system",
+      "superadmin",
+    ])
+      expect(PROTECTED_HANDLE_WORDS, w).toContain(w);
+    for (const w of ["shop", "store", "pay", "api", "root", "help", "www"])
+      expect(GENERIC_HANDLE_WORDS, w).toContain(w);
+  });
+
+  const reverse: Record<string, string[]> = {
+    o: ["0", "oo"],
+    l: ["1", "i", "ll"],
+    i: ["1", "l"],
+    e: ["3", "ee"],
+    a: ["4"],
+    s: ["5", "ss"],
+    t: ["7"],
+    b: ["8"],
+    m: ["rn"],
+  };
+  const spell = (words: readonly string[]) =>
+    fc
+      .constantFrom(...words)
       .chain((h) =>
         fc
           .tuple(...[...h].map((ch) => fc.constantFrom(ch, ...(reverse[ch] ?? []))))
           .map((chars) => chars.join("")),
       );
-    const token = fc.stringMatching(/^[a-z0-9]{1,6}$/);
+
+  it("property: a protected word in any confusable spelling is refused anywhere in a handle, digits and hyphens included", () => {
+    const filler = fc.stringMatching(/^[a-z0-9]{0,5}$/);
     fc.assert(
-      fc.property(spelling, token, fc.boolean(), (bad, other, before) => {
-        expect(isLookalikeHandle(bad)).toBe(true);
-        const joined = before ? `${other}-${bad}` : `${bad}-${other}`;
-        if (joined.length <= 24) expect(validateHandle(joined)).toEqual({ ok: false, code: "RESERVED" });
+      fc.property(
+        spell(PROTECTED_HANDLE_WORDS),
+        filler,
+        filler,
+        fc.boolean(),
+        fc.boolean(),
+        (bad, pre, post, h1, h2) => {
+          const handle = `${pre}${pre && h1 ? "-" : ""}${bad}${post && h2 ? "-" : ""}${post}`;
+          expect(isLookalikeHandle(handle), handle).toBe(true);
+          if (handle.length <= 24)
+            expect(validateHandle(handle), handle).toEqual({ ok: false, code: "RESERVED" });
+        },
+      ),
+    );
+  });
+
+  it("property: a generic word in any confusable spelling is refused as the whole handle, with or without leading and trailing digits", () => {
+    const digits = fc.stringMatching(/^[0-9]{0,3}$/);
+    fc.assert(
+      fc.property(spell(GENERIC_HANDLE_WORDS), digits, digits, (bad, pre, post) => {
+        const handle = `${pre}${bad}${post}`;
+        expect(isLookalikeHandle(handle), handle).toBe(true);
+      }),
+    );
+  });
+
+  it("property: a generic word next to an ordinary word is accepted", () => {
+    // letters that spell no protected or generic word, in any fold
+    const word = fc.stringMatching(/^[bcdfghjkqvwxz]{3,8}$/);
+    fc.assert(
+      fc.property(fc.constantFrom(...GENERIC_HANDLE_WORDS), word, fc.boolean(), (generic, other, before) => {
+        const handle = before ? `${other}-${generic}` : `${generic}-${other}`;
+        if (handle.length <= 24) expect(validateHandle(handle), handle).toEqual({ ok: true, value: handle });
       }),
     );
   });

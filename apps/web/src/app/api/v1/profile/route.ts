@@ -1,3 +1,4 @@
+import { DomainError, type ScreenReason, screenText } from "@delulu/core";
 import { updateProfile } from "@delulu/db/runtime";
 import { z } from "zod";
 import { webPool } from "@/server/db";
@@ -23,8 +24,20 @@ const body = z.strictObject({
  * privacy switches and research opt-out through core.update_profile, which validates every field
  * (a taken or reserved handle is CONFLICT). Only the fields given change, so an empty body returns
  * the current profile. The response names exactly these fields and nothing else.
+ *
+ * A handle is public text (seventh review, 5a): it is screened here with screenText and refused
+ * (VALIDATION_FAILED with reasons) unless OK; the database refuses reserved and look-alike handles
+ * (CONFLICT) and keeps the strict charset.
  */
 export const POST = route({ auth: "session", body }, async ({ body: b, session }) => {
+  if (b.handle !== undefined) {
+    const screened = screenText({ handle: b.handle });
+    if (screened.verdict !== "OK") {
+      throw new DomainError("VALIDATION_FAILED", "Some fields need changes.", {
+        reasons: screened.reasons.map((r: ScreenReason) => ({ field: r.field, code: r.code })),
+      });
+    }
+  }
   const profile = await updateProfile(webPool(), {
     authSessionId: session.id,
     ...(b.handle === undefined ? {} : { handle: b.handle }),

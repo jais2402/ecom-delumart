@@ -173,6 +173,7 @@ export {
   type Earnings,
   type EarningsTotals,
   type Inventory,
+  isOrderRef,
   type MerchantCoupon,
   type MerchantOrder,
   type MyCoupons,

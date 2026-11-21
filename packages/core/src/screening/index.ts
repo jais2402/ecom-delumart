@@ -17,14 +17,15 @@
 import {
   BLOCKED_TERMS,
   BRAND_TERMS,
+  GENERIC_HANDLE_WORDS,
   OFFICIAL_TERMS,
   PAYMENT_TERMS,
-  RESERVED_HANDLES,
+  PROTECTED_HANDLE_WORDS,
   type Term,
   WATCH_TERMS,
 } from "./terms";
 
-export { RESERVED_HANDLES } from "./terms";
+export { GENERIC_HANDLE_WORDS, PROTECTED_HANDLE_WORDS, RESERVED_HANDLES } from "./terms";
 
 export type ScreenVerdict = "OK" | "NEEDS_REVIEW" | "REJECT";
 export type ScreenCode =
@@ -323,34 +324,63 @@ const HANDLE_FOLD: Readonly<Record<string, string>> = {
   "8": "b",
 };
 
-/**
- * The confusable-folded form of a handle (or of one of its tokens): 0→o, 1/i/l→l, 3→e, 4→a, 5→s,
- * 7→t, 8→b, hyphens removed. Mirrored by core.store_handle_fold in the database (0049).
- */
-export function foldHandle(handle: string): string {
+function foldWith(handle: string, rnAsM: boolean): string {
+  let s = handle.toLowerCase().replaceAll("-", "");
+  if (rnAsM) s = s.replaceAll("rn", "m");
   let out = "";
-  for (const ch of handle) {
-    if (ch === "-") continue;
-    out += HANDLE_FOLD[ch] ?? ch;
-  }
-  return out;
+  for (const ch of s) out += HANDLE_FOLD[ch] ?? ch;
+  return out.replace(/(.)\1+/gu, "$1");
 }
 
-const RESERVED_FOLDED: ReadonlySet<string> = new Set(RESERVED_HANDLES.map(foldHandle));
+/**
+ * The confusable-folded form of a handle: lower case, hyphens removed, `rn` read as `m`, then
+ * 0→o, 1/i/l→l, 3→e, 4→a, 5→s, 7→t, 8→b, and runs of one letter collapsed to one (`dellulu` →
+ * `delulu`). Mirrored by core.handle_fold in the database (0056).
+ */
+export function foldHandle(handle: string): string {
+  return foldWith(handle, true);
+}
+
+const folded = (words: readonly string[], rnAsM: boolean) => words.map((w) => foldWith(w, rnAsM));
+const FOLDS = [true, false].map((rnAsM) => ({
+  rnAsM,
+  protectedWords: folded(PROTECTED_HANDLE_WORDS, rnAsM),
+  genericWords: new Set(folded(GENERIC_HANDLE_WORDS, rnAsM)),
+}));
+
+/** Whether a protected (brand or authority) word appears anywhere in the handle, in any spelling. */
+export function hasProtectedHandleWord(handle: string): boolean {
+  return FOLDS.some((f) => {
+    const h = foldWith(handle, f.rnAsM);
+    return f.protectedWords.some((w) => h.includes(w));
+  });
+}
 
 /**
- * Whether a handle imitates a reserved one: its folded form is a folded reserved handle
- * (`de1ulumart`, `deluiumart`), or one of its hyphen-separated tokens folds to one (`admin-team`,
- * `support-desk`, `official-store`).
+ * Whether a handle imitates a reserved one (seventh security review, minor 4): a protected word
+ * appears anywhere in its folded form (`deluluofficial`, `adrnin`, `admin1`), or its folded form,
+ * without any number of its leading and trailing digits, is a generic word (`5h0p`, `shop1`). `rn` is read
+ * both as `m` and as itself, so neither reading can hide a word. Mirrored by core.handle_lookalike.
  */
 export function isLookalikeHandle(handle: string): boolean {
-  if (RESERVED_FOLDED.has(foldHandle(handle))) return true;
-  return handle.split("-").some((token) => token !== "" && RESERVED_FOLDED.has(foldHandle(token)));
+  if (hasProtectedHandleWord(handle)) return true;
+  // the handle without any number of its leading and of its trailing digits (a digit may itself
+  // spell a letter: `roo7` is `root`, so `roo70` is tried as `roo7` too)
+  const lead = /^[0-9-]*/.exec(handle)?.[0].length ?? 0;
+  const trail = /[0-9-]*$/.exec(handle)?.[0].length ?? 0;
+  for (let i = 0; i <= lead; i++) {
+    for (let j = 0; j <= trail && i + j <= handle.length; j++) {
+      const core = handle.slice(i, handle.length - j);
+      if (FOLDS.some((f) => f.genericWords.has(foldWith(core, f.rnAsM)))) return true;
+    }
+  }
+  return false;
 }
 
 /**
  * A store handle: 3–24 of a–z, 0–9 and hyphen; no leading, trailing or double hyphen; not reserved
- * and not a look-alike of a reserved handle (isLookalikeHandle).
+ * and not a look-alike of a reserved handle (isLookalikeHandle). User handles follow the same
+ * look-alike rule (core.update_profile).
  */
 export function validateHandle(
   handle: string,

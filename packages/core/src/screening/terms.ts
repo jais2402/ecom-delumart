@@ -132,3 +132,43 @@ export const RESERVED_HANDLES: readonly string[] = [
   "console",
   "partner",
 ];
+
+/**
+ * Handle words (seventh security review, minor 4), for store and user handles alike. PROTECTED: the
+ * brand and authority words, refused anywhere in a handle (in any confusable spelling). GENERIC:
+ * ordinary words that are only refused as the whole handle (leading and trailing digits ignored),
+ * so `cake-shop` or `pay-day` are fine. Together they cover RESERVED_HANDLES. Mirrored by
+ * core.handle_protected_words() and core.handle_generic_words() (migration 0056).
+ */
+export const PROTECTED_HANDLE_WORDS: readonly string[] = [
+  "delulu",
+  "delulumart",
+  "admin",
+  "administrator",
+  "superadmin",
+  "official",
+  "support",
+  "staff",
+  "moderator",
+  "security",
+  "verified",
+  "system",
+];
+
+export const GENERIC_HANDLE_WORDS: readonly string[] = [
+  "help",
+  "root",
+  "bank",
+  "pay",
+  "originals",
+  "store",
+  "shop",
+  "www",
+  "api",
+  "account",
+  "cart",
+  "checkout",
+  "orders",
+  "console",
+  "partner",
+];

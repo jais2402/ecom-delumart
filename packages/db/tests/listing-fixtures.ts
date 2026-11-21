@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { screenListing } from "@delulu/core";
 import type pg from "pg";
 import { createPaymentAttempt } from "../src/checkout";
@@ -30,7 +31,8 @@ export interface Creator {
 export async function creator(pool: pg.Pool, toSave: readonly ProductFixture[]): Promise<Creator> {
   const u = await user(pool);
   await completePassport(pool, u, toSave);
-  const handle = `lamps-${uuidv7().slice(-10)}`; // "shop" is reserved as a token (0049)
+  // letters that spell no protected handle word in any fold (0056: "lamps-574f..." would hold "staff")
+  const handle = `lamps-${Array.from(randomBytes(10), (b) => "bcdfghjkqvwxz"[b % 13]).join("")}`;
   const q = await companyQuote(pool, {
     authSessionId: u.authSessionId,
     handle,

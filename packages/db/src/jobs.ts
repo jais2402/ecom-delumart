@@ -78,10 +78,15 @@ export async function applyScreening(
 }
 
 export interface SafetyNetResult {
-  /** Some NEEDS_REVIEW listing has waited longer than the threshold (48 h by default). */
+  /**
+   * Some listing has waited in NEEDS_REVIEW, or is stuck in SCREENING, longer than the threshold
+   * (48 h by default; 0057 counts SCREENING again).
+   */
   overdue: boolean;
-  /** How many have. */
+  /** How many have (both kinds). */
   count: number;
+  /** Of them, stuck in SCREENING. */
+  screeningStalled: number;
   oldestAgeSeconds: number | null;
   /** This run wrote the day's SYSTEM audit row (at most one per UTC day). */
   audited: boolean;
@@ -96,6 +101,7 @@ export async function moderationSafetyNet(pool: Pool): Promise<SafetyNetResult> 
     one<{
       overdue: boolean;
       count: number | string;
+      screeningStalled: number | string | null;
       oldestAgeSeconds: number | string | null;
       audited: boolean;
     }>(c, "SELECT core.moderation_safety_net() AS r", []),
@@ -103,6 +109,7 @@ export async function moderationSafetyNet(pool: Pool): Promise<SafetyNetResult> 
   return {
     overdue: r.overdue === true,
     count: Number(r.count),
+    screeningStalled: Number(r.screeningStalled ?? 0),
     oldestAgeSeconds: r.oldestAgeSeconds === null ? null : Number(r.oldestAgeSeconds),
     audited: r.audited === true,
   };

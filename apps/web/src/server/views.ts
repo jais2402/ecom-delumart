@@ -663,7 +663,8 @@ export function publicCouponView(c: PublicCoupon) {
 
 export function merchantOrderView(o: MerchantOrder) {
   return {
-    id: o.sellerOrderId,
+    // the opaque per-seller reference (0055): never the seller order's time-ordered id
+    id: o.orderRef,
     orderedAt: iso(o.orderedAt),
     status: o.status,
     source: o.source,
@@ -784,6 +785,13 @@ export function adminStatusView(s: AdminStatus) {
       oldestAgeSeconds: s.moderationOverdue.oldestAgeSeconds,
       oldestSubmittedAt: isoOrNull(s.moderationOverdue.oldestSubmittedAt),
       thresholdHours: s.moderationOverdue.thresholdHours,
+    },
+    // seventh review (0057): submissions stuck in SCREENING, reported separately
+    screeningStalled: {
+      count: s.screeningStalled.count,
+      oldestAgeSeconds: s.screeningStalled.oldestAgeSeconds,
+      oldestSubmittedAt: isoOrNull(s.screeningStalled.oldestSubmittedAt),
+      thresholdHours: s.screeningStalled.thresholdHours,
     },
     needsReview: s.needsReview,
     openReportCases: s.openReportCases,

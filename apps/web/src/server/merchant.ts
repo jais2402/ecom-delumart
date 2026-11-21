@@ -1,5 +1,11 @@
 import "./server-only";
-import { DomainError, rupeesToPaise } from "@delulu/core";
+import {
+  DomainError,
+  hasProtectedHandleWord,
+  rupeesToPaise,
+  type ScreenReason,
+  screenText,
+} from "@delulu/core";
 import type { CouponInput } from "@delulu/db/runtime";
 import { z } from "zod";
 
@@ -22,12 +28,31 @@ export const couponBody = z.strictObject({
   publicCode: z.string().max(32).optional(),
 });
 
+/**
+ * A public coupon code is public text (seventh review, 5a): it is screened like other public text
+ * (in lower case, so that a code's capitals are not "shouting") and may not carry a protected
+ * brand or authority word in any spelling. The database refuses the latter too, and keeps the code
+ * to 4-16 of A-Z and 0-9.
+ */
+function checkPublicCode(code: string): void {
+  const value = code.trim().toLowerCase();
+  const screened = screenText({ publicCode: value });
+  const reasons: { field: string; code: string }[] =
+    screened.verdict === "OK"
+      ? []
+      : screened.reasons.map((r: ScreenReason) => ({ field: r.field, code: r.code }));
+  if (hasProtectedHandleWord(value)) reasons.push({ field: "publicCode", code: "RESERVED" });
+  if (reasons.length > 0)
+    throw new DomainError("VALIDATION_FAILED", "Some fields need changes.", { reasons });
+}
+
 export function checkCoupon(b: z.infer<typeof couponBody>): CouponInput {
   if (b.isPublic !== (b.publicCode !== undefined)) {
     throw new DomainError("VALIDATION_FAILED", "Some fields need changes.", {
       reasons: [{ field: "publicCode", code: b.isPublic ? "REQUIRED" : "NOT_ALLOWED" }],
     });
   }
+  if (b.publicCode !== undefined) checkPublicCode(b.publicCode);
   return {
     kind: b.kind,
     value: b.kind === "PERCENT" ? BigInt(b.value) : rupeesToPaise(b.value),

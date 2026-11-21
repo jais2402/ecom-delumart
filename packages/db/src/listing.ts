@@ -687,6 +687,11 @@ export interface ModerationOverdue {
 export interface AdminStatus {
   publication: { enabled: boolean; updatedAt: Date | null };
   moderationOverdue: ModerationOverdue;
+  /**
+   * Submissions stuck in SCREENING (seventh review, 0057): `count` older than the threshold, the
+   * age of the oldest one in SCREENING. Same shape as moderationOverdue.
+   */
+  screeningStalled: ModerationOverdue;
   needsReview: number;
   openReportCases: number;
   openAppeals: number;
@@ -712,6 +717,7 @@ export async function adminStatus(pool: Pool, input: Session): Promise<AdminStat
   return {
     publication: { enabled: p.enabled === true, updatedAt: p.updatedAt ? date(p.updatedAt) : null },
     moderationOverdue: moderationOverdueOf(r.moderationOverdue),
+    screeningStalled: moderationOverdueOf(r.screeningStalled),
     needsReview: Number(r.needsReview ?? 0),
     openReportCases: Number(r.openReportCases ?? 0),
     openAppeals: Number(r.openAppeals ?? 0),

@@ -161,8 +161,19 @@ export interface SellerOrderLineView {
   feePaise: bigint;
 }
 
+/**
+ * A seller order's reference as its seller sees it (0055): opaque, random and stable, never derived
+ * from an id or a time. Seller reads take it instead of an id.
+ */
+export const ORDER_REF = /^SO-[A-Z2-9]{16}$/;
+
+export function isOrderRef(value: unknown): value is string {
+  return typeof value === "string" && ORDER_REF.test(value);
+}
+
 export interface MerchantOrder {
-  sellerOrderId: string;
+  /** The opaque per-seller order reference (never the seller order's time-ordered id). */
+  orderRef: string;
   orderedAt: Date;
   status: "COMPLETED" | "REVERSED";
   source: "PLAYER" | "STAFF";
@@ -199,7 +210,7 @@ export interface MerchantOrder {
 function merchantOrderOf(j: Json): MerchantOrder {
   const d = j.delivery as Json | null;
   return {
-    sellerOrderId: String(j.sellerOrderId),
+    orderRef: String(j.orderRef),
     orderedAt: date(j.orderedAt),
     status: j.status as MerchantOrder["status"],
     source: j.source as MerchantOrder["source"],
@@ -240,7 +251,9 @@ export async function mySellerOrders(
   pool: Pool,
   input: Session & { cursor?: string | null; pageSize?: number },
 ): Promise<Page<MerchantOrder, string>> {
-  if (input.cursor != null) requireUuid(input.cursor, "cursor");
+  if (input.cursor != null && !isOrderRef(input.cursor)) {
+    throw new DomainError("VALIDATION_FAILED", "cursor is an order reference");
+  }
   const r = await asWeb(pool, input.authSessionId, (c) =>
     one<{ items: Json[]; nextCursor: string | null }>(c, "SELECT core.my_seller_orders($1, $2) AS r", [
       input.cursor ?? null,
@@ -252,11 +265,12 @@ export async function mySellerOrders(
 
 export async function mySellerOrder(
   pool: Pool,
-  input: Session & { sellerOrderId: string },
+  input: Session & { orderRef: string },
 ): Promise<MerchantOrder> {
-  requireUuid(input.sellerOrderId, "sellerOrderId");
+  // a malformed reference is answered as a missing one
+  if (!isOrderRef(input.orderRef)) throw new DomainError("NOT_FOUND", "order not found");
   const r = await asWeb(pool, input.authSessionId, (c) =>
-    one<Json>(c, "SELECT core.my_seller_order($1) AS r", [input.sellerOrderId]),
+    one<Json>(c, "SELECT core.my_seller_order($1) AS r", [input.orderRef]),
   );
   return merchantOrderOf(r);
 }

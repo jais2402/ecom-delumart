@@ -9,7 +9,8 @@ import { CLEAN, codeOf, count, type ProductFixture, reconcile, user, wallet } fr
 import { createTestDatabase, plant, stateOf, type TestDatabase, type TestUser, uuidv7 } from "./helpers";
 import { completePassport, passQuiz, published, spendTo } from "./selling-fixtures";
 
-const handle = (): string => `lamps-${randomBytes(5).toString("hex")}`;
+// letters that spell no protected handle word in any fold (0056: hex such as "574f" folds to "staf")
+const handle = (): string => `lamps-${Array.from(randomBytes(10), (b) => "bcdfghjkqvwxz"[b % 13]).join("")}`;
 
 /** Sixth security review: store handles (minors 5, 6; migration 0049) and the sponsorship (minor 11). */
 describe("sixth security review: store handles and the formation sponsorship", () => {

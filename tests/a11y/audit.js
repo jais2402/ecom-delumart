@@ -36,6 +36,15 @@ const pages = [
   { path: '/studio/appeals', as: 'owner', operator: true },
   { path: '/console/moderation', as: 'admin', operator: true },
   { path: '/console/reports', as: 'admin', operator: true },
+  // analytics screens: the admin API is answered by fixtures (no Super Admin needed, see mockAnalytics)
+  { path: '/console/analytics', as: 'mocked', operator: true },
+  { path: '/console/analytics/places', as: 'mocked', operator: true },
+  { path: '/console/analytics/places?level=city&country=IN&region=Maharashtra', as: 'mocked', operator: true, label: '/console/analytics/places (city level)' },
+  { path: '/console/analytics/top', as: 'mocked', operator: true },
+  { path: '/console/analytics/top?kind=company', as: 'mocked', operator: true, label: '/console/analytics/top (shops)' },
+  { path: '/console/analytics/top', as: 'mocked', operator: true, mockMode: 'empty', label: '/console/analytics/top (empty)' },
+  { path: '/console/analytics', as: 'mocked', operator: true, mockMode: 'error', label: '/console/analytics (error)' },
+  { path: '/console/analytics', label: '/console/analytics (not available)' },
   { path: '/console/reports', label: '/console/reports (not available)' },
   { path: '/console/moderation', label: '/console/moderation (not available)' },
 ];
@@ -107,6 +116,44 @@ const pageFn = () => {
   out.landmarks.skip = !!document.querySelector('a[href^="#"]');
   return out;
 };
+// Answers /api/v1/admin/analytics/* with fixtures so the screens can be audited without the Super Admin role.
+// mode: 'data' | 'empty' | 'error' (the time series fails, the rest answers).
+async function mockAnalytics(page, mode) {
+  const DAY = 86400000;
+  const shift = (d, n) => new Date(Date.parse(d + 'T00:00:00Z') + n * DAY).toISOString().slice(0, 10);
+  const span = (a, b) => (Date.parse(b) - Date.parse(a)) / DAY + 1;
+  await page.route('**/api/v1/admin/analytics/**', (route) => {
+    const url = new URL(route.request().url());
+    const name = url.pathname.split('/').pop();
+    const q = Object.fromEntries(url.searchParams);
+    const empty = mode === 'empty';
+    const base = { from: q.from, to: q.to, days: span(q.from, q.to), asOf: new Date().toISOString() };
+    if (mode === 'error' && name === 'timeseries') return route.fulfill({ status: 500, json: { error: { code: 'INTERNAL', message: 'The analytics service is unavailable.', retryable: false, details: {} } } });
+    if (name === 'overview') {
+      const t = (v) => ({ visitors: v, trafficDays: Math.max(base.days - 5, 0), signUps: v ? 21 : 0, orders: v ? 9 : 0, spendPaise: v ? '18450000' : '0', averageOrderValuePaise: v ? '2050000' : null, creatorUnlocks: v ? 1 : 0, shopsRegistered: v ? 3 : 0, listingsPublished: v ? 4 : 0 });
+      return route.fulfill({ json: { ...base, previousFrom: shift(q.from, -base.days), previousTo: shift(q.from, -1), current: t(empty ? 0 : 1284), previous: { ...t(empty ? 0 : 1100), shopsRegistered: 0, orders: empty ? 0 : 12 }, trafficComputedAt: empty ? null : new Date().toISOString() } });
+    }
+    if (name === 'timeseries') {
+      const points = Array.from({ length: base.days }, (_, i) => ({ day: shift(q.from, i), value: empty || i % 7 === 3 ? null : String(40 + ((i * 17) % 60)) }));
+      return route.fulfill({ json: { ...base, metric: q.metric, unit: 'count', source: 'events', points } });
+    }
+    if (name === 'funnel') {
+      const v = empty ? [0, 0, 0, 0, 0] : [1284, 642, 128, 64, 9];
+      const keys = ['visitors', 'product_views', 'cart_adds', 'checkout_starts', 'purchases'];
+      return route.fulfill({ json: { ...base, steps: keys.map((step, i) => ({ step, visitors: v[i], conversionFromPrevious: i === 0 || !v[i - 1] ? null : v[i] / v[i - 1] })), overallConversion: empty ? null : 9 / 1284, trafficDays: base.days } });
+    }
+    if (name === 'places') {
+      const rows = { country: [['IN', null, null, 820], ['US', null, null, 210], ['ZZ', null, null, 40], ['Other', null, null, 30]], region: [['IN', 'Maharashtra', null, 410], ['IN', null, null, 90]], city: [['IN', 'Maharashtra', 'Pune', 120], ['IN', 'Maharashtra', null, 40]] }[q.level] || [];
+      const items = empty ? [] : rows.map(([country, region, city, visitors]) => ({ country, region, city, visitors, signUps: 3, purchases: 1 }));
+      return route.fulfill({ json: { ...base, level: q.level, country: q.country || null, region: q.region || null, minVisitors: 5, items, trafficDays: base.days } });
+    }
+    if (name === 'top') {
+      const all = { product: [{ productId: 'p1', name: 'Pocket Cloud', category: 'impossible-tech', shop: { name: 'Cloud Works', handle: 'cloud-works' }, orders: 4, units: 5, spendPaise: '1100000' }, { productId: 'p2', name: 'Moonlight Kettle', category: 'impossible-tech', shop: null, orders: 3, units: 3, spendPaise: '750000' }], company: [{ companyId: null, shop: null, orders: 6, units: 6, spendPaise: '1500000' }, { companyId: 'c1', shop: { name: 'Cloud Works', handle: 'cloud-works' }, orders: 4, units: 5, spendPaise: '1100000' }], category: [{ category: 'impossible-tech', orders: 9, units: 9, spendPaise: '2600000' }] };
+      return route.fulfill({ json: { ...base, kind: q.kind, limit: 10, items: empty ? [] : all[q.kind] } });
+    }
+    return route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: 'unknown', retryable: false, details: {} } } });
+  });
+}
 const rand = () => Math.random().toString(36).slice(2, 10);
 
 // A real product id from the public catalog route (the seed's addresses are not stable).
@@ -221,14 +268,18 @@ async function addToServerCart(page, productId) {
     await createStore(owner, products, handle);
     ids = await createListings(owner);
     await ctx.close();
-    const actx = await browser.newContext({ baseURL: BASE });
-    await makeAdmin(await actx.newPage(), adminEmail);
-    await actx.close();
+    // SKIP_ADMIN=1 leaves out the Super Admin setup (it runs `pnpm dev:setup`) and the pages that need it
+    if (!process.env.SKIP_ADMIN) {
+      const actx = await browser.newContext({ baseURL: BASE });
+      await makeAdmin(await actx.newPage(), adminEmail);
+      await actx.close();
+    }
   }
   let failures = 0;
   for (const scheme of schemes) for (const [w, h] of sizes) {
-    for (const role of ['anon', 'user', 'owner', 'admin']) {
-      const signedIn = role !== 'anon';
+    for (const role of ['anon', 'user', 'owner', 'admin', 'mocked']) {
+      if (role === 'admin' && process.env.SKIP_ADMIN) continue;
+      const signedIn = role !== 'anon' && role !== 'mocked';
       const list = pages.filter((p) => (p.as || (p.signedIn ? 'user' : 'anon')) === role);
       if (list.length === 0) continue;
       const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme, baseURL: BASE });
@@ -246,6 +297,7 @@ async function addToServerCart(page, productId) {
         await ctx.addInitScript((ids) => { try { if (!localStorage.getItem('dm.cart.v1')) localStorage.setItem('dm.cart.v1', JSON.stringify(ids)); } catch {} }, [products[0].id, products[1].id]);
       }
       for (const entry of list) {
+        if (role === 'mocked') { await page.unroute('**/api/v1/admin/analytics/**').catch(() => {}); await mockAnalytics(page, entry.mockMode || 'data'); }
         const p = entry.path.replace('{product}', products[0].id).replace('{handle}', handle).replace('{listing}', ids.live).replace('{draft}', ids.draft);
         await page.goto(BASE + p, { waitUntil: 'networkidle' });
         // client screens fill in after the first paint: wait for a heading and for loading to settle

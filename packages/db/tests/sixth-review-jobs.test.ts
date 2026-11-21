@@ -261,7 +261,10 @@ describe("sixth security review: the jobs credential", () => {
     expect(rows.map((r) => r.scope)).toEqual(["test.daily"]);
   });
 
-  it("minor 10: the purge caps the table at its row limit by deleting the oldest windows", async () => {
+  // Seventh review (7b, 0057): the cap used to evict the oldest windows even while they were live,
+  // which reset a counter an attacker could fill; over the cap the purge now evicts nothing live and
+  // records the overflow instead (tests/seventh-review-jobs.test.ts covers the audit row).
+  it("minor 10: over the row limit the purge keeps every live window (seventh review: none is evicted)", async () => {
     await pool.query(
       `INSERT INTO core.rate_counter (scope, subject, window_start, count, window_seconds)
        SELECT 'test.flood', sha256(int4send(g)), now() - make_interval(secs => g * 0.1), 1, 86400
@@ -270,15 +273,17 @@ describe("sixth security review: the jobs credential", () => {
     try {
       await purgeRateCounters(pool);
       expect(
-        Number((await pool.query<{ n: string }>("SELECT count(*) AS n FROM core.rate_counter")).rows[0]?.n),
-      ).toBe(200_000);
-      // the oldest went (g = 200010 is the oldest window)
+        Number(
+          (
+            await pool.query<{ n: string }>(
+              "SELECT count(*) AS n FROM core.rate_counter WHERE scope = 'test.flood'",
+            )
+          ).rows[0]?.n,
+        ),
+      ).toBe(200_010);
       expect(
         (await pool.query("SELECT 1 FROM core.rate_counter WHERE subject = sha256(int4send(200010))"))
           .rowCount,
-      ).toBe(0);
-      expect(
-        (await pool.query("SELECT 1 FROM core.rate_counter WHERE subject = sha256(int4send(1))")).rowCount,
       ).toBe(1);
     } finally {
       await pool.query("DELETE FROM core.rate_counter WHERE scope = 'test.flood'");

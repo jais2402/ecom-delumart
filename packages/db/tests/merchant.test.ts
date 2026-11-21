@@ -253,9 +253,9 @@ describe("the merchant side", () => {
           feePaise: 90n * RUPEE,
         }),
       ]);
-      expect(
-        (await mySellerOrder(pool, { ...as(a.u), sellerOrderId: o?.sellerOrderId ?? "" })).netPaise,
-      ).toBe(o?.netPaise);
+      expect((await mySellerOrder(pool, { ...as(a.u), orderRef: o?.orderRef ?? "" })).netPaise).toBe(
+        o?.netPaise,
+      );
 
       // no buyer identity anywhere: assert on the returned keys and on the raw text
       const raw = await asOwner<unknown>(a.u, "SELECT core.my_seller_orders(NULL, NULL) AS r");
@@ -298,7 +298,7 @@ describe("the merchant side", () => {
           "packedAt",
           "placedAt",
           "productId",
-          "sellerOrderId",
+          "orderRef",
           "shippedAt",
           "source",
           "speed",
@@ -309,7 +309,7 @@ describe("the merchant side", () => {
 
       // user B: no orders of A, NOT_FOUND for A's order (as for a missing one), A's totals stay A's
       expect((await mySellerOrders(pool, as(b.u))).items).toEqual([]);
-      expect(await codeOf(mySellerOrder(pool, { ...as(b.u), sellerOrderId: o?.sellerOrderId ?? "" }))).toBe(
+      expect(await codeOf(mySellerOrder(pool, { ...as(b.u), orderRef: o?.orderRef ?? "" }))).toBe(
         "NOT_FOUND",
       );
       expect((await myEarnings(pool, as(b.u))).current.orders).toBe(0);

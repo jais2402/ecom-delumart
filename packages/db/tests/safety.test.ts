@@ -221,6 +221,13 @@ describe("trust and safety", () => {
       const [seed] = await published(pool, 1);
       if (!seed) throw new Error("no seed");
       await payFor(pool, r4, await checkout(pool, r4, [seed], { SEED: "STANDARD" }));
+      // a purchase counts once it is three days old (seventh review, 0054)
+      await plant(pool, (x) =>
+        x.query(
+          "UPDATE core.order_group SET created_at = created_at - interval '4 days' WHERE buyer_user_id = $1",
+          [r4.userId],
+        ),
+      );
       const young = await aged(23);
       await report(r1, l.productId);
       await report(r2, l.productId, "HATE");

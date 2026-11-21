@@ -815,7 +815,7 @@ Runner contract: `POST /internal/jobs/run` is called every minute by the databas
 | `rollup.hourly`, `rollup.daily` | Every 5 min / hourly; dirty buckets | Replace bucket |
 | `shipment.delivered` | Every run | `delivered_notified` flag |
 | `expire.sessions`, `expire.invitations`, `expire.reservations`, `expire.exports` | Every run | State check |
-| `moderation.safety_net` | Hourly | Pauses publication if oldest pending > 48 h; hides at 3 qualifying reports |
+| `moderation.safety_net` | Hourly | Never pauses publication: writes one SYSTEM audit row per UTC day while any submission has waited in review or screening > 48 h (items stay unpublished); hides at 3 qualifying reports |
 | `pending_action.execute` | Every run | State `QUEUED` and `not_before <= now`, row lock |
 | `guardrail.evaluate`, `alert.evaluate` | Every 5 min | State transition table |
 | `reconcile.ledger`, `reconcile.inventory` | Daily + on demand | Read-only; flips switch on mismatch |

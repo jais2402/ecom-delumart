@@ -1,10 +1,14 @@
 import { mySellerOrder } from "@delulu/db/runtime";
 import { webPool } from "@/server/db";
-import { pathId, route } from "@/server/http";
+import { route } from "@/server/http";
 import { merchantOrderView } from "@/server/views";
 
-/** GET /api/v1/studio/orders/{id}: one of the store's seller orders (another store's is 404). */
+/**
+ * GET /api/v1/studio/orders/{reference}: one of the store's seller orders by its opaque reference
+ * (0055). Another store's, an unknown and a malformed reference (a seller order id included) all
+ * answer the same 404.
+ */
 export const GET = route({ auth: "session" }, async ({ params, session }) => {
-  const order = await mySellerOrder(webPool(), { authSessionId: session.id, sellerOrderId: pathId(params) });
+  const order = await mySellerOrder(webPool(), { authSessionId: session.id, orderRef: params.id ?? "" });
   return { json: { order: merchantOrderView(order) } };
 });

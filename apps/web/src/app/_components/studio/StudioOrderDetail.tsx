@@ -21,7 +21,7 @@ import { PortalTitle } from "./PortalTitle";
 
 /** /studio/orders/[id]: one order of the shop, as the seller's money and the delivery. */
 export function StudioOrderDetail({ orderId }: { orderId: string }) {
-  const loaded = useApiGet<{ order: MerchantOrder }>(`/api/v1/studio/orders/${orderId}`);
+  const loaded = useApiGet<{ order: MerchantOrder }>(`/api/v1/studio/orders/${encodeURIComponent(orderId)}`);
   return (
     <div className="flex flex-col gap-6">
       <a

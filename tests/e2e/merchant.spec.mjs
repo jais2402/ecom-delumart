@@ -416,7 +416,7 @@ try {
     await row.getByText("PLAYER", { exact: true }).waitFor();
     await noOverflowAt320(seller, "/studio/orders");
     await row.getByRole("link").first().click();
-    await seller.waitForURL(/\/studio\/orders\/[0-9a-f-]+/);
+    await seller.waitForURL(/\/studio\/orders\/SO-[A-Z2-9]{16}$/);
     await seller.getByRole("heading", { level: 1, name: /^Order of/ }).waitFor();
     await seller.getByText("Anonymous player").first().waitFor();
     await seller.getByText(PUBLIC_CODE, { exact: true }).waitFor();

@@ -53,12 +53,21 @@ describe("sixth security review: report standing and the automatic hide", () => 
   };
   /** An account old enough to be established on age alone (eight days). */
   const established = () => aged(8 * 24);
-  /** An account `hours` old with one completed purchase. */
+  /**
+   * An account `hours` old with one completed platform purchase, four days old (since the seventh
+   * review, 0054, a purchase counts towards "established" only once it is three days old).
+   */
   const buyer = async (hours: number): Promise<TestUser> => {
     const u = await aged(hours);
     const [seed] = await published(pool, 1);
     if (!seed) throw new Error("no seed");
     await payFor(pool, u, await checkout(pool, u, [seed], standard("SEED")));
+    await plant(pool, (x) =>
+      x.query(
+        "UPDATE core.order_group SET created_at = created_at - interval '4 days' WHERE buyer_user_id = $1",
+        [u.userId],
+      ),
+    );
     return u;
   };
   const report = (u: TestUser, productId: string) =>

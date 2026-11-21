@@ -2423,6 +2423,14 @@ describe("money attacks (security review)", () => {
         await c.query("GRANT USAGE ON SCHEMA ledger TO app_jobs"); // revoked since the sixth review (0047)
         await c.query("GRANT INSERT ON ledger.journal, ledger.posting TO app_jobs");
         await c.query("GRANT EXECUTE ON FUNCTION ledger.sync_wallets(uuid[]) TO app_jobs");
+        // ... and an allow-all policy (the seventh review, 0057, dropped the leftover ones), so the
+        // structural rule itself is what answers
+        await c.query(
+          "CREATE POLICY test_allow ON ledger.journal TO app_jobs USING (true) WITH CHECK (true)",
+        );
+        await c.query(
+          "CREATE POLICY test_allow ON ledger.posting TO app_jobs USING (true) WITH CHECK (true)",
+        );
         await become(c, { role: "app_jobs", userId: buyer.userId });
         try {
           await steal(c);
@@ -3139,8 +3147,8 @@ describe("money attacks (security review)", () => {
         "core.my_products(text,uuid,integer)",
         "core.my_reports()",
         "core.my_saves(uuid,integer)",
-        "core.my_seller_order(uuid)",
-        "core.my_seller_orders(uuid,integer)",
+        "core.my_seller_order(text)",
+        "core.my_seller_orders(text,integer)",
         "core.my_statement(bigint,integer)",
         "core.my_wallet()",
         "core.owns_products(uuid[])",

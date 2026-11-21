@@ -34,7 +34,8 @@ const MINT = "00000000-0000-7000-8000-000000000001";
 const SINK = "00000000-0000-7000-8000-000000000002";
 const FEE = 5n * LAKH;
 
-const handle = (): string => `lamps-${randomBytes(5).toString("hex")}`; // "shop" is reserved as a token (0049)
+// letters that spell no protected handle word in any fold (0056: hex such as "574f" folds to "staf")
+const handle = (): string => `lamps-${Array.from(randomBytes(10), (b) => "bcdfghjkqvwxz"[b % 13]).join("")}`;
 
 /** Company registration (E, US-18, US-19), migration 0034. */
 describe("company registration", () => {
