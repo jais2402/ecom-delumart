@@ -187,7 +187,21 @@ export interface ProductResponse {
   sellerName: string | null;
   available: boolean;
   zap: boolean;
+  /** 'SEED' for platform stock, else the selling company's id. */
+  sellerKey?: string;
+  /** The store's handle; null for platform stock. */
+  storeHandle?: string | null;
+  inventoryMode?: "STANDARD_STOCKED" | "EXCLUSIVE" | "UNLIMITED_SEED";
+  /** A band, never an exact count. */
+  stockBand?: "UNLIMITED" | "IN_STOCK" | "LOW" | "SOLD_OUT";
+  /** Exclusive editions: how many are issued of the fixed supply. */
+  edition?: { issued: number; supply: number } | null;
 }
+
+/** GET /products/:id: a product, or a bare marker for one that was published and is no longer. */
+export type ProductPageResponse =
+  | (ProductResponse & { status: "AVAILABLE" })
+  | { id: string; status: "UNAVAILABLE" };
 
 export type Speed = "STANDARD" | "EXPRESS" | "ZAP";
 

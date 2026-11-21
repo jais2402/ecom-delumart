@@ -92,7 +92,24 @@ export interface Listing {
   nextAction: ListingNextAction;
 }
 
+export interface AppealView {
+  appealId: string;
+  productId: string;
+  /** REJECTION: a rejected first submission; HIDE: a hide by moderation or by reports. */
+  kind: "REJECTION" | "HIDE";
+  status: "OPEN" | "UPHELD" | "DENIED";
+  statement: string;
+  createdAt: Date;
+  decidedAt: Date | null;
+  decisionReason: string | null;
+  productName: string | null;
+}
+
 export interface ListingDetail extends Listing {
+  /** The listing's latest appeal (migration 0039), or null. */
+  appeal: AppealView | null;
+  /** The listing was rejected or hidden by moderation and that decision has not been appealed. */
+  appealable: boolean;
   versions: (ListingVersion & {
     isCurrent: boolean;
     submissions: {
@@ -216,10 +233,28 @@ function listingOf(raw: unknown): Listing {
   };
 }
 
+export function appealOf(raw: unknown): AppealView {
+  const a = raw as Json;
+  return {
+    appealId: String(a.appealId),
+    productId: String(a.productId),
+    kind: a.kind as AppealView["kind"],
+    status: a.status as AppealView["status"],
+    statement: String(a.statement),
+    createdAt: date(a.createdAt),
+    decidedAt: dateOrNull(a.decidedAt),
+    decisionReason:
+      a.decisionReason === null || a.decisionReason === undefined ? null : String(a.decisionReason),
+    productName: a.productName === null || a.productName === undefined ? null : String(a.productName),
+  };
+}
+
 function detailOf(raw: unknown): ListingDetail {
   const j = raw as Json;
   return {
     ...listingOf(raw),
+    appeal: j.appeal === null || j.appeal === undefined ? null : appealOf(j.appeal),
+    appealable: j.appealable === true,
     versions: (j.versions as Json[]).map((v) => ({
       ...(versionOf(v) as ListingVersion),
       isCurrent: v.isCurrent === true,
@@ -486,9 +521,69 @@ export interface ModerationItem {
   version: ListingVersion;
 }
 
+export interface AppealQueueItem {
+  appealId: string;
+  productId: string;
+  kind: "REJECTION" | "HIDE";
+  statement: string;
+  createdAt: Date;
+  productStatus: ListingStatus;
+  store: { handle: string | null; displayName: string };
+  version: ListingVersion | null;
+  /** The decision appealed: the action, its reason and who made it. */
+  decision: {
+    action: "HIDDEN" | "REJECTED";
+    reason: string | null;
+    at: Date | null;
+    by: string | null;
+  } | null;
+  /** The evidence: screening reasons, and the report case's reason counts (reporters never named). */
+  evidence: {
+    reasons: FieldCode[];
+    reports: { caseId: string; reasonCounts: Record<string, number>; reporterCount: number } | null;
+  };
+}
+
 export interface ModerationQueue extends Page<ModerationItem, string> {
-  /** Hidden listings with open appeals (appeals are not built yet: always empty). */
-  appeals: unknown[];
+  /** Open appeals, oldest first (migration 0039). */
+  appeals: AppealQueueItem[];
+}
+
+function appealQueueItemOf(raw: unknown): AppealQueueItem {
+  const a = raw as Json;
+  const d = a.decision as Json | null;
+  const e = (a.evidence ?? {}) as Json;
+  const reports = e.reports as Json | null | undefined;
+  return {
+    appealId: String(a.appealId),
+    productId: String(a.productId),
+    kind: a.kind as AppealQueueItem["kind"],
+    statement: String(a.statement),
+    createdAt: date(a.createdAt),
+    productStatus: a.productStatus as ListingStatus,
+    store: a.store as { handle: string | null; displayName: string },
+    version: versionOf(a.version),
+    decision: d
+      ? {
+          action: d.action as "HIDDEN" | "REJECTED",
+          reason: d.reason === null || d.reason === undefined ? null : String(d.reason),
+          at: dateOrNull(d.at),
+          by: d.by === null || d.by === undefined ? null : String(d.by),
+        }
+      : null,
+    evidence: {
+      reasons: reasonsOf(e.reasons),
+      reports: reports
+        ? {
+            caseId: String(reports.caseId),
+            reasonCounts: Object.fromEntries(
+              Object.entries((reports.reasonCounts ?? {}) as Json).map(([k, v]) => [k, Number(v)]),
+            ),
+            reporterCount: Number(reports.reporterCount),
+          }
+        : null,
+    },
+  };
 }
 
 export async function moderationQueue(
@@ -518,7 +613,7 @@ export async function moderationQueue(
       version: versionOf(i.version) as ListingVersion,
     })),
     nextCursor: r.nextCursor,
-    appeals: r.appeals,
+    appeals: r.appeals.map(appealQueueItemOf),
   };
 }
 

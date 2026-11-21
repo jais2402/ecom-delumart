@@ -4,9 +4,10 @@ import { Alert, Badge, Button, FictionLabel, Heading, Price, StockBadge, Text } 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api, describeError, newIdempotencyKey, type ProductResponse } from "../_lib/api";
-import { checkoutSellerId } from "../_lib/catalog";
+import { checkoutSellerId, isLow, leftCount, stockStateOf, storeNameOf } from "../_lib/catalog";
 import { saveCheckoutContext } from "../_lib/checkout-context";
 import { parsePaiseOrNull } from "../_lib/money";
+import type { CompanyView } from "../_lib/selling";
 import { nextOnboardingPath, useSession } from "../_lib/session-store";
 import { requestQuote } from "../_lib/start-checkout";
 import { AddToCartButton } from "./AddToCartButton";
@@ -25,6 +26,7 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
   const router = useRouter();
   const session = useSession();
   const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [ownListing, setOwnListing] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const intentKey = useRef<string | null>(null);
@@ -47,6 +49,25 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
       cancelled = true;
     };
   }, [signedIn, product.id]);
+
+  // Is this the signed-in person's own listing? Their shop id is the product's seller key.
+  useEffect(() => {
+    if (!signedIn || !product.sellerKey || product.sellerKey === "SEED") {
+      setOwnListing(false);
+      return;
+    }
+    let cancelled = false;
+    api<{ company: CompanyView | null }>("/api/v1/company")
+      .then((data) => {
+        if (!cancelled) setOwnListing(data.company?.id === product.sellerKey);
+      })
+      .catch(() => {
+        // the server refuses a self-purchase anyway
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, product.sellerKey]);
 
   const owned = overlay?.owned.includes(product.id) ?? false;
   const balance = parsePaiseOrNull(overlay?.balancePaise);
@@ -76,6 +97,7 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
         productName: product.name,
         category: product.category,
         sellerId,
+        sellerName: storeNameOf(product),
         quotes: { STANDARD: quote },
         speed: "STANDARD",
       });
@@ -98,9 +120,21 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        {unavailable ? <StockBadge state="sold-out" /> : <StockBadge state="in-stock" />}
+        <StockBadge {...stockStateOf(product)} />
+        {product.edition && !unavailable && product.edition.supply - product.edition.issued <= 5 ? (
+          <StockBadge state="low" count={leftCount(product) ?? 0} />
+        ) : isLow(product) ? (
+          <Badge tone="warning">Only a few left</Badge>
+        ) : null}
         {owned ? <Badge tone="success">You own this</Badge> : null}
       </div>
+
+      {product.edition ? (
+        <Text size="sm" muted>
+          Exclusive edition: {product.edition.issued} of {product.edition.supply} issued. The supply is fixed
+          and will never grow.
+        </Text>
+      ) : null}
 
       {signedIn && balance !== null ? (
         <Text size="sm" muted>
@@ -117,46 +151,55 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
       </Text>
 
       {error ? <Alert tone="danger">{error}</Alert> : null}
-      {sellerId === null ? (
+      {sellerId === null && !ownListing ? (
         <Alert tone="warning">Buying from creator shops is not open from this page yet.</Alert>
       ) : null}
 
-      <div className="flex flex-col gap-3">
-        {owned ? (
-          <>
-            <Button size="lg" disabled aria-describedby="owned-hint">
-              Already in your collection
-            </Button>
-            <Text as="span" size="sm" muted id="owned-hint">
-              Each product can be owned once.{" "}
-              <a className="text-action underline" href="/account/collection">
-                See your collection
-              </a>
-            </Text>
-          </>
-        ) : (
-          <Button
-            size="lg"
-            loading={pending}
-            disabled={unavailable || sellerId === null}
-            onClick={() => void buyNow()}
-          >
-            Buy now
+      {ownListing ? (
+        <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4">
+          <Text>This is your listing.</Text>
+          <Button asChild variant="secondary" className="self-start">
+            <a href={`/studio/${product.id}`}>Manage it in the studio</a>
           </Button>
-        )}
-        <AddToCartButton
-          productId={product.id}
-          name={product.name}
-          available={product.available}
-          owned={owned}
-        />
-        <div className="flex items-center gap-2">
-          <SaveToggle productId={product.id} name={product.name} />
-          <Text as="span" size="sm" muted>
-            Save it to find it later.
-          </Text>
         </div>
-      </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {owned ? (
+            <>
+              <Button size="lg" disabled aria-describedby="owned-hint">
+                Already in your collection
+              </Button>
+              <Text as="span" size="sm" muted id="owned-hint">
+                Each product can be owned once.{" "}
+                <a className="text-action underline" href="/account/collection">
+                  See your collection
+                </a>
+              </Text>
+            </>
+          ) : (
+            <Button
+              size="lg"
+              loading={pending || session.status === "loading"}
+              disabled={unavailable || sellerId === null}
+              onClick={() => void buyNow()}
+            >
+              Buy now
+            </Button>
+          )}
+          <AddToCartButton
+            productId={product.id}
+            name={product.name}
+            available={product.available}
+            owned={owned}
+          />
+          <div className="flex items-center gap-2">
+            <SaveToggle productId={product.id} name={product.name} />
+            <Text as="span" size="sm" muted>
+              Save it to find it later.
+            </Text>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

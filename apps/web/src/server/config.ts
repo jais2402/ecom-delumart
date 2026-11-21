@@ -61,6 +61,10 @@ export const SERVER_CONFIG = {
     studioActor: { scope: "studio.write.actor", by: "actor", limit: 30, windowSeconds: 60 },
     /** Super Admin moderation calls per account. */
     adminActor: { scope: "admin.write.actor", by: "actor", limit: 60, windowSeconds: 60 },
+    /** Reports per account (LLD §11.2: 5 / hour / account; the database also counts committed reports). */
+    reportActor: { scope: "reports.write.actor", by: "actor", limit: 5, windowSeconds: 3_600 },
+    /** Blocks and unblocks per account. */
+    blockActor: { scope: "blocks.write.actor", by: "actor", limit: 30, windowSeconds: 60 },
   },
   phone: {
     /** The only code the dev provider accepts (there is no SMS in development). */

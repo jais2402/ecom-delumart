@@ -153,7 +153,11 @@ describe("sign-in, onboarding and a first purchase", () => {
       "GET",
       `/api/v1/me/overlay?productIds=${app.products.map((p) => p.id).join(",")}`,
     );
-    expect(overlay.json).toEqual({ owned: [product.id], balancePaise: balanceAfter.toString() });
+    expect(overlay.json).toEqual({
+      owned: [product.id],
+      balancePaise: balanceAfter.toString(),
+      blockedSellerKeys: [],
+    });
 
     const me = await b.call(R.me.GET, "GET", "/api/v1/me");
     expect(me.json.onboarding).toMatchObject({ provisioned: true, pinSet: true });

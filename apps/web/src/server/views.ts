@@ -1,31 +1,47 @@
 import "./server-only";
 import { type ErrorCode, serializePaise } from "@delulu/core";
 import type {
+  AppealQueueItem,
+  AppealResolution,
+  AppealView,
+  BrandProgress,
   Cart,
   CartLine,
   CartMergeSkip,
   CartPreview,
+  CaseResolution,
   CatalogProduct,
   CheckoutSessionResult,
   CollectionItem,
   Company,
   CompanyQuote,
   CompanyReceipt,
+  CouponTerms,
   CreatorAccess,
+  Earnings,
+  EarningsTotals,
+  Inventory,
   Listing,
   ListingDetail,
   ListingVersion,
+  MerchantCoupon,
+  MerchantOrder,
   ModerationItem,
   ModerationOutcome,
+  MyReport,
   OnboardingStatus,
   OrderView,
   PassportProgress,
   PayReceipt,
+  PublicCoupon,
   ReliefClaim,
   ReliefStatus,
+  ReportCase,
+  ReportReceipt,
   SavedProduct,
   StatementRow,
   Store,
+  StoreBlock,
   Wallet,
   WarehouseView,
 } from "@delulu/db/runtime";
@@ -143,6 +159,7 @@ export function productView(p: CatalogProduct) {
     inventoryMode: p.inventoryMode,
     stockBand: p.stockBand,
     edition: p.edition && { issued: p.edition.issued, supply: p.edition.supply },
+    referencePricePaise: p.referencePricePaise === null ? null : paise(p.referencePricePaise),
   };
 }
 
@@ -451,6 +468,8 @@ export function listingView(l: Listing) {
 export function listingDetailView(l: ListingDetail) {
   return {
     ...listingView(l),
+    appeal: l.appeal && appealView(l.appeal),
+    appealable: l.appealable,
     versions: l.versions.map((v) => ({
       ...listingVersionView(v),
       isCurrent: v.isCurrent,
@@ -498,4 +517,257 @@ export function moderationItemView(i: ModerationItem) {
 
 export function moderationOutcomeView(o: ModerationOutcome) {
   return { outcome: o.outcome, productId: o.productId, versionId: o.versionId ?? null };
+}
+
+export function appealQueueItemView(a: AppealQueueItem) {
+  return {
+    appealId: a.appealId,
+    productId: a.productId,
+    kind: a.kind,
+    statement: a.statement,
+    createdAt: iso(a.createdAt),
+    productStatus: a.productStatus,
+    store: { handle: a.store.handle, displayName: a.store.displayName },
+    version: a.version && listingVersionView(a.version),
+    decision: a.decision && {
+      action: a.decision.action,
+      reason: a.decision.reason,
+      at: isoOrNull(a.decision.at),
+      by: a.decision.by,
+    },
+    evidence: {
+      reasons: reasonsView(a.evidence.reasons),
+      reports: a.evidence.reports && {
+        caseId: a.evidence.reports.caseId,
+        reasonCounts: { ...a.evidence.reports.reasonCounts },
+        reporterCount: a.evidence.reports.reporterCount,
+      },
+    },
+  };
+}
+
+// ------------------------------------------------------------------ trust and safety
+
+export function reportReceiptView(r: ReportReceipt) {
+  return {
+    reference: r.reference,
+    targetType: r.targetType,
+    targetId: r.targetId,
+    reason: r.reason,
+    status: r.status,
+    createdAt: iso(r.createdAt),
+  };
+}
+
+export function myReportView(r: MyReport) {
+  return {
+    reference: r.reference,
+    targetType: r.targetType,
+    targetId: r.targetId,
+    reason: r.reason,
+    status: r.status,
+    createdAt: iso(r.createdAt),
+    resolvedAt: isoOrNull(r.resolvedAt),
+  };
+}
+
+export function appealView(a: AppealView) {
+  return {
+    id: a.appealId,
+    productId: a.productId,
+    productName: a.productName,
+    kind: a.kind,
+    status: a.status,
+    statement: a.statement,
+    createdAt: iso(a.createdAt),
+    decidedAt: isoOrNull(a.decidedAt),
+    decisionReason: a.decisionReason,
+  };
+}
+
+export function blockView(b: StoreBlock) {
+  return {
+    companyId: b.companyId,
+    handle: b.handle,
+    displayName: b.displayName,
+    blockedAt: iso(b.blockedAt),
+  };
+}
+
+/** A report case for the Super Admin: reporters only as per-case numbers. */
+export function reportCaseView(c: ReportCase) {
+  return {
+    id: c.caseId,
+    targetType: c.targetType,
+    status: c.status,
+    openedAt: iso(c.openedAt),
+    autoHidden: c.autoHidden,
+    target: c.target,
+    reasonCounts: { ...c.reasonCounts },
+    reporterCount: c.reporterCount,
+    qualifyingReporterCount: c.qualifyingReporterCount,
+    reports: c.reports.map((r) => ({
+      reporter: r.reporter,
+      reason: r.reason,
+      detail: r.detail,
+      detailFlags: [...r.detailFlags],
+      createdAt: iso(r.createdAt),
+    })),
+  };
+}
+
+export function caseResolutionView(r: CaseResolution) {
+  return { id: r.caseId, outcome: r.outcome, effect: r.effect, productStatus: r.productStatus };
+}
+
+export function appealResolutionView(r: AppealResolution) {
+  return {
+    id: r.appealId,
+    outcome: r.outcome,
+    effect: r.effect,
+    productId: r.productId,
+    productStatus: r.productStatus,
+  };
+}
+
+// ------------------------------------------------------------------ merchant
+
+function couponTermsView(t: CouponTerms) {
+  return {
+    kind: t.kind,
+    percent: t.percent,
+    amountPaise: t.amountPaise === null ? null : paise(t.amountPaise),
+    minSpendPaise: paise(t.minSpendPaise),
+    startsAt: isoOrNull(t.startsAt),
+    endsAt: isoOrNull(t.endsAt),
+    maxRedemptions: t.maxRedemptions,
+  };
+}
+
+export function merchantCouponView(c: MerchantCoupon) {
+  return {
+    id: c.couponId,
+    code: c.code,
+    isPublic: c.isPublic,
+    status: c.status,
+    ...couponTermsView(c),
+    redeemed: c.redeemed,
+    discountGivenPaise: paise(c.discountGivenPaise),
+  };
+}
+
+export function publicCouponView(c: PublicCoupon) {
+  return { code: c.code, ...couponTermsView(c) };
+}
+
+export function merchantOrderView(o: MerchantOrder) {
+  return {
+    id: o.sellerOrderId,
+    orderedAt: iso(o.orderedAt),
+    status: o.status,
+    source: o.source,
+    buyer: o.buyer,
+    listPaise: paise(o.listPaise),
+    discountPaise: paise(o.discountPaise),
+    grossPaise: paise(o.grossPaise),
+    feePaise: paise(o.feePaise),
+    deliveryFeeBuyerPaise: paise(o.deliveryFeeBuyerPaise),
+    deliveryFeeSellerPaise: paise(o.deliveryFeeSellerPaise),
+    netPaise: paise(o.netPaise),
+    couponCode: o.couponCode,
+    delivery: o.delivery && {
+      speed: o.delivery.speed,
+      placedAt: iso(o.delivery.placedAt),
+      packedAt: iso(o.delivery.packedAt),
+      shippedAt: iso(o.delivery.shippedAt),
+      outAt: iso(o.delivery.outAt),
+      deliveredAt: iso(o.delivery.deliveredAt),
+      cancelledAt: isoOrNull(o.delivery.cancelledAt),
+    },
+    lines: o.lines.map((l) => ({
+      productId: l.productId,
+      name: l.name,
+      editionSerial: l.editionSerial,
+      listPaise: paise(l.listPaise),
+      discountPaise: paise(l.discountPaise),
+      feePaise: paise(l.feePaise),
+    })),
+  };
+}
+
+function earningsTotalsView(t: EarningsTotals) {
+  return {
+    from: iso(t.from),
+    to: iso(t.to),
+    orders: t.orders,
+    grossPaise: paise(t.grossPaise),
+    feesPaise: paise(t.feesPaise),
+    merchantDeliveryPaise: paise(t.merchantDeliveryPaise),
+    netPaise: paise(t.netPaise),
+    distinctBuyers: t.distinctBuyers,
+    averageOrderPaise: t.averageOrderPaise === null ? null : paise(t.averageOrderPaise),
+  };
+}
+
+export function earningsView(e: Earnings) {
+  return {
+    periodDays: e.periodDays,
+    timeZone: e.timeZone,
+    asOf: iso(e.asOf),
+    current: earningsTotalsView(e.current),
+    previous: earningsTotalsView(e.previous),
+    staff: { current: earningsTotalsView(e.staff.current), previous: earningsTotalsView(e.staff.previous) },
+    daily: e.daily.map((d) => ({
+      date: d.date,
+      orders: d.orders,
+      grossPaise: paise(d.grossPaise),
+      netPaise: paise(d.netPaise),
+    })),
+    topProducts: e.topProducts.map((t) => ({
+      productId: t.productId,
+      name: t.name,
+      units: t.units,
+      grossPaise: paise(t.grossPaise),
+    })),
+  };
+}
+
+export function brandProgressView(b: BrandProgress) {
+  return {
+    qualifyingGrossPaise: paise(b.qualifyingGrossPaise),
+    eligibleBuyers: b.eligibleBuyers,
+    thresholdPaise: paise(b.thresholdPaise),
+    minBuyers: b.minBuyers,
+    buyerMinAgeHours: b.buyerMinAgeHours,
+    grossMet: b.grossMet,
+    buyersMet: b.buyersMet,
+    qualifies: b.qualifies,
+    tier: b.tier,
+    brandUnlocked: b.brandUnlocked,
+  };
+}
+
+export function inventoryView(i: Inventory) {
+  return {
+    lowStockThreshold: i.lowStockThreshold,
+    warehouses: i.warehouses.map((w) => ({
+      id: w.id,
+      kind: w.kind,
+      capacity: w.capacity,
+      used: w.used,
+      free: w.free,
+      zapHub: w.zapHub,
+    })),
+    products: i.products.map((p) => ({
+      id: p.productId,
+      name: p.name,
+      status: p.status,
+      inventoryMode: p.inventoryMode,
+      available: p.available,
+      issued: p.issued,
+      retired: p.retired,
+      lowStock: p.lowStock,
+      edition: p.edition && { supply: p.edition.supply, issued: p.edition.issued },
+    })),
+  };
 }

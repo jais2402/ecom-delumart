@@ -618,7 +618,7 @@ describe("fourth security review", () => {
         long: "VALIDATION_FAILED",
         publicOk: "ok",
         duplicate: "CONFLICT",
-        made: ["ok", "ok", "ok", "ok", "CONFLICT"], // the public one plus four private: five active
+        made: ["ok", "ok", "ok", "ok", "COUPON_LIMIT"], // the public one plus four private: five active
       });
       expect(results.codes[0]).toEqual({
         code_normalised: "DIWALI25",

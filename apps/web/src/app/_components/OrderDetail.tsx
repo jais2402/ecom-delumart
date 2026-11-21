@@ -6,12 +6,21 @@ import type { OrderResponse } from "../_lib/api";
 import { parsePaise } from "../_lib/money";
 import { deliveryStatus, formatWhen, orderTotals, trackingStages } from "../_lib/orders";
 import { errorCode, useApiGet } from "../_lib/use-api";
+import { useProducts } from "../_lib/use-products";
 import { ErrorBlock, LoadingBlock } from "./LoadState";
 import { PageHeading } from "./PageHeading";
 
 /** One order: receipt, then tracking computed from the shipment times. `justPaid` adds the success note. */
 export function OrderDetail({ id, justPaid = false }: { id: string; justPaid?: boolean }) {
   const result = useApiGet<OrderResponse>(`/api/v1/orders/${id}`);
+  // an exclusive's serial reads "#1 of 3": the edition's supply comes from the public product
+  const serialIds =
+    result.status === "ready"
+      ? result.data.sellerOrders.flatMap((so) =>
+          so.lines.filter((l) => l.editionSerial !== null).map((l) => l.productId),
+        )
+      : [];
+  const { products } = useProducts(serialIds);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 15_000);
@@ -55,10 +64,15 @@ export function OrderDetail({ id, justPaid = false }: { id: string; justPaid?: b
 
   const order = result.data;
   const totals = orderTotals(order);
+  const serialText = (line: { productId: string; editionSerial: number | null }): string | null => {
+    if (line.editionSerial === null) return null;
+    const supply = products.get(line.productId)?.edition?.supply;
+    return supply ? `#${line.editionSerial} of ${supply}` : `#${line.editionSerial}`;
+  };
   const lines = order.sellerOrders.flatMap((so) =>
     so.lines.map((line) => ({
       id: line.id,
-      name: line.name,
+      name: serialText(line) ? `${line.name} (${serialText(line)})` : line.name,
       quantity: 1,
       totalPaise:
         parsePaise(line.listPaise) -
@@ -105,6 +119,7 @@ export function OrderDetail({ id, justPaid = false }: { id: string; justPaid?: b
                   {so.lines.map((line) => (
                     <li key={line.id} className="break-words">
                       {line.name}
+                      {serialText(line) ? ` — edition ${serialText(line)}` : ""}
                     </li>
                   ))}
                 </ul>

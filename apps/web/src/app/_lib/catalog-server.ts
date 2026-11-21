@@ -1,4 +1,4 @@
-import { catalogProduct, catalogProducts } from "@delulu/db/runtime";
+import { catalogProduct, catalogProductPage, catalogProducts, storeProducts } from "@delulu/db/runtime";
 import { webPool } from "@/server/db";
 import { productView } from "@/server/views";
 import type { ProductResponse } from "./api";
@@ -31,4 +31,26 @@ export async function loadCatalog(category?: string): Promise<ProductResponse[]>
 export async function loadProduct(id: string): Promise<ProductResponse | null> {
   const product = await catalogProduct(webPool(), id);
   return product === null ? null : productView(product);
+}
+
+export type ProductPageView =
+  | { status: "AVAILABLE"; product: ProductResponse }
+  | { status: "UNAVAILABLE"; id: string };
+
+/** A product page's data: the product, a calm "unavailable" for one that was published and is hidden or archived, or null. */
+export async function loadProductPage(id: string): Promise<ProductPageView | null> {
+  const page = await catalogProductPage(webPool(), id);
+  if (page === null) return null;
+  if (page.status === "UNAVAILABLE") return { status: "UNAVAILABLE", id: page.productId };
+  return { status: "AVAILABLE", product: productView(page.product) };
+}
+
+/** One page of a shop's published products (public data only), with the cursor of the next page. */
+export async function loadStoreProducts(
+  handle: string,
+  cursor: string | null,
+): Promise<{ items: ProductResponse[]; nextCursor: string | null }> {
+  if (building()) return { items: [], nextCursor: null };
+  const page = await storeProducts(webPool(), { handle, cursor, pageSize: 12 });
+  return { items: page.items.map(productView), nextCursor: page.nextCursor };
 }

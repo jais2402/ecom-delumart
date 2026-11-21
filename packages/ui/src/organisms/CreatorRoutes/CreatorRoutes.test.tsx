@@ -30,7 +30,7 @@ describe("CreatorRoutes", () => {
       "0",
     );
     expect(within(spend).getByText(/does not count/)).toBeInTheDocument();
-    expect(within(spend).getByText(/Spend at least/)).toBeInTheDocument();
+    expect(within(spend).getByText(/Spend more than/)).toBeInTheDocument();
     expect(within(passport).getByText("1 of 3 steps done. Do them in any order.")).toBeInTheDocument();
     expect(within(passport).getAllByRole("listitem")).toHaveLength(3);
     expect(within(passport).getByRole("link", { name: "Open the passport" })).toHaveAttribute(

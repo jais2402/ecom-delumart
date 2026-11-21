@@ -1,10 +1,19 @@
-import { Breadcrumbs, FictionLabel, Heading, PriceBlock, ProductArt, Text } from "@delulu/ui";
+import {
+  Breadcrumbs,
+  Button,
+  EmptyState,
+  FictionLabel,
+  Heading,
+  PriceBlock,
+  ProductArt,
+  Text,
+} from "@delulu/ui";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BuyPanel } from "../../_components/BuyPanel";
 import { ShopShell } from "../../_components/ShopShell";
 import { categoryName, storeNameOf } from "../../_lib/catalog";
-import { loadProduct } from "../../_lib/catalog-server";
+import { loadProduct, loadProductPage } from "../../_lib/catalog-server";
 import { parsePaise } from "../../_lib/money";
 
 /** Public. Ownership and balance are added in the browser by BuyPanel. */
@@ -19,8 +28,27 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const product = await loadProduct(id);
-  if (!product) notFound();
+  const page = await loadProductPage(id);
+  if (!page) notFound();
+  if (page.status === "UNAVAILABLE") {
+    return (
+      <ShopShell>
+        <div className="mx-auto flex max-w-reading flex-col items-center gap-4 py-8 text-center">
+          <EmptyState
+            title="No longer available"
+            description="This product is not on sale any more. Anyone who already bought it keeps it."
+            headingLevel={1}
+            action={
+              <Button asChild>
+                <a href="/">Keep shopping</a>
+              </Button>
+            }
+          />
+        </div>
+      </ShopShell>
+    );
+  }
+  const product = page.product;
 
   return (
     <ShopShell>
@@ -45,7 +73,17 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           {product.hook ? <Text size="lg">{product.hook}</Text> : null}
           <Text muted>{product.description}</Text>
           <Text as="span" size="sm" muted>
-            Sold by {storeNameOf(product)}
+            Sold by{" "}
+            {product.storeHandle ? (
+              <a
+                className="inline-flex min-h-touch items-center text-action underline"
+                href={`/store/${product.storeHandle}`}
+              >
+                {storeNameOf(product)}
+              </a>
+            ) : (
+              storeNameOf(product)
+            )}
           </Text>
           <div className="flex flex-col gap-1">
             <PriceBlock amountPaise={parsePaise(product.pricePaise)} display="exact" />

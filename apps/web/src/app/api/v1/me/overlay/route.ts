@@ -1,5 +1,5 @@
 import { serializePaise } from "@delulu/core";
-import { myWallet, ownsProducts } from "@delulu/db/runtime";
+import { myBlocks, myWallet, ownsProducts } from "@delulu/db/runtime";
 import { z } from "zod";
 import { SERVER_CONFIG } from "@/server/config";
 import { webPool } from "@/server/db";
@@ -16,18 +16,24 @@ const query = z.object({
     .pipe(z.array(z.uuid()).max(MAX)),
 });
 
-/** GET /api/v1/me/overlay?productIds=a,b: the private overlay for public pages (owned flags, balance). */
+/**
+ * GET /api/v1/me/overlay?productIds=a,b: the private overlay for public pages: owned flags, balance,
+ * and `blockedSellerKeys`, the seller keys (company ids) of stores the caller blocked, whose
+ * products the client hides.
+ */
 export const GET = route({ auth: "session", query }, async ({ session, query: q }) => {
   const authSessionId = session.id;
   const ids = q.productIds.map((id) => id.toLowerCase());
-  const [owned, wallet] = await Promise.all([
+  const [owned, wallet, blocks] = await Promise.all([
     ownsProducts(webPool(), { authSessionId, productIds: ids }),
     myWallet(webPool(), { authSessionId }),
+    myBlocks(webPool(), { authSessionId }),
   ]);
   return {
     json: {
       owned: ids.filter((id) => owned.has(id)),
       balancePaise: wallet ? serializePaise(wallet.balancePaise) : null,
+      blockedSellerKeys: blocks.map((b) => b.companyId),
     },
   };
 });

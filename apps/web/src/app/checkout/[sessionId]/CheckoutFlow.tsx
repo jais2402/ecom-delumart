@@ -460,7 +460,7 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
       </Heading>
       <Text>{ctx.productName}</Text>
       <Text size="sm" muted>
-        Sold by DeluluMart Originals · {SPEED_COPY[ctx.speed].name} delivery
+        Sold by {ctx.sellerName ?? "DeluluMart Originals"} · {SPEED_COPY[ctx.speed].name} delivery
       </Text>
     </section>
   );

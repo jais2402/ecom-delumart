@@ -61,6 +61,14 @@ export const ERROR_CODES = [
   "NOT_EDITABLE",
   "SUBMISSION_LIMIT",
   "PUBLICATION_PAUSED",
+  // trust and safety (§7.7): five reports per account per hour; one open report per reporter per
+  // target; one appeal per moderation action; the listing has no moderation action to appeal
+  "REPORT_LIMIT",
+  "ALREADY_REPORTED",
+  "APPEAL_EXISTS",
+  "NOT_APPEALABLE",
+  // merchant coupons (US-41): the company already has its maximum of active coupons
+  "COUPON_LIMIT",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

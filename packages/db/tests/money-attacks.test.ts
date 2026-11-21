@@ -3088,12 +3088,19 @@ describe("money attacks (security review)", () => {
       // actor's own cart of 0028 (no money, stock or price authority)
       expect(fns.rows.map((r) => r.f)).toEqual([
         "core.actor_id()",
+        // 0039: Super Admin appeals and report cases (each refuses anyone but the Super Admin; no money moves)
+        "core.admin_appeal_resolve(uuid,text,text)",
         // 0037: Super Admin moderation (each refuses anyone but the Super Admin; no money moves)
         "core.admin_listing_decide(uuid,uuid,text,text)",
         "core.admin_listing_hide(uuid,text)",
         "core.admin_listing_restore(uuid,text)",
         "core.admin_moderation_queue(uuid,integer)",
+        "core.admin_report_resolve(uuid,text,text)",
+        "core.admin_reports(uuid,integer)",
         "core.admin_set_switch(text,boolean,text)",
+        // 0039/0040: the actor's own appeals, reports and blocks (no money moves)
+        "core.appeal_create(uuid,text)",
+        "core.block_store(uuid)",
         "core.cart_add(uuid)",
         "core.cart_clear()",
         "core.cart_merge(uuid[])",
@@ -3108,15 +3115,26 @@ describe("money attacks (security review)", () => {
         "core.draft_delete(uuid)",
         "core.draft_update(uuid,text,text,text,text,integer,text,bigint,text,integer,boolean,boolean)",
         "core.is_published_version(uuid)",
+        "core.my_appeals()",
+        "core.my_blocks()",
+        // 0042: the owner's merchant read models (read only; never a buyer's identity)
+        "core.my_brand_progress()",
         "core.my_cart()",
         "core.my_collection()",
         // 0034: the actor's own company and its edits, and the public store lookup (no money moves)
         "core.my_company()",
+        // 0041: the owner's coupons; 0042: earnings and inventory
+        "core.my_coupons()",
+        "core.my_earnings(integer)",
+        "core.my_inventory()",
         "core.my_order(uuid)",
         "core.my_orders(uuid,integer)",
         "core.my_product(uuid)",
         "core.my_products(text,uuid,integer)",
+        "core.my_reports()",
         "core.my_saves(uuid,integer)",
+        "core.my_seller_order(uuid)",
+        "core.my_seller_orders(uuid,integer)",
         "core.my_statement(bigint,integer)",
         "core.my_wallet()",
         "core.owns_products(uuid[])",
@@ -3138,11 +3156,15 @@ describe("money attacks (security review)", () => {
         "core.rate_hit(text,bytea,integer,integer)",
         // 0033: the actor's own relief status
         "core.relief_status()",
+        "core.report_create(text,uuid,text,text,jsonb)",
         "core.reveal_card_number(uuid)",
         "core.save_product(uuid)",
         "core.set_coupon_status(uuid,text)",
         "core.store_by_handle(text)",
+        // 0041: a store's public coupons (public data)
+        "core.store_coupons(text)",
         "core.store_products(text,uuid,integer)",
+        "core.unblock_store(uuid)",
         "core.unsave_product(uuid)",
         "core.update_profile(text,jsonb,boolean)",
         "core.update_store(text,text)",

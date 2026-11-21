@@ -137,6 +137,8 @@ describe("seed catalog loader", () => {
       inventoryMode: "UNLIMITED_SEED",
       stockBand: "UNLIMITED",
       edition: null,
+      // 0043: seed stock has no price history, so never a reference ("was") price
+      referencePricePaise: null,
     });
     expect((await catalogProduct(pool, seedProductId("monsoon-in-a-jar")))?.pricePaise).toBe(
       100_000_000_000n,

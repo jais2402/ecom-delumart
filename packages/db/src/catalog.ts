@@ -30,6 +30,11 @@ export interface CatalogProduct {
   stockBand: "UNLIMITED" | "IN_STOCK" | "LOW" | "SOLD_OUT";
   /** EXCLUSIVE editions: "#issued of supply". */
   edition: { issued: number; supply: number } | null;
+  /**
+   * The "was" price to show struck through (US-43): the price that was live for at least 24
+   * continuous hours right before the current, lower price took effect; null when none may be shown.
+   */
+  referencePricePaise: bigint | null;
 }
 
 interface Row {
@@ -50,11 +55,12 @@ interface Row {
   stock_band: CatalogProduct["stockBand"];
   edition_issued: number | null;
   edition_supply: number | null;
+  reference_price_paise: string | null;
 }
 
 const COLUMNS = `product_id, name, hook, description, alt_text, price_paise::text AS price_paise, category,
                  template_id, seller_name, available, zap, seller_key, store_handle, inventory_mode, stock_band,
-                 edition_issued, edition_supply`;
+                 edition_issued, edition_supply, reference_price_paise::text AS reference_price_paise`;
 
 function productOf(r: Row): CatalogProduct {
   return {
@@ -75,6 +81,7 @@ function productOf(r: Row): CatalogProduct {
     stockBand: r.stock_band,
     edition:
       r.edition_supply === null ? null : { issued: Number(r.edition_issued ?? 0), supply: r.edition_supply },
+    referencePricePaise: r.reference_price_paise === null ? null : BigInt(r.reference_price_paise),
   };
 }
 

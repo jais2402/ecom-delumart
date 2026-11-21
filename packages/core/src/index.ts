@@ -7,6 +7,7 @@ export * from "./listing/index";
 export * from "./money/index";
 export * from "./passport/index";
 export * from "./pin/index";
+export * from "./policy/index";
 export * from "./pricing/index";
 export * from "./progression/index";
 export * from "./screening/index";

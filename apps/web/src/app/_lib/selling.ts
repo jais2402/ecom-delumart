@@ -226,5 +226,5 @@ export function unlockRouteText(source: CreatorAccessResponse["source"]): string
   return "Creator access is open for you.";
 }
 
-/** Where "Create your first listing" goes. /studio belongs to a later step; until it exists the shop home stands in. */
-export const LISTING_HREF = "/sell/shop";
+/** Where "Create your first listing" goes: the studio's new-listing editor. */
+export const LISTING_HREF = "/studio/new";

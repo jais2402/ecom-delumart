@@ -24,7 +24,9 @@ export function useProducts(ids: readonly string[]): {
     void Promise.all(
       missing.map(async (id) => {
         try {
-          known.set(id, await api<ProductResponse>(`/api/v1/products/${id}`));
+          const product = await api<ProductResponse & { status?: string }>(`/api/v1/products/${id}`);
+          // a product that was published once and is gone comes back as a bare marker: treat it as unreadable
+          known.set(id, product.status === "UNAVAILABLE" ? null : product);
         } catch {
           known.set(id, null);
         }

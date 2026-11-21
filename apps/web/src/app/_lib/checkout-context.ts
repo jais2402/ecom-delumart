@@ -24,6 +24,8 @@ export interface CheckoutContext {
   productName: string;
   category: string;
   sellerId: string;
+  /** The store's name for a single-product checkout; platform stock when absent. */
+  sellerName?: string;
   /** Quotes by delivery speed; each is an immutable priced session of its own. */
   quotes: Partial<Record<Speed, QuoteResponse>>;
   speed: Speed;

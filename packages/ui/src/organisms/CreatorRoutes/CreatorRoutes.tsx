@@ -48,7 +48,8 @@ export function CreatorRoutes({
   const clamped = spent < 0n ? 0n : spent > toSpend ? toSpend : spent;
   // basis points of the way down; a display ratio only, never used as money
   const basisPoints = toSpend > 0n ? Number((clamped * 10_000n) / toSpend) : 0;
-  const stillToSpend = balancePaise === null ? null : balancePaise - thresholdPaise + 1n;
+  // spending more than this (whole rupees; the balance must end strictly below the threshold)
+  const mustExceed = balancePaise === null ? null : balancePaise - thresholdPaise;
   const doneCount = passport.steps.filter((step) => step.done).length;
   const card = "flex min-w-0 flex-col gap-3 rounded-lg border border-border-strong bg-surface p-4";
 
@@ -89,12 +90,11 @@ export function CreatorRoutes({
               max={10_000}
             />
             <p className="text-sm">
-              {spend.reached || (stillToSpend !== null && stillToSpend <= 0n) ? (
+              {spend.reached || (mustExceed !== null && mustExceed < 0n) ? (
                 "Your balance is below the line."
               ) : (
                 <>
-                  Spend at least{" "}
-                  <Price amountPaise={stillToSpend ?? 0n} display="exact" className="text-sm" /> more.
+                  Spend more than <Price amountPaise={mustExceed ?? 0n} className="text-sm" />.
                 </>
               )}
             </p>

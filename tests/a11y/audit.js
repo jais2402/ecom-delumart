@@ -1,4 +1,6 @@
 const { chromium } = require('playwright');
+const { execSync } = require('node:child_process');
+const path = require('node:path');
 // Run against a dev server (AUTH_PROVIDER=dev):  BASE_URL=http://localhost:3000 node tests/a11y/audit.js
 const BASE = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 // path, whether it needs a signed-in account, and whether the cart is filled first
@@ -18,6 +20,14 @@ const pages = [
   { path: '/sell', signedIn: true, label: '/sell (signed in)' },
   { path: '/sell/passport', signedIn: true },
   { path: '/store/{handle}' },
+  // the Partner Portal and the Commerce Console: operator frames have no site footer
+  { path: '/studio', as: 'owner', operator: true },
+  { path: '/studio/new', as: 'owner', operator: true },
+  { path: '/studio/{listing}', as: 'owner', operator: true, label: '/studio/[id] (published listing)' },
+  { path: '/studio/{draft}', as: 'owner', operator: true, label: '/studio/[id] (draft)' },
+  { path: '/studio/inventory', as: 'owner', operator: true },
+  { path: '/console/moderation', as: 'admin', operator: true },
+  { path: '/console/moderation', label: '/console/moderation (not available)' },
 ];
 const sizes = [[1280, 900], [360, 800]];
 const schemes = ['light', 'dark'];
@@ -101,7 +111,7 @@ async function discoverProducts() {
 
 // Sign in through the dev flow and finish onboarding with API calls from the page itself, so the
 // browser holds the session cookie. Returns once /api/v1/me reports a finished account.
-async function signInAndOnboard(page) {
+async function signInAndOnboard(page, address) {
   await page.goto(BASE + '/');
   await page.evaluate(async ({ email, phone }) => {
     const post = async (path, body, token) => {
@@ -117,7 +127,7 @@ async function signInAndOnboard(page) {
     await post('/api/v1/onboarding/birthdate', { birthdate: '1995-06-15' }, session);
     const created = await post('/api/v1/onboarding/provision', {}, session);
     await post('/api/v1/cards/' + created.card.id + '/pin', { pin: '482915' }, session);
-  }, { email: `audit-${rand()}@example.com`, phone: `+91 9${String(Math.floor(Math.random() * 1e9)).padStart(9, '0')}` });
+  }, { email: address || `audit-${rand()}@example.com`, phone: `+91 9${String(Math.floor(Math.random() * 1e9)).padStart(9, '0')}` });
 }
 
 // Opens a shop for a throw-away account (passport unlock, then the registration quote paid from the
@@ -140,6 +150,45 @@ async function createStore(page, products, handle) {
   }, { handle, ids: products.slice(0, 3).map((p) => p.id) });
 }
 
+
+// Sign an existing, finished account in again (the dev provider needs only the email).
+async function signInOnly(page, email) {
+  await page.goto(BASE + '/');
+  await page.evaluate(async (address) => {
+    const token = (await (await fetch('/api/v1/auth/csrf', { credentials: 'same-origin' })).json()).csrfToken;
+    const r = await fetch('/api/v1/auth/dev/sign-in', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf-token': token }, body: JSON.stringify({ email: address }) });
+    if (!r.ok) throw new Error('sign-in ' + r.status);
+  }, email);
+}
+
+// A published listing, a listing waiting for review (its text needs a person) and a plain draft,
+// for the shop owner's studio pages and the moderation queue. Returns the ids.
+async function createListings(page) {
+  return page.evaluate(async () => {
+    const call = async (method, path, body) => {
+      const token = (await (await fetch('/api/v1/auth/csrf', { credentials: 'same-origin' })).json()).csrfToken;
+      const r = await fetch(path, { method, credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf-token': token }, body: body === undefined ? undefined : JSON.stringify(body) });
+      const json = await r.json();
+      if (!r.ok) throw new Error(path + ' ' + r.status + ' ' + JSON.stringify(json).slice(0, 160));
+      return json;
+    };
+    const base = { category: 'impossible-tech', templateId: 120, altText: 'A drawing of the product', priceRupees: 2500, inventoryMode: 'STANDARD_STOCKED', quantity: 3 };
+    const make = async (name, description) => (await call('POST', '/api/v1/studio/products', { ...base, name, description })).product;
+    const live = await make('Audit Pocket Cloud', 'A small friendly cloud that follows you around and rains on bad news.');
+    await call('POST', '/api/v1/studio/products/' + live.id + '/submit', {});
+    const review = await make('Official Audit Teapot', 'A teapot that pours a different kind of weather into every cup.');
+    await call('POST', '/api/v1/studio/products/' + review.id + '/submit', {});
+    const draft = await make('Audit Draft Kite', 'A kite that flies itself and comes home before supper every day.');
+    return { live: live.id, review: review.id, draft: draft.id };
+  });
+}
+
+// A finished account that becomes the Super Admin through the local setup script.
+async function makeAdmin(page, email) {
+  await signInAndOnboard(page, email);
+  execSync('pnpm dev:setup', { cwd: path.resolve(__dirname, '../..'), env: { ...process.env, SUPER_ADMIN_EMAIL: email }, stdio: 'pipe' });
+}
+
 async function addToServerCart(page, productId) {
   await page.evaluate(async (id) => {
     const token = (await (await fetch('/api/v1/auth/csrf', { credentials: 'same-origin' })).json()).csrfToken;
@@ -152,20 +201,33 @@ async function addToServerCart(page, productId) {
   const products = await discoverProducts();
   const browser = await chromium.launch();
   const handle = `audit-${rand()}`;
+  const ownerEmail = `audit-owner-${rand()}@example.com`;
+  const adminEmail = `audit-admin-${rand()}@example.com`;
+  let ids = {};
   {
     const ctx = await browser.newContext({ baseURL: BASE });
     const owner = await ctx.newPage();
-    await signInAndOnboard(owner);
+    await signInAndOnboard(owner, ownerEmail);
     await createStore(owner, products, handle);
+    ids = await createListings(owner);
     await ctx.close();
+    const actx = await browser.newContext({ baseURL: BASE });
+    await makeAdmin(await actx.newPage(), adminEmail);
+    await actx.close();
   }
   let failures = 0;
   for (const scheme of schemes) for (const [w, h] of sizes) {
-    for (const signedIn of [false, true]) {
-      const list = pages.filter((p) => !!p.signedIn === signedIn);
+    for (const role of ['anon', 'user', 'owner', 'admin']) {
+      const signedIn = role !== 'anon';
+      const list = pages.filter((p) => (p.as || (p.signedIn ? 'user' : 'anon')) === role);
+      if (list.length === 0) continue;
       const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme, baseURL: BASE });
       const page = await ctx.newPage();
-      if (signedIn) {
+      if (role === 'owner') {
+        await signInOnly(page, ownerEmail);
+      } else if (role === 'admin') {
+        await signInOnly(page, adminEmail);
+      } else if (signedIn) {
         await signInAndOnboard(page);
         await addToServerCart(page, products[0].id);
         await addToServerCart(page, products[1].id);
@@ -174,7 +236,7 @@ async function addToServerCart(page, productId) {
         await ctx.addInitScript((ids) => { try { if (!localStorage.getItem('dm.cart.v1')) localStorage.setItem('dm.cart.v1', JSON.stringify(ids)); } catch {} }, [products[0].id, products[1].id]);
       }
       for (const entry of list) {
-        const p = entry.path.replace('{product}', products[0].id).replace('{handle}', handle);
+        const p = entry.path.replace('{product}', products[0].id).replace('{handle}', handle).replace('{listing}', ids.live).replace('{draft}', ids.draft);
         await page.goto(BASE + p, { waitUntil: 'networkidle' });
         // client screens fill in after the first paint: wait for a heading and for loading to settle
         await page.getByRole('heading', { level: 1 }).first().waitFor();
@@ -201,7 +263,7 @@ async function addToServerCart(page, productId) {
         r.names.forEach((x) => issues.push(x)); r.h.forEach((x) => issues.push('HEAD ' + x));
         r.touch.forEach((x) => issues.push('TOUCH ' + x)); r.contrast.forEach((x) => issues.push('CONTRAST ' + x));
         focus.forEach((x) => issues.push('FOCUS ' + x));
-        const L = r.landmarks; if (L.main !== 1) issues.push('LM main=' + L.main); if (!L.banner) issues.push('LM banner missing'); if (!L.footer) issues.push('LM footer=' + L.footer); L.unlabelledNavs.forEach((x) => issues.push('LM unlabelled nav ' + x));
+        const L = r.landmarks; if (L.main !== 1) issues.push('LM main=' + L.main); if (!L.banner) issues.push('LM banner missing'); if (!L.footer && !entry.operator) issues.push('LM footer=' + L.footer); L.unlabelledNavs.forEach((x) => issues.push('LM unlabelled nav ' + x));
         failures += issues.length;
         console.log(`== ${key}: ${issues.length} issues (contrast nodes ${r.n} min ${r.min && r.min.toFixed(2)})`);
         issues.slice(0, +process.env.MAX || 12).forEach((x) => console.log('   ' + x));

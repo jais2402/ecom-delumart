@@ -94,6 +94,8 @@ export {
   terminateStuckMoneySessions,
 } from "./jobs";
 export {
+  type AppealQueueItem,
+  type AppealView,
   allocateAndPublish,
   archiveProduct,
   createDraft,
@@ -129,6 +131,29 @@ export {
   updateDraft,
   type WarehouseView,
 } from "./listing";
+export {
+  type BrandProgress,
+  type CouponInput,
+  type CouponStatus,
+  type CouponTerms,
+  createCoupon,
+  type Earnings,
+  type EarningsTotals,
+  type Inventory,
+  type MerchantCoupon,
+  type MerchantOrder,
+  type MyCoupons,
+  myBrandProgress,
+  myCoupons,
+  myEarnings,
+  myInventory,
+  mySellerOrder,
+  mySellerOrders,
+  type PublicCoupon,
+  type SellerOrderLineView,
+  setCouponStatus,
+  storeCoupons,
+} from "./merchant";
 export {
   type OnboardingStatus,
   onboardingStatus,
@@ -166,6 +191,28 @@ export {
 } from "./provision";
 export { type RateHitInput, rateHit } from "./rate";
 export { claimRelief, type ReliefClaim, type ReliefReason, type ReliefStatus, reliefStatus } from "./relief";
+export {
+  type AppealResolution,
+  adminReports,
+  blockStore,
+  type CaseResolution,
+  createAppeal,
+  createReport,
+  type MyReport,
+  myAppeals,
+  myBlocks,
+  myReports,
+  type ReportCase,
+  type ReportCaseReport,
+  type ReportCaseStatus,
+  type ReportInput,
+  type ReportReceipt,
+  type ReportTargetType,
+  resolveAppeal,
+  resolveReportCase,
+  type StoreBlock,
+  unblockStore,
+} from "./safety";
 export {
   SEED_PRODUCT_NAMESPACE,
   type SeedCategoryInput,

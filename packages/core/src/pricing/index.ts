@@ -316,3 +316,5 @@ export function price(q: Quote): Priced {
 
   return { lines, perSeller, buyerTotal, mint, sink, postings };
 }
+
+export * from "./reference-price";
