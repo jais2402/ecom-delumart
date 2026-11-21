@@ -394,21 +394,6 @@ export async function createPaymentAttempt(
   });
 }
 
-/**
- * Marks a PENDING CARD attempt authenticated. PIN verification is out of scope here: only
- * the caller that has just verified the PIN calls this (the check moves into the database
- * function when PIN storage is built).
- */
-export async function markAttemptAuthenticated(
-  pool: Pool,
-  input: { authSessionId: string; attemptId: string },
-): Promise<void> {
-  requireUuid(input.attemptId, "attemptId");
-  await asPay(pool, input.authSessionId, async (c) => {
-    await c.query("SELECT core.mark_attempt_authenticated($1)", [input.attemptId]);
-  });
-}
-
 // ---------------------------------------------------------------------------- B3: pay
 
 interface StoredReceipt {

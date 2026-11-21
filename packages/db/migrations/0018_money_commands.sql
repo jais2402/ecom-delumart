@@ -697,7 +697,7 @@ END $$;
 
 -- ---------------------------------------------------------------- payment attempts
 -- A PENDING attempt on one of the actor's open sessions; BALANCE is authenticated at once by
--- the signed-in session itself, CARD only after its PIN step (mark_attempt_authenticated).
+-- the signed-in session itself, CARD only by its PIN step (core.verify_card_pin, 0025).
 CREATE FUNCTION core.create_payment_attempt(session_id uuid, method text, card_id uuid) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp SET lock_timeout = '2s' AS $$
 DECLARE
@@ -759,32 +759,6 @@ BEGIN
   SET CONSTRAINTS ALL IMMEDIATE;
   SET CONSTRAINTS ALL DEFERRED;
   RETURN jsonb_build_object('attemptId', aid, 'reference', ref, 'method', method, 'authenticated', method = 'BALANCE');
-END $$;
-
--- Marks the actor's PENDING CARD attempt authenticated (stamped by the database clock, once).
--- The PIN is still verified by the caller: this trusts the application for the PIN result
--- until PIN storage is built, when the PIN check moves into this function.
-CREATE FUNCTION core.mark_attempt_authenticated(attempt_id uuid) RETURNS void
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp SET lock_timeout = '2s' AS $$
-DECLARE
-  actor uuid := core.actor_id();
-  a     record;
-BEGIN
-  IF actor IS NULL THEN
-    PERFORM core.fail('FORBIDDEN', 'sign in to continue');
-  END IF;
-  PERFORM ledger.require_read_committed();
-  SELECT pa.state, pa.method INTO a FROM core.payment_attempt pa
-   WHERE pa.id = mark_attempt_authenticated.attempt_id AND pa.user_id = actor FOR NO KEY UPDATE;
-  IF NOT FOUND THEN
-    PERFORM core.fail('NOT_FOUND', 'payment attempt not found');
-  END IF;
-  IF a.state <> 'PENDING' OR a.method <> 'CARD' THEN
-    PERFORM core.fail('CONFLICT', 'only a pending card attempt can be authenticated');
-  END IF;
-  UPDATE core.payment_attempt pa SET authenticated_at = now() WHERE pa.id = mark_attempt_authenticated.attempt_id;
-  SET CONSTRAINTS ALL IMMEDIATE;
-  SET CONSTRAINTS ALL DEFERRED;
 END $$;
 
 -- ---------------------------------------------------------------- pay (LLD §5.2)
@@ -1260,7 +1234,6 @@ GRANT EXECUTE ON FUNCTION
   core.checkout_inputs(jsonb, text),
   core.create_checkout_session(jsonb, text),
   core.create_payment_attempt(uuid, text, uuid),
-  core.mark_attempt_authenticated(uuid),
   core.commit_purchase(uuid, uuid, text, bytea, jsonb)
 TO app_pay;
 GRANT EXECUTE ON FUNCTION core.purge_idempotency_records() TO app_jobs;

@@ -58,3 +58,34 @@ export async function asPay<T>(
     throw mapCommandError(error);
   }
 }
+
+/**
+ * Runs fn as the web role app_web, signed in with the caller's sign-in session when one is given
+ * (the database derives the acting user from it), or with no identity at all for public reads.
+ * Same timeouts and error mapping as asPay.
+ */
+export async function asWeb<T>(
+  pool: Pool,
+  authSessionId: string | null,
+  fn: (c: PoolClient) => Promise<T>,
+): Promise<T> {
+  if (authSessionId !== null) requireUuid(authSessionId, "authSessionId");
+  try {
+    return await withTransaction(pool, fn, {
+      role: "app_web",
+      sessionId: authSessionId,
+      lockTimeout: "2s",
+      statementTimeout: "5s",
+    });
+  } catch (error) {
+    throw mapCommandError(error);
+  }
+}
+
+/** Runs one SELECT of a function returning jsonb (`AS r`) and returns its value. */
+export async function one<T>(c: PoolClient, sql: string, params: unknown[]): Promise<T> {
+  const { rows } = await c.query<{ r: T }>(sql, params);
+  const r = rows[0]?.r;
+  if (r === undefined || r === null) throw new Error("command returned nothing");
+  return r;
+}

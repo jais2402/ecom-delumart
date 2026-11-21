@@ -16,11 +16,14 @@
 -- these tables, so they cannot keep another buyer's pay() waiting.
 --
 --  * app_web  - ordinary web requests: reads, plus low-risk writes (own company/product
---               drafts, addresses, secrets, analytics, outbox). No money command. Coupons are
+--               drafts, addresses, analytics; own profile fields through core.update_profile).
+--               No money command and no outbox event: outbox rows (which downstream consumers
+--               trust) are written only by the owner-run definer functions and the owner
+--               itself. Coupons are
 --               created and paused only through core.create_coupon / core.set_coupon_status
 --               (0020), which generate every private coupon's code.
 --  * app_pay  - money commands only, through the functions of 0018 (EXECUTE only to it):
---               provisioning, checkout, payment attempts, attempt authentication, pay. A
+--               provisioning, checkout, payment attempts, card PIN steps, pay. A
 --               separate login with its own credential and pool; app_web is never a member
 --               of it (0001). It reads (own rows under RLS) what the pricing function needs.
 --  * app_jobs - background jobs (reconciliation, retention, expiry, delivery notices, product
@@ -148,7 +151,9 @@ GRANT SELECT ON ledger.journal, ledger.posting, ledger.grant_record, ledger.ledg
 -- no INSERT/UPDATE/DELETE on any ledger table for anyone but the owner
 
 -- ---------------------------------------------------------------- private: web only, owner rows (0012)
-GRANT SELECT, INSERT, UPDATE ON private.user_secret TO app_web;
+-- the encrypted birthdate is written once, by core.record_birthdate (0024), and never changed
+-- afterwards except by the owner: the web role reads its own row only
+GRANT SELECT ON private.user_secret TO app_web;
 GRANT SELECT, INSERT, UPDATE, DELETE ON private.address TO app_web;   -- a user removes their own address
 GRANT SELECT ON private.address TO app_pay;                            -- checkout checks the chosen address
 
@@ -161,10 +166,14 @@ GRANT SELECT ON analytics.experiment TO app_web;
 GRANT SELECT, INSERT ON analytics.experiment_exposure TO app_web;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA analytics TO app_jobs;
 
--- ---------------------------------------------------------------- audit: web appends; jobs relay and read
--- purchase_completed is written by core.commit_purchase, not by an application role
-GRANT INSERT ON audit.outbox, audit.audit_log TO app_web;
-GRANT SELECT, INSERT ON audit.outbox, audit.audit_log TO app_jobs;
+-- ---------------------------------------------------------------- audit: jobs relay and read
+-- Outbox events (purchase_completed, ...) are written ONLY by the owner-run SECURITY DEFINER
+-- command functions (core.commit_purchase, 0018) and the owner: no application role holds INSERT
+-- on audit.outbox, so nobody can forge an event that the notification, analytics, progression
+-- or cache consumers would act on. The relay (app_jobs) reads events and marks them relayed.
+GRANT INSERT ON audit.audit_log TO app_web;
+GRANT SELECT ON audit.outbox TO app_jobs;
+GRANT SELECT, INSERT ON audit.audit_log TO app_jobs;
 GRANT UPDATE (relayed_at) ON audit.outbox TO app_jobs;
 GRANT SELECT, INSERT ON audit.consumer_receipt TO app_jobs;
 -- Super Admin queues delayed actions from the web console (rows limited to the admin by RLS)

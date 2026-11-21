@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type pg from "pg";
+import { setCardPin, verifyCardPin } from "../src/card";
 import {
   createCheckoutSession,
   createPaymentAttempt,
@@ -8,6 +9,25 @@ import {
   type SellerQuote,
 } from "../src/checkout";
 import { inTx, provisionAccount, provisionInput, type TestUser, uuidv7 } from "./helpers";
+
+/** A test PIN's HMAC (the database only ever sees the 32-byte mac, never a PIN). */
+export const TEST_PIN_MAC = Buffer.alloc(32, 7);
+
+/** Sets the user's card PIN to TEST_PIN_MAC when it has none, then passes the attempt's PIN step. */
+export async function authenticateCard(pool: pg.Pool, buyer: TestUser, attemptId: string): Promise<void> {
+  const { rows } = await pool.query<{ set: boolean }>(
+    "SELECT pin_hash IS NOT NULL AS set FROM core.virtual_card WHERE id = $1",
+    [buyer.cardId],
+  );
+  if (!rows[0]?.set) {
+    await setCardPin(pool, {
+      authSessionId: buyer.authSessionId,
+      cardId: buyer.cardId,
+      pinMac: TEST_PIN_MAC,
+    });
+  }
+  await verifyCardPin(pool, { authSessionId: buyer.authSessionId, attemptId, pinMac: TEST_PIN_MAC });
+}
 
 export const RUPEE = 100n;
 export const LAKH = 100_000n * RUPEE;

@@ -2,10 +2,12 @@ import { randomBytes } from "node:crypto";
 import { DEFAULT_DELIVERY_DURATIONS_MS, DEFAULT_PRICING_CONFIG, price } from "@delulu/core";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { createCheckoutSession, createPaymentAttempt, markAttemptAuthenticated, pay } from "../src/checkout";
+import { verifyCardPin } from "../src/card";
+import { createCheckoutSession, createPaymentAttempt, pay } from "../src/checkout";
 import { MINT_ACCOUNT_ID, SINK_ACCOUNT_ID } from "../src/provision";
 import { type TransactionOptions, withTransaction } from "../src/transaction";
 import {
+  authenticateCard,
   CLEAN,
   CRORE,
   checkout,
@@ -22,6 +24,7 @@ import {
   type Seller,
   seller,
   standard,
+  TEST_PIN_MAC,
   user,
   wallet,
 } from "./checkout-fixtures";
@@ -1043,10 +1046,7 @@ describe("money attacks (security review)", () => {
         method: "CARD",
         cardId: buyer.cardId,
       });
-      await markAttemptAuthenticated(pool, {
-        authSessionId: buyer.authSessionId,
-        attemptId: attempt.attemptId,
-      });
+      await authenticateCard(pool, buyer, attempt.attemptId);
       const { rows } = await pool.query<{ recent: boolean }>(
         "SELECT authenticated_at > now() - interval '1 minute' AS recent FROM core.payment_attempt WHERE id = $1",
         [attempt.attemptId],
@@ -2201,7 +2201,7 @@ describe("money attacks (security review)", () => {
         createPaymentAttempt(pool, { authSessionId, sessionId: target.sessionId, method: "BALANCE" }),
       ),
       authenticate: await codeOf(
-        markAttemptAuthenticated(pool, { authSessionId, attemptId: target.attemptId }),
+        verifyCardPin(pool, { authSessionId, attemptId: target.attemptId, pinMac: TEST_PIN_MAC }),
       ),
       pay: await codeOf(
         pay(pool, {
@@ -2222,13 +2222,13 @@ describe("money attacks (security review)", () => {
   };
   const USER_FUNCTIONS: [string, unknown[]][] = [
     [
-      "core.provision_account($1, $2, '0000000000000000', 'a', 'a@delulu')",
+      "core.provision_account($1, $2, ARRAY['0000000000000001'], 'a', 'a@delulu')",
       [randomBytes(32), randomBytes(32)],
     ],
     ["core.checkout_inputs($1::jsonb, 'k')", ['{"productIds":[]}']],
     ["core.create_checkout_session($1::jsonb, 'k')", ['{"productIds":[]}']],
     ["core.create_payment_attempt($1, 'BALANCE', NULL)", [uuidv7()]],
-    ["core.mark_attempt_authenticated($1)", [uuidv7()]],
+    ["core.verify_card_pin($1, $2)", [uuidv7(), Buffer.alloc(32)]],
     ["core.commit_purchase($1, $2, 'k', '\\x00', NULL)", [uuidv7(), uuidv7()]],
   ];
 
@@ -2365,7 +2365,11 @@ describe("money attacks (security review)", () => {
       ).toBe("NOT_FOUND");
       expect(
         await codeOf(
-          markAttemptAuthenticated(pool, { authSessionId: a.authSessionId, attemptId: coB.attemptId }),
+          verifyCardPin(pool, {
+            authSessionId: a.authSessionId,
+            attemptId: coB.attemptId,
+            pinMac: TEST_PIN_MAC,
+          }),
         ),
       ).toBe("NOT_FOUND");
       expect(
@@ -3069,12 +3073,24 @@ describe("money attacks (security review)", () => {
           WHERE n.nspname IN ('core','ledger') AND p.prosecdef AND has_function_privilege('app_web', p.oid, 'EXECUTE')
           ORDER BY 1`,
       );
-      // the read-only questions RLS policies ask, and the coupon commands of 0020 (no money moves)
+      // the read-only questions RLS policies ask, the coupon commands of 0020 and the profile
+      // command of 0023 (no money moves), and the actor-scoped and catalog reads of 0026
       expect(fns.rows.map((r) => r.f)).toEqual([
         "core.actor_id()",
+        "core.catalog_product(uuid)",
+        "core.catalog_products(text,uuid,integer)",
         "core.create_coupon(uuid,text,bigint,bigint,timestamp with time zone,timestamp with time zone,integer,boolean,text)",
         "core.is_published_version(uuid)",
+        "core.my_collection()",
+        "core.my_order(uuid)",
+        "core.my_orders(uuid,integer)",
+        "core.my_statement(bigint,integer)",
+        "core.my_wallet()",
+        "core.owns_products(uuid[])",
+        "core.page_size(integer)",
+        "core.reveal_card_number(uuid)",
         "core.set_coupon_status(uuid,text)",
+        "core.update_profile(text,jsonb,boolean)",
       ]);
     });
 
@@ -3095,8 +3111,16 @@ describe("money attacks (security review)", () => {
         "core.create_checkout_session(jsonb,text)",
         "core.create_payment_attempt(uuid,text,uuid)",
         "core.is_published_version(uuid)",
-        "core.mark_attempt_authenticated(uuid)",
-        "core.provision_account(bytea,bytea,text,text,text)",
+        "core.my_wallet()",
+        "core.onboarding_status()",
+        "core.owns_products(uuid[])",
+        "core.provision_account(bytea,bytea,text[],text,text)",
+        "core.record_birthdate(bytea,boolean)",
+        "core.record_phone_verified(bytea,bytea)",
+        "core.reset_card_pin(uuid,bytea)",
+        "core.set_card_frozen(uuid,boolean)",
+        "core.set_card_pin(uuid,bytea,bytea)",
+        "core.verify_card_pin(uuid,bytea)",
       ]);
       expect(by("app_jobs")).toEqual([
         "core.identity_is_tombstoned(bytea,bytea)",

@@ -4,6 +4,7 @@ import { provisionAccount as provisionAs, SINK_ACCOUNT_ID } from "../src/provisi
 import { withTransaction } from "../src/transaction";
 import {
   createTestDatabase,
+  onboard,
   provisionAccount,
   provisionInput,
   sessionFor,
@@ -69,7 +70,7 @@ describe("provisionAccount", () => {
       "SELECT status, card_number FROM core.virtual_card WHERE user_id = $1",
       [input.userId],
     );
-    expect(card.rows).toEqual([{ status: "ACTIVE", card_number: input.cardNumber }]);
+    expect(card.rows).toEqual([{ status: "ACTIVE", card_number: input.cardNumbers[0] }]);
     const profile = await pool.query(
       "SELECT 1 FROM core.user_profile WHERE id = $1 AND provisioned_at IS NOT NULL",
       [input.userId],
@@ -80,11 +81,123 @@ describe("provisionAccount", () => {
   it("US-14: calling again returns the existing records and never grants twice", async () => {
     const input = provisionInput();
     const first = await provisionAccount(pool, input);
-    const again = await provisionAccount(pool, { ...input, cardNumber: provisionInput().cardNumber });
+    const again = await provisionAccount(pool, { ...input, cardNumbers: provisionInput().cardNumbers });
     expect(again).toEqual({ ...first, created: false });
     expect(
       await count(pool, "SELECT count(*) AS n FROM ledger.grant_record WHERE user_id = $1", [input.userId]),
     ).toBe(1);
+  });
+
+  describe("review fix: provisioning is no oracle for card numbers or fingerprints", () => {
+    const codeOf = (p: Promise<unknown>) =>
+      p.then(
+        () => "ok",
+        (e: { code?: string }) => e.code ?? "unknown",
+      );
+    const messageOf = (p: Promise<unknown>) =>
+      p.then(
+        () => "ok",
+        (e: Error) => e.message,
+      );
+
+    it("the first unused candidate card number is stored", async () => {
+      const taken = await provisionAccount(pool, provisionInput());
+      const input = provisionInput();
+      const free = input.cardNumbers[1] ?? "";
+      const r = await provisionAccount(pool, { ...input, cardNumbers: [taken.cardNumber, free] });
+      expect(r.cardNumber).toBe(free);
+    });
+
+    it("when every candidate is taken: one generic retryable BUSY, nothing created", async () => {
+      const a = await provisionAccount(pool, provisionInput());
+      const b = await provisionAccount(pool, provisionInput());
+      const input = provisionInput();
+      const outcome = await codeOf(
+        provisionAccount(pool, { ...input, cardNumbers: [a.cardNumber, b.cardNumber] }),
+      );
+      expect(outcome).toBe("BUSY");
+      expect(
+        await count(pool, "SELECT count(*) AS n FROM ledger.ledger_account WHERE user_id = $1", [
+          input.userId,
+        ]),
+      ).toBe(0);
+      // a retry with fresh candidates succeeds
+      expect((await provisionAccount(pool, input)).created).toBe(true);
+    });
+
+    it("a taken alias or DeluluPay id is the same generic BUSY", async () => {
+      const a = await provisionAccount(pool, provisionInput());
+      const { rows } = await pool.query<{ alias: string; upi_style_id: string }>(
+        "SELECT alias, upi_style_id FROM core.bank_account WHERE id = $1",
+        [a.bankAccountId],
+      );
+      const taken = rows[0];
+      if (!taken) throw new Error("fixture");
+      expect(await codeOf(provisionAccount(pool, { ...provisionInput(), alias: taken.alias }))).toBe("BUSY");
+      expect(
+        await codeOf(provisionAccount(pool, { ...provisionInput(), upiStyleId: taken.upi_style_id })),
+      ).toBe("BUSY");
+    });
+
+    it("candidates must be 1–5 DeluluMart-shaped numbers that fail the Luhn check (never a real card number)", async () => {
+      const input = provisionInput();
+      const good = input.cardNumbers[0] ?? "";
+      for (const cardNumbers of [
+        [],
+        [good, good, good, good, good, good],
+        ["4111111111111111"], // a real-looking, Luhn-valid number
+        ["0000000000000000"], // Luhn-valid
+        ["123"],
+      ]) {
+        const authSessionId = await sessionFor(pool, input.userId);
+        const outcome = await codeOf(provisionAs(pool, { ...asCall(input, authSessionId), cardNumbers }));
+        expect(outcome, JSON.stringify(cardNumbers)).toBe("VALIDATION_FAILED");
+      }
+      // the database refuses them too, whatever the TypeScript layer lets through
+      const authSessionId = await sessionFor(pool, input.userId);
+      const raw = await withTransaction(
+        pool,
+        (c) =>
+          c
+            .query("SELECT core.provision_account($1, $2, $3::text[], 'alias-x', 'x@delulu')", [
+              input.emailFingerprint,
+              input.phoneFingerprint,
+              ["0000000000000000", good, good, good, good, good],
+            ])
+            .then(
+              () => "ok",
+              (e: { hint?: string }) => e.hint ?? "unknown",
+            ),
+        { role: "app_pay", sessionId: authSessionId },
+      );
+      expect(raw).toBe("VALIDATION_FAILED");
+    });
+
+    it("an email or a phone fingerprint held by another account: one uniform CONFLICT that does not say which", async () => {
+      const holder = provisionInput();
+      await provisionAccount(pool, holder);
+      const byEmail = await messageOf(
+        provisionAccount(pool, { ...provisionInput(), emailFingerprint: holder.emailFingerprint }),
+      );
+      const byPhone = await messageOf(
+        provisionAccount(pool, { ...provisionInput(), phoneFingerprint: holder.phoneFingerprint }),
+      );
+      const byBoth = await messageOf(
+        provisionAccount(pool, {
+          ...provisionInput(),
+          emailFingerprint: holder.emailFingerprint,
+          phoneFingerprint: holder.phoneFingerprint,
+        }),
+      );
+      expect(byEmail).toBe(byPhone);
+      expect(byPhone).toBe(byBoth);
+      expect(
+        await codeOf(
+          provisionAccount(pool, { ...provisionInput(), phoneFingerprint: holder.phoneFingerprint }),
+        ),
+      ).toBe("CONFLICT");
+      expect(byEmail).not.toMatch(/card|email only|phone only/i);
+    });
   });
 
   async function tombstone(fingerprint: Buffer, kind: "EMAIL" | "PHONE", expiresIn: string): Promise<void> {
@@ -114,6 +227,7 @@ describe("provisionAccount", () => {
     if (!input.phoneFingerprint) throw new Error("fixture has a phone");
     await tombstone(input.phoneFingerprint, "PHONE", "30 days");
     const authSessionId = await sessionFor(pool, input.userId);
+    await onboard(pool, input, authSessionId);
     const r = await withLogin(db.url, "app_pay", (p) => provisionAs(p, asCall(input, authSessionId)));
     expect(r.created).toBe(true);
     expect(r.walletPaise).toBe(0n);
@@ -145,6 +259,7 @@ describe("provisionAccount", () => {
     const input = provisionInput();
     const authSessionId = await sessionFor(pool, input.userId);
     await withLogin(db.url, "app_pay", async (appPayPool) => {
+      await onboard(appPayPool, input, authSessionId);
       const r = await provisionAs(appPayPool, asCall(input, authSessionId));
       expect(r.created).toBe(true);
       expect(r.userId).toBe(input.userId);
@@ -340,14 +455,14 @@ function asCall(input: TestProvisionInput, authSessionId: string) {
     authSessionId,
     emailFingerprint: input.emailFingerprint,
     phoneFingerprint: input.phoneFingerprint,
-    cardNumber: input.cardNumber,
+    cardNumbers: input.cardNumbers,
     alias: input.alias,
     upiStyleId: input.upiStyleId,
   };
 }
 
 function pick(i: ReturnType<typeof provisionInput>) {
-  return { cardNumber: i.cardNumber, alias: i.alias, upiStyleId: i.upiStyleId };
+  return { cardNumbers: i.cardNumbers, alias: i.alias, upiStyleId: i.upiStyleId };
 }
 
 /**

@@ -1,8 +1,9 @@
 import type pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { createCheckoutSession, createPaymentAttempt, markAttemptAuthenticated, pay } from "../src/checkout";
+import { createCheckoutSession, createPaymentAttempt, pay } from "../src/checkout";
 import { SINK_ACCOUNT_ID } from "../src/provision";
 import {
+  authenticateCard,
   CLEAN,
   CRORE,
   checkout,
@@ -513,10 +514,7 @@ describe("checkout and pay (LLD §5.2)", () => {
       expect(outcome).toBe("PAYMENT_PENDING");
       expect(await attemptState(attempt.attemptId)).toEqual({ state: "PENDING", failure_code: null });
 
-      await markAttemptAuthenticated(pool, {
-        authSessionId: buyer.authSessionId,
-        attemptId: attempt.attemptId,
-      });
+      await authenticateCard(pool, buyer, attempt.attemptId);
       const receipt = await pay(pool, input);
       expect(receipt.paymentReference).toBe(attempt.reference);
     });
@@ -536,10 +534,7 @@ describe("checkout and pay (LLD §5.2)", () => {
         method: "CARD",
         cardId: buyer.cardId,
       });
-      await markAttemptAuthenticated(pool, {
-        authSessionId: buyer.authSessionId,
-        attemptId: attempt.attemptId,
-      });
+      await authenticateCard(pool, buyer, attempt.attemptId);
       await pool.query("UPDATE core.virtual_card SET status = 'FROZEN' WHERE id = $1", [buyer.cardId]);
       try {
         const outcome = await expectNothingDebited(buyer.ledgerAccountId, session.sessionId, () =>

@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
+import { generateCardNumber } from "@delulu/core";
 import pg from "pg";
 import { migrate } from "../src/migrate";
+import { onboardingStatus, recordBirthdate, recordPhoneVerified } from "../src/onboarding";
 import {
   type ProvisionInput,
   type ProvisionResult,
@@ -267,38 +269,80 @@ let counter = 0;
 export type TestProvisionInput = Omit<ProvisionInput, "authSessionId"> & {
   userId: string;
   authSessionId?: string;
+  /** Stand-in for the AES-256-GCM ciphertext of the birthdate (the database never decrypts it). */
+  birthdateEnc: Buffer;
+  isAdult: boolean;
 };
 
 /** A provisioned user with a live sign-in session (the caller's bearer secret). */
 export type TestUser = ProvisionResult & { authSessionId: string };
 
-/** Fresh, unique provisioning input. Card numbers are synthetic 16-digit strings. */
+/** A DeluluMart card number (LLD §5.4: Luhn-invalid by construction) from a random test key. */
+export function cardNumberFor(userId: string, sequence = 0): string {
+  return generateCardNumber({
+    cardKey: randomBytes(32),
+    userId,
+    birthdate: "1990-01-01",
+    sequence,
+    prefix: "042424",
+  });
+}
+
+/** Fresh, unique provisioning input. Card numbers come from the card-number algorithm. */
 export function provisionInput(overrides: Partial<TestProvisionInput> = {}): TestProvisionInput {
   counter += 1;
   const tag = randomBytes(4).toString("hex");
-  const digits = (BigInt(`0x${randomBytes(8).toString("hex")}`) % 10n ** 15n).toString().padStart(15, "0");
+  const userId = overrides.userId ?? uuidv7();
   return {
-    userId: uuidv7(),
+    userId,
     emailFingerprint: randomBytes(32),
     phoneFingerprint: randomBytes(32),
-    cardNumber: `0${digits}`,
+    cardNumbers: [cardNumberFor(userId, 0), cardNumberFor(userId, 1)],
     alias: `alias-${tag}-${counter}`,
     upiStyleId: `u${tag}${counter}@delulu`,
+    birthdateEnc: randomBytes(40),
+    isAdult: true,
     ...overrides,
   };
 }
 
 /**
- * Signs the user up with the auth service (auth.users row and a live session, committed) and
- * provisions them through core.provision_account as app_pay with that session.
+ * The onboarding steps before provisioning (LLD §7.1), as app_pay with the user's session: the
+ * verified phone (which creates the profile with the email fingerprint) and the encrypted
+ * birthdate. Steps already done are skipped; a user without a phone fingerprint skips the phone.
+ */
+export async function onboard(
+  pool: pg.Pool,
+  input: Pick<TestProvisionInput, "emailFingerprint" | "phoneFingerprint" | "birthdateEnc" | "isAdult">,
+  authSessionId: string,
+): Promise<void> {
+  const status = await onboardingStatus(pool, { authSessionId });
+  if (status.provisioned) return;
+  if (!status.phoneVerified && input.phoneFingerprint) {
+    await recordPhoneVerified(pool, {
+      authSessionId,
+      phoneFingerprint: input.phoneFingerprint,
+      emailFingerprint: input.emailFingerprint,
+    });
+  }
+  if (!status.hasBirthdate && input.phoneFingerprint) {
+    await recordBirthdate(pool, { authSessionId, birthdateEnc: input.birthdateEnc, isAdult: input.isAdult });
+  }
+}
+
+/**
+ * Signs the user up with the auth service (auth.users row and a live session, committed), runs
+ * the onboarding steps and provisions them through core.provision_account as app_pay with that
+ * session.
  */
 export async function provisionAccount(pool: pg.Pool, input: TestProvisionInput): Promise<TestUser> {
   const authSessionId = input.authSessionId ?? (await sessionFor(pool, input.userId));
+  await onboard(pool, input, authSessionId);
   const result = await provisionAccountAs(pool, {
     authSessionId,
     emailFingerprint: input.emailFingerprint,
     phoneFingerprint: input.phoneFingerprint,
-    cardNumber: input.cardNumber,
+    cardNumbers: input.cardNumbers,
     alias: input.alias,
     upiStyleId: input.upiStyleId,
   });

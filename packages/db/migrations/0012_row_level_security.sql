@@ -175,7 +175,7 @@ CREATE POLICY web_owner_update ON core.company FOR UPDATE TO app_web
 CREATE POLICY pay_read ON core.company FOR SELECT TO app_pay USING (true);
 
 -- ---------------------------------------------------------------- owner-scoped (user_id column)
--- app_web: own rows, read-only except its own secrets and addresses (grants in 0011).
+-- app_web: own rows, read-only except its own addresses (grants in 0011).
 -- app_pay: own rows, read-only (the money commands are the functions of 0018).
 DO $$
 DECLARE
@@ -193,7 +193,7 @@ BEGIN
       ('core.membership',         'user_id',       false, true),
       ('core.coupon_redemption',  'user_id',       false, true),
       ('ledger.grant_record',     'user_id',       false, true),
-      ('private.user_secret',     'user_id',       true,  false),
+      ('private.user_secret',     'user_id',       false, false),
       ('private.address',         'user_id',       true,  false)
     ) AS v(tbl, col, web_writes, pay)
   LOOP
@@ -331,7 +331,7 @@ CREATE POLICY pay_owner ON ledger.wallet FOR SELECT TO app_pay
                          WHERE a.type = 'USER' AND a.user_id = core.actor_id()));
 
 -- ---------------------------------------------------------------- audit and analytics: append-only for the web
-CREATE POLICY web_append ON audit.outbox      FOR INSERT TO app_web WITH CHECK (true);
+-- (no outbox policy for app_web: outbox events are written only by definer functions, 0011)
 CREATE POLICY web_append ON audit.audit_log   FOR INSERT TO app_web WITH CHECK (true);
 CREATE POLICY web_append ON analytics.event   FOR INSERT TO app_web WITH CHECK (true);
 

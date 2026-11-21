@@ -365,7 +365,7 @@ describe("security hardening (review findings)", () => {
       expect(visible).toEqual([{ id: f.sellerOrderB, net_paise: "9500" }]);
     });
 
-    it("app_web cannot read tombstones, audit or raw analytics, but can append outbox, audit_log and analytics events", async () => {
+    it("app_web cannot read tombstones, audit or raw analytics, but can append audit_log and analytics events", async () => {
       for (const sql of [
         "SELECT 1 FROM core.identity_tombstone",
         "SELECT 1 FROM audit.outbox",
@@ -377,12 +377,30 @@ describe("security hardening (review findings)", () => {
         expect(await stateOf(pool, sql, [], web()), sql).toBe("42501");
       }
       for (const sql of [
-        "INSERT INTO audit.outbox (event_id, type, payload, payload_version) VALUES (gen_random_uuid(), 't', '{}', 1)",
         "INSERT INTO audit.audit_log (actor_kind, action, row_hash) VALUES ('SYSTEM', 'x', '\\x00')",
         "INSERT INTO analytics.event (event_id, type, occurred_at, props) VALUES (gen_random_uuid(), 't', now(), '{}')",
       ]) {
         expect(await stateOf(pool, sql, [], web()), sql).toBe("no error");
       }
+    });
+
+    it("review fix (outbox forgery): no application role inserts outbox events; only definer functions and the owner write them", async () => {
+      const insert =
+        "INSERT INTO audit.outbox (event_id, type, aggregate_id, payload, payload_version) VALUES (gen_random_uuid(), 'purchase_completed', gen_random_uuid(), '{}', 1)";
+      for (const role of ["app_web", "app_pay", "app_jobs", "npc_worker", "research_ro"]) {
+        expect(await stateOf(pool, insert, [], { role, userId: f.a.userId }), role).toBe("42501");
+      }
+      const { rows } = await pool.query<{ r: string }>(
+        `SELECT r FROM unnest(ARRAY['app_web','app_pay','app_jobs','npc_worker','research_ro','anon','authenticated']) r
+          WHERE has_any_column_privilege(r, 'audit.outbox', 'INSERT')`,
+      );
+      expect(rows).toEqual([]);
+      // the relay still marks events relayed
+      expect(
+        await stateOf(pool, "UPDATE audit.outbox SET relayed_at = now() WHERE id = -1", [], {
+          role: "app_jobs",
+        }),
+      ).toBe("no error");
     });
 
     it("app_web sees only published product versions (plus its own company's drafts)", async () => {

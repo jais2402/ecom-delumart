@@ -1,3 +1,4 @@
+import { DomainError } from "@delulu/core";
 import type { Pool } from "pg";
 import { asPay } from "./command";
 
@@ -19,8 +20,12 @@ export interface ProvisionInput {
   emailFingerprint: Buffer;
   /** HMAC of the verified E.164 number; null if not yet verified. */
   phoneFingerprint: Buffer | null;
-  /** 16-digit display number from the card-number algorithm (LLD §5.4). */
-  cardNumber: string;
+  /**
+   * 1–5 candidate 16-digit display numbers from the card-number algorithm (LLD §5.4), e.g. for
+   * sequences 0..4. The database stores the first one nobody holds; when all are taken it answers
+   * BUSY (retry with fresh candidates) without saying which collided.
+   */
+  cardNumbers: readonly string[];
   alias: string;
   upiStyleId: string;
 }
@@ -56,13 +61,17 @@ interface StoredProvision {
  * bank account, wallet, STARTER grant journal, grant record, one ACTIVE card. The grant is
  * skipped when the stored email or phone fingerprint matches an unexpired identity tombstone.
  * Concurrent and repeated calls return the existing records; the grant is never repeated
- * (US-01, US-14). Runs as the money-command role app_pay.
+ * (US-01, US-14). A fingerprint held by another account is one uniform CONFLICT. Runs as the
+ * money-command role app_pay.
  */
 export async function provisionAccount(pool: Pool, input: ProvisionInput): Promise<ProvisionResult> {
+  if (!Array.isArray(input.cardNumbers) || input.cardNumbers.length < 1 || input.cardNumbers.length > 5) {
+    throw new DomainError("VALIDATION_FAILED", "give 1–5 candidate card numbers");
+  }
   const stored = await asPay(pool, input.authSessionId, async (c) => {
     const { rows } = await c.query<{ r: StoredProvision }>(
-      "SELECT core.provision_account($1, $2, $3, $4, $5) AS r",
-      [input.emailFingerprint, input.phoneFingerprint, input.cardNumber, input.alias, input.upiStyleId],
+      "SELECT core.provision_account($1, $2, $3::text[], $4, $5) AS r",
+      [input.emailFingerprint, input.phoneFingerprint, [...input.cardNumbers], input.alias, input.upiStyleId],
     );
     const r = rows[0]?.r;
     if (!r) throw new Error("provision_account returned nothing");
