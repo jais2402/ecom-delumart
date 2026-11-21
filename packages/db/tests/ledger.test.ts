@@ -192,12 +192,20 @@ describe("ledger invariants", () => {
       expect(rows.filter((r) => r.has)).toEqual([]);
       expect(rows.length).toBe(36);
     });
-    // COMPENSATION is an admin action and runs as app_jobs (insert-only, not read-only). The
-    // user's own journals (grants at provisioning, purchases) are written by the owner-run
-    // command functions (0018); app_web and app_pay insert none directly.
-    it("app_jobs can still INSERT a balanced COMPENSATION journal (insert-only, not read-only)", async () => {
+    // COMPENSATION is an admin action that only the owner may post (fourth review: the job
+    // runner could mint uncapped compensation). The user's own journals (grants at provisioning,
+    // purchases) are written by the owner-run command functions (0018); no application role
+    // inserts any directly.
+    it("app_jobs cannot INSERT a journal; the owner can still post a balanced COMPENSATION", async () => {
+      expect(
+        await stateOf(
+          pool,
+          "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'COMPENSATION', 1)",
+          [uuidv7()],
+          { role: "app_jobs" },
+        ),
+      ).toBe("42501");
       const state = await inRolledBackTx(pool, async (c) => {
-        await c.query("SET LOCAL ROLE app_jobs");
         const id = await insertJournal(c, [
           [MINT_ACCOUNT_ID, -7n],
           [userAccount, 7n],

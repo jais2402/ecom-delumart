@@ -139,7 +139,7 @@ describe("checkout concurrency (separate connections)", () => {
 
   it("US-41: a coupon with max_redemptions 1 used by two buyers concurrently is redeemed once", async () => {
     const s = await seller(pool);
-    const couponId = await merchantCoupon(pool, s, { code: "JUSTONE", percent: 10, maxRedemptions: 1 });
+    const { id: couponId, code } = await merchantCoupon(pool, s, { percent: 10, maxRedemptions: 1 });
     const p1 = await product(pool, {
       seller: s,
       mode: "STANDARD_STOCKED",
@@ -154,8 +154,8 @@ describe("checkout concurrency (separate connections)", () => {
     });
     const a = await user(pool);
     const b = await user(pool);
-    const coA = await checkout(pool, a, [p1], standard(s), "JUSTONE");
-    const coB = await checkout(pool, b, [p2], standard(s), "JUSTONE");
+    const coA = await checkout(pool, a, [p1], standard(s), code);
+    const coB = await checkout(pool, b, [p2], standard(s), code);
 
     const { codes } = await settle([payFor(pool, a, coA), payFor(pool, b, coB)]);
 

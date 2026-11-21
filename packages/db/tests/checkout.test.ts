@@ -257,14 +257,15 @@ describe("checkout and pay (LLD §5.2)", () => {
     it("US-41: a 10% merchant coupon on ₹2 crore debits ₹1.8 crore + delivery, credits the seller ₹1.71 crore and SINK ₹9 lakh + delivery", async () => {
       const buyer = await user(pool);
       const s = await seller(pool);
-      const couponId = await merchantCoupon(pool, s, { code: "MONSOON10", percent: 10 });
+      const { id: couponId, code } = await merchantCoupon(pool, s, { percent: 10 });
       const p = await product(pool, {
         seller: s,
         mode: "STANDARD_STOCKED",
         pricePaise: 2n * CRORE,
         units: 1,
       });
-      const co = await checkout(pool, buyer, [p], standard(s), "monsoon10");
+      // the buyer may type it in lower case
+      const co = await checkout(pool, buyer, [p], standard(s), code.toLowerCase());
       expect(co.totalPaise).toBe((18n * CRORE) / 10n + STANDARD_DELIVERY);
 
       const receipt = await payFor(pool, buyer, co);
@@ -292,7 +293,7 @@ describe("checkout and pay (LLD §5.2)", () => {
 
     it("US-41: the company owner cannot redeem their own coupon", async () => {
       const s = await seller(pool);
-      await merchantCoupon(pool, s, { code: "OWNERS", percent: 10 });
+      const { code } = await merchantCoupon(pool, s, { percent: 10 });
       const p = await product(pool, {
         seller: s,
         mode: "STANDARD_STOCKED",
@@ -304,7 +305,7 @@ describe("checkout and pay (LLD §5.2)", () => {
           authSessionId: s.owner.authSessionId,
           lines: [{ productId: p.id }],
           speedBySeller: standard(s),
-          couponCode: "OWNERS",
+          couponCode: code,
           idempotencyKey: key(),
         }),
       );
@@ -314,7 +315,7 @@ describe("checkout and pay (LLD §5.2)", () => {
     it("US-41: one redemption per buyer", async () => {
       const buyer = await user(pool);
       const s = await seller(pool);
-      await merchantCoupon(pool, s, { code: "ONCE", percent: 10 });
+      const { code } = await merchantCoupon(pool, s, { percent: 10 });
       const p1 = await product(pool, {
         seller: s,
         mode: "STANDARD_STOCKED",
@@ -328,12 +329,12 @@ describe("checkout and pay (LLD §5.2)", () => {
         units: 1,
       });
       // two sessions quoted before either is paid: the second is refused at pay
-      const first = await checkout(pool, buyer, [p1], standard(s), "ONCE");
-      const second = await checkout(pool, buyer, [p2], standard(s), "ONCE");
+      const first = await checkout(pool, buyer, [p1], standard(s), code);
+      const second = await checkout(pool, buyer, [p2], standard(s), code);
       await payFor(pool, buyer, first);
       expect(await codeOf(payFor(pool, buyer, second))).toBe("COUPON_NOT_APPLICABLE");
       // and a new quote is refused up front
-      expect(await codeOf(checkout(pool, buyer, [p2], standard(s), "ONCE"))).toBe("COUPON_NOT_APPLICABLE");
+      expect(await codeOf(checkout(pool, buyer, [p2], standard(s), code))).toBe("COUPON_NOT_APPLICABLE");
     });
   });
 

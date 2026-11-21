@@ -56,6 +56,8 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
   /** a writer the grants did not stop (helpers.ts): the structural rules alone refuse it */
   const raw = (): Actor => ({ role: RAW_WRITER, userId: a.userId });
   const jobs: Actor = { role: "app_jobs" };
+  /** the database owner (the only role that may post admin journal types) */
+  const owner: Actor = {};
 
   beforeAll(async () => {
     db = await createTestDatabase();
@@ -67,10 +69,10 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
     await db.drop();
   });
 
-  describe("A1: app_web and app_pay insert no journal at all; admin types only in the job runner", () => {
+  describe("A1: no application role inserts a journal at all; admin types only by the owner", () => {
     for (const type of ["COMPENSATION", "REVERSAL", "ACCOUNT_RETIREMENT"]) {
       for (const role of ["app_web", "app_pay"]) {
-        it(`${role} cannot insert a ${type} journal (admin actions run in the job runner)`, async () => {
+        it(`${role} cannot insert a ${type} journal (admin actions: the owner only)`, async () => {
           expect(
             await stateOf(
               pool,
@@ -125,8 +127,8 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
       }
     });
 
-    it("app_jobs may post a COMPENSATION journal crediting one user from MINT", async () => {
-      const state = await commitState(pool, jobs, (c) =>
+    it("only the owner may post a COMPENSATION journal crediting one user from MINT; the job runner may not (fourth review)", async () => {
+      const compensate = (c: pg.PoolClient) =>
         journal(
           c,
           "COMPENSATION",
@@ -135,30 +137,25 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
             [a.ledgerAccountId, 5],
           ],
           [a.ledgerAccountId],
-        ),
-      );
-      expect(state).toBe("no error");
+        );
+      expect(await commitState(pool, jobs, compensate)).toBe("42501");
+      expect(await commitState(pool, owner, compensate)).toBe("no error");
     });
 
     for (const type of ["REVERSAL", "ACCOUNT_RETIREMENT"]) {
-      it(`app_jobs may insert a ${type} journal row`, async () => {
-        expect(
-          await stateOf(
-            pool,
-            "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, $2, 1)",
-            [uuidv7(), type],
-            jobs,
-          ),
-        ).toBe("no error");
+      it(`only the owner may insert a ${type} journal row (not the job runner)`, async () => {
+        const insert = "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, $2, 1)";
+        expect(await stateOf(pool, insert, [uuidv7(), type], jobs)).toBe("42501");
+        expect(await stateOf(pool, insert, [uuidv7(), type], owner)).toBe("no error");
       });
     }
   });
 
   describe("A2: every USER account that received postings has a matching wallet at commit", () => {
-    it("an application role: a journal debiting a user without a wallet update is rejected at commit", async () => {
-      // (app_pay's own debits are PURCHASEs, which need a whole order group, 0016; the job
-      // runner's REVERSAL debits a user the same way)
-      const message = await commitError(pool, jobs, (c) =>
+    it("a journal debiting a user without a wallet update is rejected at commit", async () => {
+      // (app_pay's own debits are PURCHASEs, which need a whole order group, 0016; an owner
+      // REVERSAL debits a user the same way)
+      const message = await commitError(pool, owner, (c) =>
         journal(c, "REVERSAL", [
           [a.ledgerAccountId, -700],
           [SINK_ACCOUNT_ID, 700],
@@ -169,8 +166,8 @@ describe("ledger gaps: journal types by role, wallet sync at commit, MINT in PUR
 
     it("crediting another user's account without syncing their wallet is rejected at commit", async () => {
       // (since 0016 only a complete PURCHASE credits another user from a user's journal, so
-      // the credit here comes from the job runner's COMPENSATION)
-      const message = await commitError(pool, jobs, (c) =>
+      // the credit here comes from an owner COMPENSATION)
+      const message = await commitError(pool, owner, (c) =>
         journal(c, "COMPENSATION", [
           [MINT_ACCOUNT_ID, -800],
           [b.ledgerAccountId, 800],

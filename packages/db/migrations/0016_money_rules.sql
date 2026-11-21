@@ -7,7 +7,7 @@
 --      tombstoned), RELIEF_GRANT (exactly ledger.relief_grant_paise(), one per user per
 --      UTC day, at most ledger.relief_lifetime_max() per user, only while the wallet was
 --      below ledger.relief_wallet_ceiling_paise() before the grant), and COMPENSATION /
---      REVERSAL, which only app_jobs (or the owner) may create.
+--      REVERSAL, which only the database owner may create (fourth security review).
 --  R2  PURCHASE, COMPANY_REGISTRATION, WAREHOUSE_PURCHASE, MEMBERSHIP: exactly one USER
 --      account is debited and it is the ledger account of the acting user (core.actor_id(),
 --      derived from the sign-in session); SINK is only
@@ -233,17 +233,20 @@ ALTER TABLE core.ownership
     DEFERRABLE INITIALLY DEFERRED;
 
 -- ---------------------------------------------------------------- R1/R2/R3: journal rules
--- Admin journal types: only app_jobs or the owner (superuser / member of migrator) may
--- insert them. A BEFORE trigger runs as the inserting role, so current_user is the
--- caller. (The RLS insert policy for app_pay, 0014, already excludes them.)
+-- Admin journal types: only the database owner (superuser / member of migrator) may insert
+-- them, whatever privileges another role is given: an uncapped COMPENSATION mints, a REVERSAL
+-- may move any user's money to anyone, an ACCOUNT_RETIREMENT burns a balance (fourth security
+-- review: the job runner could do all three). A BEFORE trigger runs as the inserting role, so
+-- current_user is the caller.
+-- TODO(reversal feature): these types return for the job runner only behind owner-run SECURITY
+-- DEFINER functions that require an approved audit.pending_action (and check its payload).
 CREATE FUNCTION ledger.assert_admin_journal_role() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
 BEGIN
   IF NEW.event_type IN ('COMPENSATION', 'REVERSAL', 'ACCOUNT_RETIREMENT')
-     AND current_user <> 'app_jobs'
      AND NOT COALESCE((SELECT rolsuper FROM pg_roles WHERE rolname = current_user), false)
      AND NOT pg_has_role(current_user, 'migrator', 'MEMBER') THEN
-    RAISE EXCEPTION '% journals are created only by the job runner (app_jobs), not %', NEW.event_type, current_user
+    RAISE EXCEPTION '% journals are created only by the database owner, not %', NEW.event_type, current_user
       USING ERRCODE = 'insufficient_privilege';
   END IF;
   -- R8: nothing backs these yet, so the application roles may not create them at all
@@ -326,7 +329,7 @@ BEGIN
         USING ERRCODE = 'check_violation';
     END IF;
   ELSIF ev = 'REVERSAL' THEN
-    NULL;  -- admin correction (app_jobs only, see admin_journal_role); any balanced shape
+    NULL;  -- admin correction (the owner only, see admin_journal_role); any balanced shape
   ELSE
     -- ---------------------------------------------- R2: user-driven purchases
     IF mint_n > 0 THEN

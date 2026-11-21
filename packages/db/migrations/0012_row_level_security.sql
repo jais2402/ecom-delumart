@@ -282,13 +282,12 @@ CREATE POLICY pay_read ON core.warehouse FOR SELECT TO app_pay
   USING (EXISTS (SELECT 1 FROM core.inventory_unit u WHERE u.warehouse_id = warehouse.id));
 
 -- ---------------------------------------------------------------- promotions
--- Coupons are redeemed by code inside pay (cap counter); company owners create their own.
+-- Coupons are redeemed by code inside pay (cap counter); company owners create their own through
+-- core.create_coupon (0020), which generates every private code: app_web inserts none directly.
 -- A private coupon's code is readable only by the owner of its company; everyone else sees
 -- public ACTIVE coupons only (a buyer types a private code; it is looked up, not listed).
 CREATE POLICY web_read ON core.coupon FOR SELECT TO app_web
   USING (company_id IN (SELECT core.actor_company_ids()) OR (is_public AND status = 'ACTIVE'));
-CREATE POLICY web_company_insert ON core.coupon FOR INSERT TO app_web
-  WITH CHECK (scope = 'MERCHANT' AND company_id IN (SELECT core.actor_company_ids()));
 -- app_pay reads public ACTIVE coupons and the ones named in the buyer's own checkout
 -- sessions (to price pay); it cannot list private coupons, and codes are looked up only
 -- inside the checkout command functions (0018). The cap counter moves only in

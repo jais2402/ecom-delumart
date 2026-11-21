@@ -70,6 +70,7 @@ describe("money attacks (security review)", () => {
   let s: Seller;
   let crorePiece: ProductFixture; // ₹10 crore, stocked
   let couponId: string;
+  let couponCode: string; // private: generated (0020)
   let accomplice: TestUser;
 
   beforeAll(async () => {
@@ -83,7 +84,7 @@ describe("money attacks (security review)", () => {
       pricePaise: 10n * CRORE,
       units: 3,
     });
-    couponId = await merchantCoupon(pool, s, { code: "TENOFF", percent: 10 });
+    ({ id: couponId, code: couponCode } = await merchantCoupon(pool, s, { percent: 10 }));
     accomplice = await user(pool);
   });
   afterEach(async () => {
@@ -305,11 +306,12 @@ describe("money attacks (security review)", () => {
     });
 
     for (const type of ["COMPENSATION", "REVERSAL", "ACCOUNT_RETIREMENT"]) {
-      it(`only the job runner creates ${type} journals`, async () => {
+      it(`only the database owner creates ${type} journals (not even the job runner)`, async () => {
         const insert = "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, $2, 1)";
         expect(await stateOf(pool, insert, [uuidv7(), type], web(buyer))).toBe("42501");
         expect(await stateOf(pool, insert, [uuidv7(), type], payAs(buyer))).toBe("42501");
-        expect(await stateOf(pool, insert, [uuidv7(), type], { role: "app_jobs" })).toBe("no error");
+        expect(await stateOf(pool, insert, [uuidv7(), type], { role: "app_jobs" })).toBe("42501");
+        expect(await stateOf(pool, insert, [uuidv7(), type], {})).toBe("no error");
       });
     }
   });
@@ -457,7 +459,7 @@ describe("money attacks (security review)", () => {
         coupon: {
           id: couponId,
           companyId: s.companyId,
-          code: "TENOFF",
+          code: couponCode,
           kind: "FLAT",
           value: "99999999999",
           minSpendPaise: "0",
@@ -532,8 +534,7 @@ describe("money attacks (security review)", () => {
 
     it("pay re-checks the coupon from its locked row: a coupon paused after the quote is refused", async () => {
       const victim = await user(pool);
-      const code = `PAUSE${randomBytes(2).toString("hex").toUpperCase()}`;
-      const id = await merchantCoupon(pool, s, { code, percent: 20 });
+      const { id, code } = await merchantCoupon(pool, s, { percent: 20 });
       const p = await product(pool, { seller: s, mode: "STANDARD_STOCKED", pricePaise: 2_000n * RUPEE });
       const co = await checkout(pool, victim, [p], standard(s), code);
       await pool.query("UPDATE core.coupon SET status = 'PAUSED' WHERE id = $1", [id]);
@@ -644,6 +645,8 @@ describe("money attacks (security review)", () => {
     creditAccount?: string;
     /** paid to SINK instead of to the seller (the journal still balances) */
     creditShortfall?: bigint;
+    /** debited from the buyer beyond the order total and paid to SINK (the journal still balances) */
+    overcharge?: bigint;
     journal?: boolean;
     succeed?: boolean;
     coupon?: { id: string; discount: bigint };
@@ -681,6 +684,7 @@ describe("money attacks (security review)", () => {
     const net = list - sd - fee - dsel;
     const total = list - sd + db;
     const shortfall = o.creditShortfall ?? 0n;
+    const overcharge = o.overcharge ?? 0n;
     const [session, attempt, journalId, group, so] = [uuidv7(), uuidv7(), uuidv7(), uuidv7(), uuidv7()];
     // a real session names its coupon in the quote (pay() and app_pay's coupon policy read it)
     const quote = o.coupon ? { coupon: { id: o.coupon.id } } : {};
@@ -705,12 +709,12 @@ describe("money attacks (security review)", () => {
         [
           journalId,
           who.ledgerAccountId,
-          (-total).toString(),
+          (-(total + overcharge)).toString(),
           credit,
           (net - shortfall).toString(),
           so,
           SINK_ACCOUNT_ID,
-          (fee + db + dsel + shortfall).toString(),
+          (fee + db + dsel + shortfall + overcharge).toString(),
         ],
       );
       await c.query("SELECT ledger.sync_wallets($1)", [[who.ledgerAccountId, credit]]);
@@ -950,11 +954,7 @@ describe("money attacks (security review)", () => {
       });
 
       it("coupon_redemption on an earlier order group (burning a merchant's coupon cap)", async () => {
-        const capped = await merchantCoupon(pool, s, {
-          code: `CAP${randomBytes(2).toString("hex")}`,
-          percent: 5,
-          maxRedemptions: 1,
-        });
+        const { id: capped } = await merchantCoupon(pool, s, { percent: 5, maxRedemptions: 1 });
         const r = await both(async (c) => {
           // the attacker names the coupon in a session of their own so app_pay may touch it
           await nameCoupon(c, buyer, capped);
@@ -1098,7 +1098,8 @@ describe("money attacks (security review)", () => {
         "product.available_units",
         "UPDATE core.product SET available_units = available_units + 5 WHERE id = $1",
         () => [crorePiece.id],
-        /available_units must equal/,
+        // refused at the statement (0019) or, failing that, at commit (0016)
+        /available_units (must equal|may change only to)/,
       ],
       [
         "coupon.redeemed",
@@ -1112,7 +1113,7 @@ describe("money attacks (security review)", () => {
         "warehouse.used",
         "UPDATE core.warehouse SET used = used + 1 WHERE id = $1",
         () => [s.warehouseId],
-        /used must equal/,
+        /used (must equal|may change only to)/,
       ],
     ];
     for (const [label, sql, params, why, setup] of edits) {
@@ -1269,7 +1270,7 @@ describe("money attacks (security review)", () => {
           JSON.stringify({
             productIds: [target.id, other.id],
             speedBySeller: standard(s),
-            couponCode: "TENOFF",
+            couponCode,
           }),
           key(),
         ]);
@@ -1480,12 +1481,18 @@ describe("money attacks (security review)", () => {
     });
 
     it("the owner creates coupons and draft products on their own company only", async () => {
+      // coupons only through core.create_coupon (0020), which checks the company's owner itself
       const coupon = (company: string) =>
-        `INSERT INTO core.coupon (id, scope, company_id, code_normalised, kind, value)
-         VALUES ('${uuidv7()}', 'MERCHANT', '${company}', 'OWN5', 'PERCENT', 5)`;
-      expect(await stateOf(pool, coupon(s.companyId), [], web(s.owner))).toBe("no error");
+        `SELECT core.create_coupon('${company}', 'PERCENT', 5, 0, NULL, NULL, NULL, false)`;
       const other = await seller(pool);
-      expect(await stateOf(pool, coupon(other.companyId), [], web(s.owner))).toBe("42501");
+      expect(await stateOf(pool, coupon(other.companyId), [], web(other.owner))).toBe("no error");
+      const refused = await asActor(pool, web(s.owner), (c) =>
+        c.query(coupon(other.companyId)).then(
+          () => "no error",
+          (e: { hint?: string }) => e.hint ?? "?",
+        ),
+      );
+      expect(refused).toBe("FORBIDDEN");
       const draft = (company: string) =>
         `INSERT INTO core.product (id, company_id, seller_type, status, category, inventory_mode)
          VALUES ('${uuidv7()}', '${company}', 'USER', 'DRAFT', 'gadgets', 'STANDARD_STOCKED')`;
@@ -1541,7 +1548,7 @@ describe("money attacks (security review)", () => {
       }
       // the buyer who types the code still gets it (control): quoted with the 10% discount
       const p = await product(pool, { seller: s, mode: "STANDARD_STOCKED", pricePaise: 2_000n * RUPEE });
-      const co = await checkout(pool, accomplice, [p], standard(s), "tenoff");
+      const co = await checkout(pool, accomplice, [p], standard(s), couponCode.toLowerCase());
       expect(co.totalPaise).toBe(1_800n * RUPEE + DELIVERY.STANDARD);
     });
   });
@@ -1633,13 +1640,13 @@ describe("money attacks (security review)", () => {
         expect(await atIsolation(level, rawAs(buyer), (c) => forgePurchase(c, buyer)), level).toMatch(
           /READ COMMITTED/,
         );
-        expect(await atIsolation(level, { role: "app_jobs" }, reversal), level).toMatch(/READ COMMITTED/);
+        expect(await atIsolation(level, {}, reversal), level).toMatch(/READ COMMITTED/);
       }
       // the same writes at READ COMMITTED commit (control)
       expect(await atIsolation("READ COMMITTED", rawAs(buyer), (c) => forgePurchase(c, buyer))).toBe(
         "no error",
       );
-      expect(await atIsolation("READ COMMITTED", { role: "app_jobs" }, reversal)).toBe("no error");
+      expect(await atIsolation("READ COMMITTED", {}, reversal)).toBe("no error");
     });
 
     it("an unlimited-seed product repriced while a hand-written purchase is open: refused at commit (fresh read)", async () => {
@@ -1690,7 +1697,7 @@ describe("money attacks (security review)", () => {
 
   describe("review 2, finding 4: dates come from the database clock", () => {
     it("journal.created_at is stamped at insert: a supplied date is ignored", async () => {
-      const recent = await asActor(pool, { role: "app_jobs" }, async (c) => {
+      const recent = await asActor(pool, {}, async (c) => {
         const j = uuidv7();
         await c.query(
           "INSERT INTO ledger.journal (id, event_type, config_version, created_at) VALUES ($1, 'REVERSAL', 1, '2001-01-01')",
@@ -1754,9 +1761,9 @@ describe("money attacks (security review)", () => {
     it("a coupon whose window ends while the purchase transaction is open is refused at commit", async () => {
       const id = uuidv7();
       await pool.query(
-        `INSERT INTO core.coupon (id, scope, company_id, code_normalised, kind, value, ends_at)
-         VALUES ($1, 'MERCHANT', $2, $3, 'PERCENT', 10, clock_timestamp() + interval '1.5 seconds')`,
-        [id, s.companyId, `SOON${randomBytes(2).toString("hex").toUpperCase()}`],
+        `INSERT INTO core.coupon (id, scope, company_id, code_normalised, code_generated, kind, value, ends_at)
+         VALUES ($1, 'MERCHANT', $2, core.generate_coupon_code(), true, 'PERCENT', 10, clock_timestamp() + interval '1.5 seconds')`,
+        [id, s.companyId],
       );
       const outcome = await commitError(pool, rawAs(buyer), (c) =>
         forgePurchase(c, buyer, {
@@ -1978,9 +1985,9 @@ describe("money attacks (security review)", () => {
       flatId = uuidv7();
       minSpendId = uuidv7();
       await pool.query(
-        `INSERT INTO core.coupon (id, scope, company_id, code_normalised, kind, value, min_spend_paise) VALUES
-           ($1, 'MERCHANT', $3, 'FLAT5CR', 'FLAT', $4, 0),
-           ($2, 'MERCHANT', $3, 'BIGSPEND', 'PERCENT', 10, $5)`,
+        `INSERT INTO core.coupon (id, scope, company_id, code_normalised, code_generated, kind, value, min_spend_paise) VALUES
+           ($1, 'MERCHANT', $3, core.generate_coupon_code(), true, 'FLAT', $4, 0),
+           ($2, 'MERCHANT', $3, core.generate_coupon_code(), true, 'PERCENT', 10, $5)`,
         [flatId, minSpendId, s.companyId, (5n * CRORE).toString(), (20n * CRORE).toString()],
       );
     });
@@ -1991,6 +1998,16 @@ describe("money attacks (security review)", () => {
           forgePurchase(c, buyer, { creditShortfall: 1_000n * RUPEE }),
         ),
       ).toMatch(/seller credit does not equal its seller order's net/);
+    });
+
+    it("(a2) the buyer's debit equals the order group's total (₹1 more than the total, paid to SINK, is refused by that rule)", async () => {
+      // the journal balances and every seller order is right: only the buyer's debit is off. The
+      // SINK rule would refuse it too, later; this asserts that the debit rule itself fires first
+      expect(
+        await commitError(pool, rawAs(buyer), (c) => forgePurchase(c, buyer, { overcharge: RUPEE })),
+      ).toMatch(/buyer debit \d+ does not equal the order total \d+/);
+      // the same purchase without the overcharge commits (control)
+      expect(await commitError(pool, rawAs(buyer), (c) => forgePurchase(c, buyer))).toBe("no error");
     });
 
     it("(b) a FLAT coupon gives exactly its amount (capped at ₹100 a line); never more", async () => {
@@ -2093,8 +2110,9 @@ describe("money attacks (security review)", () => {
       const amount = 1_000n * RUPEE + 7n;
       const id = uuidv7();
       await pool.query(
-        `INSERT INTO core.coupon (id, scope, company_id, code_normalised, kind, value) VALUES ($1, 'MERCHANT', $2, $3, 'FLAT', $4)`,
-        [id, s.companyId, `SPLIT${randomBytes(2).toString("hex").toUpperCase()}`, amount.toString()],
+        `INSERT INTO core.coupon (id, scope, company_id, code_normalised, code_generated, kind, value)
+         VALUES ($1, 'MERCHANT', $2, core.generate_coupon_code(), true, 'FLAT', $3)`,
+        [id, s.companyId, amount.toString()],
       );
       const priced = price({
         lines: [a, b].map((p) => ({
@@ -2394,9 +2412,21 @@ describe("money attacks (security review)", () => {
           [buyer.ledgerAccountId, -CRORE],
           [SINK_ACCOUNT_ID, CRORE],
         ]);
-      expect(await commitError(pool, { role: "app_jobs", userId: buyer.userId }, steal)).toMatch(
-        /acting user's own account/,
-      );
+      expect(await commitState(pool, { role: "app_jobs", userId: buyer.userId }, steal)).toBe("42501");
+      // even granted the writes (a grant mistake, rolled back with the test), it acts as no user
+      const granted = await asActor(pool, {}, async (c) => {
+        await c.query("GRANT INSERT ON ledger.journal, ledger.posting TO app_jobs");
+        await c.query("GRANT EXECUTE ON FUNCTION ledger.sync_wallets(uuid[]) TO app_jobs");
+        await become(c, { role: "app_jobs", userId: buyer.userId });
+        try {
+          await steal(c);
+          await c.query("SET CONSTRAINTS ALL IMMEDIATE");
+          return "no error";
+        } catch (error) {
+          return (error as Error).message;
+        }
+      });
+      expect(granted).toMatch(/acting user's own account/);
       // the same journal for the owner signed in as the buyer reaches the next rule (control)
       expect(await commitError(pool, { userId: buyer.userId }, steal)).toMatch(/order group/);
       for (const role of ["app_jobs", "npc_worker", "research_ro"]) {
@@ -2568,6 +2598,13 @@ describe("money attacks (security review)", () => {
 
   // -------------------------------------------------------------------------------- seals
   describe("the deferred checks are re-check-proof: seals (0016 R9)", () => {
+    // a buyer of this block's own: its genuine purchases stay within the per-actor payment
+    // attempt limit (10 a minute, 0018) whatever the rest of the file did in the last minute
+    let buyer: TestUser;
+    beforeAll(async () => {
+      buyer = await user(pool);
+    });
+
     /** A genuine purchase through core.commit_purchase as app_pay, in the caller's transaction. */
     async function genuinePurchase(
       c: pg.PoolClient,
@@ -2636,8 +2673,11 @@ describe("money attacks (security review)", () => {
           await c.query("SET CONSTRAINTS ALL DEFERRED");
           await mintToBuyer(c, journalId);
         });
+        // the job runner writes no posting at all (fourth review); a raw writer meets the seal
         expect(outcome, writer).toMatch(
-          /posting row refused: its journal has already been checked and sealed/,
+          writer === "app_jobs"
+            ? /permission denied/
+            : /posting row refused: its journal has already been checked and sealed/,
         );
       }
       // the same with a hand-written purchase by a raw writer that fires the checks itself
@@ -2871,7 +2911,7 @@ describe("money attacks (security review)", () => {
           }),
         );
       // s's real code, tried on another seller's cart: not found (and counted)
-      expect(await attempt("TENOFF", elsewhere, other)).toBe("COUPON_INVALID");
+      expect(await attempt(couponCode, elsewhere, other)).toBe("COUPON_INVALID");
       for (let i = 0; i < 9; i++) expect(await attempt(`GUESS${i}`)).toBe("COUPON_INVALID");
       expect(
         await count(pool, "SELECT count(*) AS n FROM core.coupon_lookup_failure WHERE user_id = $1", [
@@ -2879,14 +2919,14 @@ describe("money attacks (security review)", () => {
         ]),
       ).toBe(10);
       // the right code now answers exactly like a wrong one
-      expect(await attempt("TENOFF")).toBe("COUPON_INVALID");
+      expect(await attempt(couponCode)).toBe("COUPON_INVALID");
       // other users are unaffected; the limit is per user, per hour
-      expect(await codeOf(checkout(pool, accomplice, [p], standard(s), "TENOFF"))).toBe("ok");
+      expect(await codeOf(checkout(pool, accomplice, [p], standard(s), couponCode))).toBe("ok");
       await pool.query(
         "UPDATE core.coupon_lookup_failure SET at = at - interval '2 hours' WHERE user_id = $1",
         [guesser.userId],
       );
-      expect(await attempt("TENOFF")).toBe("ok");
+      expect(await attempt(couponCode)).toBe("ok");
     });
   });
 
@@ -2959,15 +2999,13 @@ describe("money attacks (security review)", () => {
       const first = await payFor(pool, accomplice, co, k);
       expect(first.reversed).toBe(false);
       expect((await payFor(pool, accomplice, co, k)).reversed).toBe(false);
-      // the reversal job (app_jobs) marks the order reversed (a lifecycle column the seal allows)
-      await withTransaction(
-        pool,
-        (c) =>
-          c.query(
-            "UPDATE core.seller_order SET status = 'REVERSED', qualifies_for_progression = false WHERE order_group_id = $1",
-            [first.orderGroupId],
-          ),
-        { role: "app_jobs" },
+      // the order is marked reversed (a lifecycle column the seal allows); until the reversal
+      // feature brings an owner-run function for the job runner, only the owner can do this
+      await withTransaction(pool, (c) =>
+        c.query(
+          "UPDATE core.seller_order SET status = 'REVERSED', qualifies_for_progression = false WHERE order_group_id = $1",
+          [first.orderGroupId],
+        ),
       );
       const replay = await payFor(pool, accomplice, co, k);
       expect(replay).toEqual({ ...first, reversed: true });
@@ -3031,8 +3069,13 @@ describe("money attacks (security review)", () => {
           WHERE n.nspname IN ('core','ledger') AND p.prosecdef AND has_function_privilege('app_web', p.oid, 'EXECUTE')
           ORDER BY 1`,
       );
-      // only the read-only questions RLS policies ask
-      expect(fns.rows.map((r) => r.f)).toEqual(["core.actor_id()", "core.is_published_version(uuid)"]);
+      // the read-only questions RLS policies ask, and the coupon commands of 0020 (no money moves)
+      expect(fns.rows.map((r) => r.f)).toEqual([
+        "core.actor_id()",
+        "core.create_coupon(uuid,text,bigint,bigint,timestamp with time zone,timestamp with time zone,integer,boolean,text)",
+        "core.is_published_version(uuid)",
+        "core.set_coupon_status(uuid,text)",
+      ]);
     });
 
     it("every SECURITY DEFINER function and who may execute it: app_pay runs only the command functions", async () => {
@@ -3040,7 +3083,7 @@ describe("money attacks (security review)", () => {
         `SELECT r AS role, p.oid::regprocedure::text AS f
            FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace,
                 unnest(ARRAY['app_web','app_pay','app_jobs','npc_worker','research_ro','anon','authenticated']) r
-          WHERE n.nspname IN ('core','ledger','private','audit','analytics','sandbox','research') AND p.prosecdef
+          WHERE n.nspname IN ('core','ledger','private','audit','analytics','sandbox','research','ops') AND p.prosecdef
             AND has_function_privilege(r, p.oid, 'EXECUTE')
           ORDER BY 1, 2`,
       );
@@ -3059,14 +3102,14 @@ describe("money attacks (security review)", () => {
         "core.identity_is_tombstoned(bytea,bytea)",
         "core.is_published_version(uuid)",
         "core.purge_idempotency_records()",
-        "ledger.sync_wallets(uuid[])",
+        "ops.terminate_stuck_money_sessions(interval)",
       ]);
       expect(by("npc_worker")).toEqual(["core.is_published_version(uuid)"]);
       expect([...by("research_ro"), ...by("anon"), ...by("authenticated")]).toEqual([]);
       // every definer function pins its search_path
       const unpinned = await pool.query<{ f: string }>(
         `SELECT p.oid::regprocedure::text AS f FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-          WHERE n.nspname IN ('core','ledger') AND p.prosecdef
+          WHERE n.nspname IN ('core','ledger','ops') AND p.prosecdef
             AND NOT EXISTS (SELECT 1 FROM unnest(p.proconfig) c WHERE c = 'search_path=pg_catalog, pg_temp')`,
       );
       expect(unpinned.rows).toEqual([]);

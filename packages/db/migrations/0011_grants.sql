@@ -16,14 +16,21 @@
 -- these tables, so they cannot keep another buyer's pay() waiting.
 --
 --  * app_web  - ordinary web requests: reads, plus low-risk writes (own company/product
---               drafts/coupons, addresses, secrets, analytics, outbox). No money command.
+--               drafts, addresses, secrets, analytics, outbox). No money command. Coupons are
+--               created and paused only through core.create_coupon / core.set_coupon_status
+--               (0020), which generate every private coupon's code.
 --  * app_pay  - money commands only, through the functions of 0018 (EXECUTE only to it):
 --               provisioning, checkout, payment attempts, attempt authentication, pay. A
 --               separate login with its own credential and pool; app_web is never a member
 --               of it (0001). It reads (own rows under RLS) what the pricing function needs.
---  * app_jobs - background jobs (admin journals, reconciliation, retention). Acts as no user:
---               core.actor_id() is NULL for it whatever session id it sets, and it cannot
---               execute the user-scoped command functions.
+--  * app_jobs - background jobs (reconciliation, retention, expiry, delivery notices, product
+--               screening). Acts as no user: core.actor_id() is NULL for it whatever session id
+--               it sets, and it cannot execute the user-scoped command functions. It writes no
+--               money: no ledger INSERT/UPDATE (no COMPENSATION, REVERSAL or ACCOUNT_RETIREMENT
+--               journals, no wallet), no UPDATE on inventory units, ownership or seller orders
+--               (fourth security review). TODO(reversal feature): those admin actions return as
+--               owner-run SECURITY DEFINER functions that require an approved
+--               audit.pending_action; until then only the database owner can perform them.
 --
 -- Least privilege, per table and (for INSERT/UPDATE) per column. Row-level security
 -- (0012) further limits which rows each grant reaches. Configuration (config_version,
@@ -98,7 +105,10 @@ GRANT SELECT ON core.product_version TO npc_worker, app_pay;
 GRANT SELECT, INSERT ON core.product_version TO app_web, app_jobs;   -- immutable: no UPDATE
 
 GRANT SELECT ON core.warehouse, core.inventory_unit TO app_web, app_pay;
-GRANT SELECT, INSERT, UPDATE ON core.warehouse, core.inventory_unit TO app_jobs;
+GRANT SELECT, INSERT, UPDATE ON core.warehouse TO app_jobs;
+-- units are stocked by the jobs (INSERT, AVAILABLE only, 0019); a unit's state moves only inside
+-- core.commit_purchase (issue) or as the owner (retire, revoke), never back to AVAILABLE (0019)
+GRANT SELECT, INSERT ON core.inventory_unit TO app_jobs;
 
 -- ---------------------------------------------------------------- core: orders (written only by commit_purchase)
 -- Purchases are anonymous to sellers (PRD): app_web, through which a company owner reads its
@@ -109,10 +119,10 @@ GRANT SELECT (id, order_group_id, company_id, seller_type, list_paise, seller_di
               net_paise, status, qualifies_for_progression) ON core.seller_order TO app_web;
 GRANT SELECT ON core.order_group, core.seller_order, core.order_line, core.ownership, core.shipment TO app_pay;
 GRANT SELECT ON core.order_group, core.order_line TO app_jobs;
+-- seller order status and ownership state move with a reversal, which is not built yet
+-- (TODO(reversal feature): an owner-run definer function behind an approved audit.pending_action)
 GRANT SELECT ON core.seller_order TO app_jobs;
-GRANT UPDATE (status, qualifies_for_progression) ON core.seller_order TO app_jobs;
 GRANT SELECT ON core.ownership TO app_jobs;
-GRANT UPDATE (state) ON core.ownership TO app_jobs;
 GRANT SELECT ON core.shipment TO app_jobs;
 GRANT UPDATE (delivered_notified, cancelled_at) ON core.shipment TO app_jobs;
 
@@ -121,9 +131,7 @@ GRANT UPDATE (delivered_notified, cancelled_at) ON core.shipment TO app_jobs;
 GRANT SELECT ON core.promo_campaign TO app_web;
 GRANT SELECT, INSERT, UPDATE ON core.promo_campaign TO app_jobs;
 
-GRANT SELECT ON core.coupon TO app_web;
-GRANT INSERT (id, scope, company_id, campaign_id, code_normalised, kind, value, min_spend_paise,
-              starts_at, ends_at, max_redemptions, is_public, status) ON core.coupon TO app_web;
+GRANT SELECT ON core.coupon TO app_web;   -- written only through the definer functions of 0020
 GRANT SELECT ON core.coupon TO app_pay;
 GRANT SELECT, UPDATE ON core.coupon TO app_jobs;
 
@@ -132,10 +140,12 @@ GRANT SELECT ON core.coupon_redemption, core.membership TO app_web, app_pay, app
 -- ---------------------------------------------------------------- ledger: read-only for the application
 GRANT SELECT ON ledger.journal, ledger.posting, ledger.grant_record, ledger.ledger_account,
                 ledger.wallet TO app_web, app_pay;
-GRANT SELECT, INSERT ON ledger.journal, ledger.posting, ledger.grant_record, ledger.ledger_account TO app_jobs;
-GRANT SELECT, INSERT, UPDATE ON ledger.wallet TO app_jobs;
-GRANT EXECUTE ON FUNCTION ledger.sync_wallets(uuid[]) TO app_jobs;
--- no UPDATE/DELETE on journal, posting, grant_record for anyone but the owner
+-- The job runner reads the ledger (reconciliation) and writes none of it: an INSERT on journal or
+-- posting let it mint uncapped COMPENSATION and move a victim's money by REVERSAL, and wallet
+-- UPDATE let it hold every wallet's row lock. It does not need ledger.sync_wallets either.
+GRANT SELECT ON ledger.journal, ledger.posting, ledger.grant_record, ledger.ledger_account,
+                ledger.wallet TO app_jobs;
+-- no INSERT/UPDATE/DELETE on any ledger table for anyone but the owner
 
 -- ---------------------------------------------------------------- private: web only, owner rows (0012)
 GRANT SELECT, INSERT, UPDATE ON private.user_secret TO app_web;

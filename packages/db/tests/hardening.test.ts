@@ -434,9 +434,9 @@ describe("security hardening (review findings)", () => {
     });
 
     it("a wallet change matched by a balanced journal commits", async () => {
-      // (the job runner's REVERSAL: app_pay's own debits are PURCHASEs, which need a whole
-      // order group, and its unbacked fee journals are refused, 0014)
-      const state = await commitState(pool, { role: "app_jobs" }, async (c) => {
+      // (an owner REVERSAL: app_pay's own debits are PURCHASEs, which need a whole order group,
+      // its unbacked fee journals are refused, 0014, and no other role may post admin types)
+      const state = await commitState(pool, {}, async (c) => {
         const j = uuidv7();
         await c.query(
           "INSERT INTO ledger.journal (id, event_type, config_version) VALUES ($1, 'REVERSAL', 1)",
@@ -702,7 +702,7 @@ describe("security hardening (review findings)", () => {
         "accept",
       ],
     ];
-    // Admin journal types are inserted only by the job runner (0014, 0016). No application role
+    // Admin journal types are inserted only by the database owner (0016). No application role
     // inserts the rest (the command functions of 0018 do), so their account rules are exercised
     // by a writer the grants did not stop. The unbacked fee types (MEMBERSHIP, ...) are checked
     // as the owner acting for user A, the path they will take once they are backed.
@@ -711,7 +711,7 @@ describe("security hardening (review findings)", () => {
     for (const [label, type, postings, expected] of cases) {
       it(`event-type account rules: ${label} is ${expected}ed`, async () => {
         const actor = ADMIN_TYPES.includes(type)
-          ? { role: "app_jobs" }
+          ? {}
           : UNBACKED_TYPES.includes(type)
             ? { userId: f.a.userId }
             : raw();

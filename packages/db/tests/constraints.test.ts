@@ -128,8 +128,8 @@ describe("business constraints", () => {
       pool,
       (c) =>
         c.query(
-          `INSERT INTO core.coupon (id, scope, code_normalised, kind, value, max_redemptions, redeemed)
-           VALUES ($1, 'PLATFORM', 'DELULU10', 'PERCENT', 10, 2, 1)`,
+          `INSERT INTO core.coupon (id, scope, code_normalised, kind, value, max_redemptions, redeemed, is_public)
+           VALUES ($1, 'PLATFORM', 'DELULU10', 'PERCENT', 10, 2, 1, true)`,
           [id],
         ),
       async (c) => {

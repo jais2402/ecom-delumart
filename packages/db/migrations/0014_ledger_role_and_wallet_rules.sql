@@ -3,9 +3,9 @@
 -- A1. Journal types by role. No application role inserts journals directly any more: user
 --     journals (STARTER_GRANT, PURCHASE) are written by the owner-run command functions of
 --     0018 for the signed-in actor, which only app_pay may execute; COMPENSATION, REVERSAL and
---     ACCOUNT_RETIREMENT are admin actions and run only in the job runner (app_jobs, whose
---     jobs_all policy is unchanged), enforced by a role check in 0016. app_web and app_pay
---     hold no INSERT privilege on ledger tables (0011).
+--     ACCOUNT_RETIREMENT are admin actions that only the database owner may create (role check
+--     in 0016) until the reversal feature brings them back behind approved pending actions. No
+--     application role (app_web, app_pay, app_jobs) holds INSERT on ledger tables (0011).
 --
 --     COMPANY_REGISTRATION, WAREHOUSE_PURCHASE and MEMBERSHIP are NOT allowed yet: nothing
 --     backs them (no company-registration, warehouse or membership purchase records and

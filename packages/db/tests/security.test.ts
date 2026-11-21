@@ -262,7 +262,7 @@ describe("roles, grants and row-level security", () => {
     expect(grants.rows).toEqual([]);
   });
 
-  it("ledger grants: read-only for app_web and app_pay, insert-only for app_jobs, wallet updatable by jobs, nothing for research_ro", async () => {
+  it("ledger grants: read-only for app_web, app_pay and app_jobs (fourth review), nothing for research_ro", async () => {
     const { rows } = await pool.query<{ r: string; t: string; p: string; has: boolean }>(
       `SELECT r, t, p, has_table_privilege(r, t, p) AS has
          FROM unnest(ARRAY['app_web','app_pay','app_jobs','research_ro']) r,
@@ -272,21 +272,12 @@ describe("roles, grants and row-level security", () => {
     const held = rows.filter((x) => x.has).map((x) => `${x.r} ${x.p} ${x.t}`);
     expect(held.sort()).toEqual(
       [
-        ...["app_web", "app_pay"].flatMap((r) => [
+        ...["app_web", "app_pay", "app_jobs"].flatMap((r) => [
           `${r} SELECT ledger.journal`,
           `${r} SELECT ledger.posting`,
           `${r} SELECT ledger.grant_record`,
           `${r} SELECT ledger.wallet`,
         ]),
-        "app_jobs SELECT ledger.journal",
-        "app_jobs INSERT ledger.journal",
-        "app_jobs SELECT ledger.posting",
-        "app_jobs INSERT ledger.posting",
-        "app_jobs SELECT ledger.grant_record",
-        "app_jobs INSERT ledger.grant_record",
-        "app_jobs SELECT ledger.wallet",
-        "app_jobs INSERT ledger.wallet",
-        "app_jobs UPDATE ledger.wallet",
       ].sort(),
     );
   });

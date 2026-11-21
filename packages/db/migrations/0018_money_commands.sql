@@ -56,6 +56,33 @@ LANGUAGE sql IMMUTABLE SET search_path = pg_catalog, pg_temp AS $$
   SELECT v IS NOT NULL AND v ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 $$;
 
+-- ---------------------------------------------------------------- per-actor limits (LLD §11.2)
+-- Limits are counted from committed rows and read from the current configuration version:
+--   payment_attempts_per_minute  (10)   payment attempts per actor in any rolling minute
+--   purchase_lines_per_day       (100)  completed purchase lines per actor per UTC day
+--   checkout_open_sessions_max   (5)    OPEN checkout sessions per actor (older ones expire)
+-- Exceeding a limit is RATE_LIMITED. A command that counts serialises with the actor's other
+-- calls of the same kind on a transaction-level advisory lock keyed by the actor, so concurrent
+-- calls cannot all pass on the same count (the lock is the actor's own: it cannot hold anyone
+-- else's calls, and it is released at commit or rollback).
+CREATE FUNCTION core.lock_actor(kind text, actor uuid) RETURNS void
+LANGUAGE sql VOLATILE SET search_path = pg_catalog, pg_temp AS $$
+  SELECT pg_advisory_xact_lock(hashtextextended(kind || ':' || actor::text, 0))
+$$;
+
+-- Purchase lines of the actor's order groups created since the start of the current UTC day.
+CREATE FUNCTION core.purchase_lines_today(actor uuid) RETURNS bigint
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+  SELECT count(*) FROM core.order_group g
+    JOIN core.seller_order so ON so.order_group_id = g.id
+    JOIN core.order_line l ON l.seller_order_id = so.id
+   WHERE g.buyer_user_id = actor
+     AND g.created_at >= (date_trunc('day', clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+$$;
+
+CREATE INDEX payment_attempt_user_created ON core.payment_attempt (user_id, created_at);
+CREATE INDEX checkout_session_user_open ON core.checkout_session (user_id, created_at) WHERE state = 'OPEN';
+
 -- ---------------------------------------------------------------- idempotency (LLD §5.3)
 ALTER TABLE core.idempotency_record
   ADD CONSTRAINT idempotency_key_length CHECK (char_length(key) BETWEEN 1 AND 200);
@@ -629,6 +656,17 @@ BEGIN
     RETURN jsonb_build_object('replay', rec.response);   -- a concurrent duplicate finished first
   END IF;
 
+  -- at most `checkout_open_sessions_max` (5) OPEN sessions per actor, this one included: sessions
+  -- past their expiry and the oldest beyond the cap are expired here
+  PERFORM core.lock_actor('core.checkout_session', actor);
+  UPDATE core.checkout_session cs SET state = 'EXPIRED'
+   WHERE cs.user_id = actor AND cs.state = 'OPEN'
+     AND (cs.expires_at <= clock_timestamp()
+          OR cs.id IN (SELECT o.id FROM core.checkout_session o
+                        WHERE o.user_id = actor AND o.state = 'OPEN' AND o.expires_at > clock_timestamp()
+                        ORDER BY o.created_at DESC, o.id DESC
+                        OFFSET GREATEST(core.config_int(cfg, ARRAY['checkout_open_sessions_max'], 5) - 1, 0)));
+
   quote := jsonb_build_object(
     'version', 1,
     'lines', inputs -> 'lines',
@@ -675,6 +713,13 @@ BEGIN
   PERFORM ledger.require_read_committed();
   IF method IS NULL OR method NOT IN ('BALANCE', 'CARD') THEN
     PERFORM core.fail('VALIDATION_FAILED', 'unsupported payment method');
+  END IF;
+  -- at most `payment_attempts_per_minute` (10) attempts per actor in any rolling minute
+  PERFORM core.lock_actor('core.payment_attempt', actor);
+  IF (SELECT count(*) FROM core.payment_attempt pa
+       WHERE pa.user_id = actor AND pa.created_at > clock_timestamp() - interval '1 minute')
+     >= core.config_int(core.current_config_id(), ARRAY['payment_attempts_per_minute'], 10) THEN
+    PERFORM core.fail('RATE_LIMITED', 'too many payment attempts; try again in a minute');
   END IF;
   IF method = 'CARD' AND card_id IS NULL THEN
     PERFORM core.fail('VALIDATION_FAILED', 'cardId must be a uuid');
@@ -799,6 +844,7 @@ DECLARE
   seller_totals jsonb := '[]';
   receipt     jsonb;
   i           int;
+  line_limit  bigint;
 BEGIN
   -- #1 checkout session (the buyer's own)
   SELECT cs.*, cs.expires_at <= clock_timestamp() AS expired INTO ses
@@ -846,6 +892,12 @@ BEGIN
   cfg := ses.config_version;
   IF cardinality(ids) > core.config_int(cfg, ARRAY['cart_max_lines'], 20) THEN
     PERFORM core.fail('VALIDATION_FAILED', 'too many lines');
+  END IF;
+  -- at most `purchase_lines_per_day` (100) completed purchase lines per actor per UTC day; checked
+  -- here before any lock on another user's rows, and again under the buyer's wallet lock (#9)
+  line_limit := core.config_int(core.current_config_id(), ARRAY['purchase_lines_per_day'], 100);
+  IF core.purchase_lines_today(actor) + cardinality(ids) > line_limit THEN
+    PERFORM core.fail('RATE_LIMITED', 'daily purchase limit reached; try again tomorrow (UTC)');
   END IF;
   sorted_ids := ARRAY(SELECT x FROM unnest(ids) x ORDER BY x);
 
@@ -994,14 +1046,24 @@ BEGIN
       USING ERRCODE = 'serialization_failure';
   END IF;
 
+  -- the switches the commit-time check reads under lock (0016 R7), shared, now: after the wallets
+  -- this purchase takes no lock it does not already hold, so nothing it might wait for can keep
+  -- a seller's wallet locked (fourth security review)
+  PERFORM 1 FROM core.system_switch sw WHERE sw.name IN ('payments_card', 'purchases') ORDER BY sw.name FOR SHARE;
   -- #9 wallets: buyer and every seller, ascending account id (ledger.sync_wallets waits at most
-  -- 2 s). Taken last: a refused purchase never queues on (or holds) anyone's wallet.
+  -- 2 s). Taken last: a refused purchase never queues on (or holds) anyone's wallet, and no lock
+  -- is taken after them.
   wallet_accts := ARRAY(SELECT DISTINCT x FROM unnest(
                     ARRAY[buyer_acct] || ARRAY(SELECT (owner_accts ->> (owners ->> (s ->> 'sellerId')))::uuid
                                                  FROM jsonb_array_elements(priced -> 'sellers') s
                                                 WHERE s ->> 'sellerId' <> 'SEED')) x ORDER BY x);
   PERFORM ledger.sync_wallets(wallet_accts);
   SELECT w.available_paise INTO available FROM ledger.wallet w WHERE w.account_id = buyer_acct;
+  -- the daily line limit again, under the buyer's wallet lock: the buyer's concurrent purchases
+  -- serialise on it, so this count includes every purchase of theirs that committed before
+  IF core.purchase_lines_today(actor) + cardinality(ids) > line_limit THEN
+    PERFORM core.fail('RATE_LIMITED', 'daily purchase limit reached; try again tomorrow (UTC)');
+  END IF;
   -- #10 entitlement (read under the buyer's wallet lock)
   has_ent := EXISTS (SELECT 1 FROM core.creator_entitlement ce WHERE ce.user_id = actor);
   IF COALESCE(available, 0) < total THEN PERFORM core.fail('INSUFFICIENT_FUNDS', 'not enough fictional balance'); END IF;

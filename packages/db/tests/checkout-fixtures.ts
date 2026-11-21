@@ -137,18 +137,27 @@ export async function reprice(pool: pg.Pool, p: ProductFixture, pricePaise: bigi
   await pool.query("UPDATE core.product SET current_version_id = $2 WHERE id = $1", [p.id, versionId]);
 }
 
+/**
+ * An ACTIVE merchant PERCENT coupon of the seller's company (written as the owner). A private
+ * coupon's code is generated, never chosen (migration 0020): the code is returned for the buyer
+ * to type. `publicCode` makes a public coupon with that code instead.
+ */
 export async function merchantCoupon(
   pool: pg.Pool,
   s: Seller,
-  opts: { code: string; percent: number; maxRedemptions?: number },
-): Promise<string> {
+  opts: { percent: number; maxRedemptions?: number; publicCode?: string },
+): Promise<{ id: string; code: string }> {
   const id = uuidv7();
-  await pool.query(
-    `INSERT INTO core.coupon (id, scope, company_id, code_normalised, kind, value, max_redemptions)
-     VALUES ($1, 'MERCHANT', $2, $3, 'PERCENT', $4, $5)`,
-    [id, s.companyId, opts.code, opts.percent, opts.maxRedemptions ?? null],
+  const { rows } = await pool.query<{ code: string }>(
+    `INSERT INTO core.coupon (id, scope, company_id, code_normalised, code_generated, kind, value, max_redemptions, is_public)
+     VALUES ($1, 'MERCHANT', $2, COALESCE($3::text, core.generate_coupon_code()), $3::text IS NULL, 'PERCENT', $4, $5,
+             $3::text IS NOT NULL)
+     RETURNING code_normalised AS code`,
+    [id, s.companyId, opts.publicCode ?? null, opts.percent, opts.maxRedemptions ?? null],
   );
-  return id;
+  const code = rows[0]?.code;
+  if (!code) throw new Error("fixture: coupon not created");
+  return { id, code };
 }
 
 export const key = (): string => `k-${uuidv7()}`;
