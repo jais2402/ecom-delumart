@@ -47,6 +47,14 @@ export const SERVER_CONFIG = {
     checkoutActor: { scope: "checkout.create.actor", by: "actor", limit: 10, windowSeconds: 60 },
     /** Pay calls per account (LLD: purchase attempts 10 / minute / account). */
     payActor: { scope: "checkout.pay.actor", by: "actor", limit: 10, windowSeconds: 60 },
+    /** Saves and unsaves per account. */
+    saveWriteActor: { scope: "saves.write.actor", by: "actor", limit: 60, windowSeconds: 60 },
+    /** Passport quiz answers and concept submissions per account. */
+    passportActor: { scope: "passport.write.actor", by: "actor", limit: 20, windowSeconds: 60 },
+    /** Relief claims per account (one succeeds per UTC day). */
+    reliefActor: { scope: "relief.claim.actor", by: "actor", limit: 10, windowSeconds: 60 },
+    /** Company quotes, registrations and store edits per account. */
+    companyActor: { scope: "company.write.actor", by: "actor", limit: 10, windowSeconds: 60 },
   },
   phone: {
     /** The only code the dev provider accepts (there is no SMS in development). */

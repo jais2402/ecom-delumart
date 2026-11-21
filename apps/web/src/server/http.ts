@@ -71,6 +71,13 @@ const STATUS: Record<ErrorCode, number> = {
   PIN_NOT_SET: 409,
   PIN_LOCKED: 409,
   CHALLENGE_LOCKED: 409,
+  ONBOARDING_REQUIRED: 403,
+  CREATOR_LOCKED: 403,
+  COMPANY_EXISTS: 409,
+  HANDLE_TAKEN: 409,
+  HANDLE_RESERVED: 409,
+  RELIEF_NOT_ELIGIBLE: 409,
+  RELIEF_LIMIT: 409,
   RATE_LIMITED: 429,
   BUSY: 503,
   MAINTENANCE: 503,
@@ -95,13 +102,17 @@ const SAFE_DETAIL_KEYS: ReadonlySet<string> = new Set([
   "adultAge",
   "retryAfterSeconds",
   "issues",
+  // screening refusals: [{field, code}] per input field (no text is echoed)
+  "reasons",
+  // passport quiz: the ids of the questions answered wrongly (never the right options)
+  "wrong",
 ]);
 
 function safeDetails(details: Readonly<Record<string, unknown>>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(details)) {
     if (!SAFE_DETAIL_KEYS.has(key)) continue;
-    if (key === "issues" && Array.isArray(value)) out[key] = value;
+    if ((key === "issues" || key === "reasons" || key === "wrong") && Array.isArray(value)) out[key] = value;
     else if (["string", "number", "boolean"].includes(typeof value)) out[key] = value;
   }
   return out;

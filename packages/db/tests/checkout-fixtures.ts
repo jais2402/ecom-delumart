@@ -298,10 +298,12 @@ export async function reconcile(pool: pg.Pool): Promise<Record<string, unknown>>
       `SELECT w.id FROM core.warehouse w
         WHERE w.used <> (SELECT count(*) FROM core.inventory_unit u WHERE u.warehouse_id = w.id AND u.state = 'AVAILABLE')`,
     ),
+    // exactly one outcome per successful attempt: its order group, or (0034) its company registration
     succeededWithoutOneOrder: await q(
       `SELECT a.id FROM core.payment_attempt a
         WHERE a.state = 'SUCCEEDED'
-          AND (SELECT count(*) FROM core.order_group g WHERE g.payment_attempt_id = a.id) <> 1`,
+          AND (SELECT count(*) FROM core.order_group g WHERE g.payment_attempt_id = a.id)
+            + (SELECT count(*) FROM core.company_registration r WHERE r.payment_attempt_id = a.id) <> 1`,
     ),
   };
 }

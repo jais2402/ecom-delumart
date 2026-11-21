@@ -65,6 +65,17 @@ export {
   type SellerQuote,
 } from "./checkout";
 export {
+  type Company,
+  type CompanyQuote,
+  type CompanyReceipt,
+  companyQuote,
+  myCompany,
+  registerCompany,
+  type Store,
+  storeByHandle,
+  updateStore,
+} from "./company";
+export {
   type OnboardingStatus,
   onboardingStatus,
   type RecordBirthdateInput,
@@ -72,6 +83,19 @@ export {
   recordBirthdate,
   recordPhoneVerified,
 } from "./onboarding";
+export {
+  type CreatorAccess,
+  type CreatorSource,
+  creatorAccess,
+  mySaves,
+  type PassportProgress,
+  passportProgress,
+  recordPassportQuiz,
+  type SavedProduct,
+  saveProduct,
+  submitPassportConcept,
+  unsaveProduct,
+} from "./passport";
 export {
   type OwnProfile,
   type ProfilePrivacy,
@@ -87,6 +111,7 @@ export {
   STARTER_GRANT_PAISE,
 } from "./provision";
 export { type RateHitInput, rateHit } from "./rate";
+export { claimRelief, type ReliefClaim, type ReliefReason, type ReliefStatus, reliefStatus } from "./relief";
 export {
   SEED_PRODUCT_NAMESPACE,
   type SeedCategoryInput,

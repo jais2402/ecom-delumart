@@ -1156,16 +1156,22 @@ describe("money attacks (security review)", () => {
   describe("attack 4: holding a seller's rows to keep other buyers' pay() BUSY", () => {
     const LOCKS = ["FOR UPDATE", "FOR NO KEY UPDATE", "FOR SHARE", "FOR KEY SHARE"];
 
-    async function holdThenProbe(as: Actor, lock: string): Promise<{ held: number; probe: string }> {
+    async function holdThenProbe(as: Actor, lock: string): Promise<{ held: number | string; probe: string }> {
       const holder = await pool.connect();
       const prober = new pg.Client({ connectionString: db.url });
       await prober.connect();
       try {
         await holder.query("BEGIN");
         await become(holder, as);
-        const held =
-          (await holder.query(`SELECT id FROM core.company WHERE id = $1 ${lock}`, [s.companyId])).rowCount ??
-          0;
+        // the rows locked, or the SQLSTATE the lock was refused with
+        let held: number | string;
+        try {
+          held =
+            (await holder.query(`SELECT id FROM core.company WHERE id = $1 ${lock}`, [s.companyId]))
+              .rowCount ?? 0;
+        } catch (error) {
+          held = String((error as { code?: unknown }).code);
+        }
         const probe = await sqlState(
           prober.query("SELECT id FROM core.company WHERE id = $1 FOR UPDATE NOWAIT", [s.companyId]),
         );
@@ -1179,7 +1185,9 @@ describe("money attacks (security review)", () => {
 
     for (const lock of LOCKS) {
       it(`app_web cannot take a ${lock} lock on another seller's company`, async () => {
-        expect(await holdThenProbe(web(buyer), lock)).toEqual({ held: 0, probe: "no error" });
+        // since 0034 app_web holds no UPDATE on core.company at all (companies are created and
+        // edited only through the definer functions), so the lock is refused outright
+        expect(await holdThenProbe(web(buyer), lock)).toEqual({ held: "42501", probe: "no error" });
       });
     }
 
@@ -3054,6 +3062,15 @@ describe("money attacks (security review)", () => {
         "core.inventory_unit",
         "core.bank_account",
         "core.virtual_card",
+        // 0032-0034: progression and company registration records
+        "core.company",
+        "core.company_registration",
+        "core.formation_sponsorship",
+        "core.handle_reservation",
+        "core.creator_route_evidence",
+        "core.passport_progress",
+        "core.product_save",
+        "private.invention_concept",
       ];
       const { rows } = await pool.query<{ t: string; p: string }>(
         `SELECT t, p FROM unnest($1::text[]) t, unnest(ARRAY['INSERT','UPDATE','DELETE','TRUNCATE']) p
@@ -3085,20 +3102,34 @@ describe("money attacks (security review)", () => {
         "core.catalog_product(uuid)",
         "core.catalog_products(text,uuid,integer)",
         "core.create_coupon(uuid,text,bigint,bigint,timestamp with time zone,timestamp with time zone,integer,boolean,text)",
+        // 0032: the actor's own creator access, passport and saves (no money moves)
+        "core.creator_access()",
         "core.is_published_version(uuid)",
         "core.my_cart()",
         "core.my_collection()",
+        // 0034: the actor's own company and its edits, and the public store lookup (no money moves)
+        "core.my_company()",
         "core.my_order(uuid)",
         "core.my_orders(uuid,integer)",
+        "core.my_saves(uuid,integer)",
         "core.my_statement(bigint,integer)",
         "core.my_wallet()",
         "core.owns_products(uuid[])",
         "core.page_size(integer)",
+        "core.passport_progress()",
+        "core.passport_record_quiz(boolean,text)",
+        "core.passport_submit_concept(text,text)",
         // fifth review (0031): the database rate counter, hit by the server before a call
         "core.rate_hit(text,bytea,integer,integer)",
+        // 0033: the actor's own relief status
+        "core.relief_status()",
         "core.reveal_card_number(uuid)",
+        "core.save_product(uuid)",
         "core.set_coupon_status(uuid,text)",
+        "core.store_by_handle(text)",
+        "core.unsave_product(uuid)",
         "core.update_profile(text,jsonb,boolean)",
+        "core.update_store(text,text)",
       ]);
     });
 
@@ -3120,7 +3151,12 @@ describe("money attacks (security review)", () => {
         "core.cart_quote_inputs(jsonb)",
         "core.cart_remove(uuid)",
         "core.checkout_inputs(jsonb,text)",
+        // 0033: the relief grant (a money command)
+        "core.claim_relief(uuid)",
+        // 0034: company registration (quote and pay transaction)
+        "core.commit_company_registration(uuid,uuid,text,bytea)",
         "core.commit_purchase(uuid,uuid,text,bytea,jsonb)",
+        "core.company_quote(text,text,text)",
         "core.create_checkout_session(jsonb,text)",
         "core.create_payment_attempt(uuid,text,uuid)",
         "core.is_published_version(uuid)",

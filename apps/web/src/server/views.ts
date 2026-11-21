@@ -8,10 +8,19 @@ import type {
   CatalogProduct,
   CheckoutSessionResult,
   CollectionItem,
+  Company,
+  CompanyQuote,
+  CompanyReceipt,
+  CreatorAccess,
   OnboardingStatus,
   OrderView,
+  PassportProgress,
   PayReceipt,
+  ReliefClaim,
+  ReliefStatus,
+  SavedProduct,
   StatementRow,
+  Store,
   Wallet,
 } from "@delulu/db/runtime";
 
@@ -236,4 +245,136 @@ export function cartView(
 
 export function cartMergeSkipView(s: CartMergeSkip) {
   return { productId: s.productId, reason: s.reason };
+}
+
+// ------------------------------------------------------------------ selling side (0032-0034)
+
+const isoOrNull = (d: Date | null): string | null => (d === null ? null : iso(d));
+
+export function savedProductView(s: SavedProduct) {
+  return {
+    productId: s.productId,
+    savedAt: iso(s.savedAt),
+    published: s.published,
+    name: s.name,
+    pricePaise: s.pricePaise === null ? null : paise(s.pricePaise),
+    sellerName: s.sellerName,
+    available: s.available,
+    templateId: s.templateId,
+    altText: s.altText,
+  };
+}
+
+export function passportView(p: PassportProgress) {
+  return {
+    ruleVersion: p.ruleVersion,
+    steps: {
+      quiz: {
+        done: p.quiz.done,
+        completedAt: isoOrNull(p.quiz.completedAt),
+        failedAttempts: p.quiz.failedAttempts,
+      },
+      saves: {
+        done: p.saves.done,
+        completedAt: isoOrNull(p.saves.completedAt),
+        count: p.saves.count,
+        required: p.saves.required,
+      },
+      concept: { done: p.concept.done, completedAt: isoOrNull(p.concept.completedAt), text: p.concept.text },
+    },
+    completedAt: isoOrNull(p.completedAt),
+  };
+}
+
+export function creatorAccessView(a: CreatorAccess) {
+  return {
+    unlocked: a.unlocked,
+    source: a.source,
+    unlockedAt: isoOrNull(a.unlockedAt),
+    ruleVersion: a.ruleVersion,
+    routes: {
+      spend: {
+        balancePaise: a.routes.spend.balancePaise === null ? null : paise(a.routes.spend.balancePaise),
+        thresholdPaise: paise(a.routes.spend.thresholdPaise),
+        reached: a.routes.spend.reached,
+        reachedAt: isoOrNull(a.routes.spend.reachedAt),
+      },
+      passport: passportView(a.routes.passport),
+    },
+  };
+}
+
+export function reliefStatusView(r: ReliefStatus) {
+  return {
+    eligible: r.eligible,
+    reason: r.reason,
+    claimsUsed: r.claimsUsed,
+    claimsMax: r.claimsMax,
+    claimsRemaining: r.claimsRemaining,
+    balancePaise: r.balancePaise === null ? null : paise(r.balancePaise),
+    ceilingPaise: paise(r.ceilingPaise),
+    grantPaise: paise(r.grantPaise),
+    nextResetAt: iso(r.nextResetAt),
+  };
+}
+
+export function reliefClaimView(r: ReliefClaim) {
+  return { ...reliefStatusView(r), productId: r.productId, grantedPaise: paise(r.grantedPaise) };
+}
+
+export function companyQuoteView(q: CompanyQuote) {
+  return {
+    sessionId: q.sessionId,
+    expiresAt: iso(q.expiresAt),
+    handle: q.handle,
+    displayName: q.displayName,
+    description: q.description,
+    feePaise: paise(q.feePaise),
+    sponsorshipPaise: paise(q.sponsorshipPaise),
+    payablePaise: paise(q.payablePaise),
+    balancePaise: paise(q.balancePaise),
+    balanceAfterPaise: q.balanceAfterPaise === null ? null : paise(q.balanceAfterPaise),
+    sufficient: q.sufficient,
+  };
+}
+
+export function companyReceiptView(r: CompanyReceipt) {
+  return {
+    companyId: r.companyId,
+    handle: r.handle,
+    displayName: r.displayName,
+    tier: r.tier,
+    warehouseId: r.warehouseId,
+    feePaise: paise(r.feePaise),
+    paidPaise: paise(r.paidPaise),
+    sponsorshipPaise: paise(r.sponsorshipPaise),
+    balanceAfterPaise: paise(r.balanceAfterPaise),
+    paymentReference: r.paymentReference,
+    replayed: r.replayed,
+  };
+}
+
+export function companyView(c: Company) {
+  return {
+    id: c.companyId,
+    handle: c.handle,
+    displayName: c.displayName,
+    description: c.description,
+    tier: c.tier,
+    registeredAt: iso(c.registeredAt),
+    warehouses: {
+      count: c.warehouses.count,
+      capacity: c.warehouses.capacity,
+      used: c.warehouses.used,
+      starter: c.warehouses.starter && {
+        id: c.warehouses.starter.id,
+        capacity: c.warehouses.starter.capacity,
+        used: c.warehouses.starter.used,
+      },
+    },
+  };
+}
+
+export function storeView(s: Store) {
+  return { handle: s.handle, displayName: s.displayName, description: s.description, tier: s.tier };
 }

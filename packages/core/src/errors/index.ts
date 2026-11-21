@@ -38,6 +38,18 @@ export const ERROR_CODES = [
   "PHONE_CODE_FAILED",
   // cart (PRD R2.2): the cart already holds the configured maximum number of lines
   "CART_FULL",
+  // selling side: onboarding not finished (no account yet)
+  "ONBOARDING_REQUIRED",
+  // creator access (US-04, US-05): the action needs the creator entitlement
+  "CREATOR_LOCKED",
+  // company registration (US-18): one company per person; a store handle in use or held by
+  // another person's live registration quote
+  "COMPANY_EXISTS",
+  "HANDLE_TAKEN",
+  "HANDLE_RESERVED",
+  // relief grant: not claimable now (balance, already claimed today); lifetime cap reached
+  "RELIEF_NOT_ELIGIBLE",
+  "RELIEF_LIMIT",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
