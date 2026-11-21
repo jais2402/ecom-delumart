@@ -213,6 +213,113 @@ describe("provisionAccount", () => {
     expect(wallet.rows.map((w) => BigInt(w.available_paise))).toEqual([STARTER]);
   });
 
+  it("US-01/US-14 concurrency, repeated: 25 rounds of 10 simultaneous first calls never surface a unique violation", async () => {
+    // The fingerprint indexes are not the primary key: a profile insert that arbitrates on
+    // id alone loses this race now and then with 23505 on user_profile_email_fingerprint_key.
+    for (let round = 0; round < 25; round += 1) {
+      const input = provisionInput();
+      const outcomes = await Promise.allSettled(
+        Array.from({ length: 10 }, (_, i) =>
+          provisionAccount(pool, i === 0 ? input : { ...input, ...pick(provisionInput()) }),
+        ),
+      );
+      const failures = outcomes.flatMap((o) => (o.status === "rejected" ? [errorCode(o.reason)] : []));
+      expect(failures).toEqual([]);
+      const results = outcomes.flatMap((o) => (o.status === "fulfilled" ? [o.value] : []));
+      expect(results.filter((r) => r.created)).toHaveLength(1);
+      expect(new Set(results.map((r) => r.ledgerAccountId)).size).toBe(1);
+      expect(
+        await count(pool, "SELECT count(*) AS n FROM ledger.grant_record WHERE user_id = $1", [input.userId]),
+      ).toBe(1);
+    }
+  });
+
+  /** Holds `insert` open in its own transaction while `during` runs against it, then ends it. */
+  async function whileUncommitted<T>(
+    insert: (c: pg.PoolClient) => Promise<unknown>,
+    end: "COMMIT" | "ROLLBACK",
+    during: () => Promise<T>,
+  ): Promise<PromiseSettledResult<T>> {
+    const holder = await pool.connect();
+    try {
+      await holder.query("BEGIN");
+      await insert(holder);
+      const pending = during().then(
+        (value): PromiseSettledResult<T> => ({ status: "fulfilled", value }),
+        (reason: unknown): PromiseSettledResult<T> => ({ status: "rejected", reason }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 300)); // let the call reach the held row
+      await holder.query(end);
+      return await pending;
+    } finally {
+      holder.release();
+    }
+  }
+
+  const insertProfile = (c: pg.PoolClient, id: string, email: Buffer, phone: Buffer | null) =>
+    c.query("INSERT INTO core.user_profile (id, email_fingerprint, phone_fingerprint) VALUES ($1, $2, $3)", [
+      id,
+      email,
+      phone,
+    ]);
+
+  it("US-14 concurrency: a call that meets the same user's uncommitted profile waits and converges on it", async () => {
+    const input = provisionInput();
+    const outcome = await whileUncommitted(
+      (c) => insertProfile(c, input.userId, input.emailFingerprint, input.phoneFingerprint),
+      "COMMIT",
+      () => provisionAccount(pool, input),
+    );
+    expect(outcome.status).toBe("fulfilled");
+    expect(
+      await count(pool, "SELECT count(*) AS n FROM core.user_profile WHERE id = $1", [input.userId]),
+    ).toBe(1);
+    expect((await provisionAccount(pool, input)).created).toBe(false);
+  });
+
+  for (const field of ["emailFingerprint", "phoneFingerprint"] as const) {
+    it(`US-01: a different user id reusing another profile's ${field} is rejected with CONFLICT and gets nothing`, async () => {
+      const owner = provisionInput();
+      await provisionAccount(pool, owner);
+      const intruder = provisionInput({ [field]: owner[field] });
+      const outcome = await provisionAccount(pool, intruder).then(() => "ok", errorCode);
+      expect(outcome).toBe("CONFLICT");
+      const u = [intruder.userId];
+      expect(await count(pool, "SELECT count(*) AS n FROM core.user_profile WHERE id = $1", u)).toBe(0);
+      expect(await count(pool, "SELECT count(*) AS n FROM ledger.ledger_account WHERE user_id = $1", u)).toBe(
+        0,
+      );
+      expect(await count(pool, "SELECT count(*) AS n FROM ledger.grant_record WHERE user_id = $1", u)).toBe(
+        0,
+      );
+    });
+
+    it(`US-01 concurrency: reusing ${field} of another user's uncommitted profile is rejected with CONFLICT once it commits`, async () => {
+      const owner = provisionInput();
+      const intruder = provisionInput({ [field]: owner[field] });
+      const outcome = await whileUncommitted(
+        (c) => insertProfile(c, owner.userId, owner.emailFingerprint, owner.phoneFingerprint),
+        "COMMIT",
+        () => provisionAccount(pool, intruder),
+      );
+      expect(outcome.status === "rejected" ? errorCode(outcome.reason) : "ok").toBe("CONFLICT");
+      expect(
+        await count(pool, "SELECT count(*) AS n FROM core.user_profile WHERE id = $1", [intruder.userId]),
+      ).toBe(0);
+    });
+
+    it(`US-01 concurrency: reusing ${field} of a profile insert that rolls back provisions normally`, async () => {
+      const owner = provisionInput();
+      const second = provisionInput({ [field]: owner[field] });
+      const outcome = await whileUncommitted(
+        (c) => insertProfile(c, owner.userId, owner.emailFingerprint, owner.phoneFingerprint),
+        "ROLLBACK",
+        () => provisionAccount(pool, second),
+      );
+      expect(outcome.status === "fulfilled" ? outcome.value.created : errorCode(outcome.reason)).toBe(true);
+    });
+  }
+
   it("global conservation: after several provisions SUM(posting.amount) = 0 and each wallet equals its postings (LLD §5.9)", async () => {
     await Promise.all(Array.from({ length: 5 }, () => provisionAccount(pool, provisionInput())));
     const tombstoned = provisionInput();
@@ -317,6 +424,12 @@ describe("provisionAccount", () => {
     expect(outcome).toBe("23514");
   });
 });
+
+/** DomainError code or SQLSTATE of a rejection; never the message (it may quote row values). */
+function errorCode(e: unknown): string {
+  const code = (e as { code?: unknown } | null)?.code;
+  return typeof code === "string" ? code : "unknown";
+}
 
 function pick(i: ReturnType<typeof provisionInput>) {
   return { cardNumber: i.cardNumber, alias: i.alias, upiStyleId: i.upiStyleId };
