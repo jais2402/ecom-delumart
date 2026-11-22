@@ -104,6 +104,8 @@ export interface CartPreviewInput {
 
 export interface CheckoutFromCartInput extends CartPreviewInput {
   idempotencyKey: string;
+  /** One of the caller's own saved addresses; omitted: the fictional delivery spot. */
+  addressId?: string;
 }
 
 // ---------------------------------------------------------------------------- parsing
@@ -453,6 +455,7 @@ export async function createCheckoutSessionFromCart(
       lines: cart.lines.map((l) => ({ productId: l.productId })),
       speedBySeller: chosenSpeeds(cart.lines, input.speedBySeller),
       ...(input.couponCode === undefined ? {} : { couponCode: input.couponCode }),
+      ...(input.addressId === undefined ? {} : { addressId: input.addressId }),
       idempotencyKey: input.idempotencyKey,
     });
   } catch (error) {

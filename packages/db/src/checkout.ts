@@ -36,6 +36,7 @@ export interface CreateCheckoutSessionInput {
   /** Delivery speed per seller order: the company id, or "SEED" for platform seed stock. */
   speedBySeller: Readonly<Record<string, Speed>>;
   couponCode?: string;
+  /** One of the caller's own saved addresses; omitted: the fictional delivery spot (decisions.md #4). */
   addressId?: string;
   idempotencyKey: string;
 }
@@ -362,6 +363,10 @@ export async function createCheckoutSession(
   };
 
   const outcome = await asPay<Outcome<StoredSession>>(pool, input.authSessionId, async (c) => {
+    // one of the actor's own saved addresses, or ADDRESS_NOT_FOUND (core.resolve_cart checks again)
+    if (input.addressId !== undefined) {
+      await c.query("SELECT core.checkout_address_check($1)", [input.addressId]);
+    }
     const step1 = await c.query<{ r: { replay?: StoredSession; error?: Refusal; inputs?: CartInputs } }>(
       "SELECT core.checkout_inputs($1::jsonb, $2) AS r",
       [JSON.stringify(choices), input.idempotencyKey],

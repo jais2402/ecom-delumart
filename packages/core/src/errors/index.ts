@@ -69,6 +69,10 @@ export const ERROR_CODES = [
   "NOT_APPEALABLE",
   // merchant coupons (US-41): the company already has its maximum of active coupons
   "COUPON_LIMIT",
+  // delivery addresses (PRD R5.2): not one of the actor's own saved addresses (another user's, a
+  // deleted one or none); the actor already has the configured maximum of saved addresses
+  "ADDRESS_NOT_FOUND",
+  "ADDRESS_LIMIT",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

@@ -22,6 +22,19 @@ export {
   type Wallet,
 } from "./account";
 export {
+  ADDRESS_PAYLOAD_BYTES,
+  createAddress,
+  type Destination,
+  deleteAddress,
+  myAddresses,
+  myOrderDelivery,
+  type OrderDelivery,
+  type StoredAddress,
+  setCheckoutDestination,
+  setDefaultAddress,
+  updateAddress,
+} from "./address";
+export {
   type AnalyticsFunnel,
   type AnalyticsOverview,
   type AnalyticsPlaces,
