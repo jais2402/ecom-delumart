@@ -1,6 +1,16 @@
 "use client";
 
-import { Alert, Badge, Button, EmptyState, Heading, Receipt, Text, TrackingTimeline } from "@delulu/ui";
+import {
+  AddressCard,
+  Alert,
+  Badge,
+  Button,
+  EmptyState,
+  Heading,
+  Receipt,
+  Text,
+  TrackingTimeline,
+} from "@delulu/ui";
 import { useEffect, useState } from "react";
 import type { OrderResponse } from "../_lib/api";
 import { parsePaise } from "../_lib/money";
@@ -103,6 +113,25 @@ export function OrderDetail({ id, justPaid = false }: { id: string; justPaid?: b
           totalPaise={totals.total}
         />
         <div className="flex flex-col gap-6">
+          <section aria-labelledby="delivery-to" className="flex flex-col gap-2">
+            <Heading level={2} size="sm" id="delivery-to">
+              Delivery address
+            </Heading>
+            {order.delivery?.kind === "ADDRESS" ? (
+              <AddressCard label={order.delivery.labelName} text={order.delivery.text} kind="real" />
+            ) : order.delivery?.kind === "ADDRESS_REMOVED" ? (
+              <Text muted>Address removed</Text>
+            ) : (
+              <AddressCard
+                label="Fictional delivery spot"
+                text={order.delivery?.kind === "FICTIONAL_SPOT" ? order.delivery.text : "A fictional spot"}
+                kind="fictional"
+              />
+            )}
+            <Text size="sm" muted>
+              Nothing real ships — delivery is simulated. Only you can see this address.
+            </Text>
+          </section>
           {order.sellerOrders.map((so) => {
             const delivery = deliveryStatus(so.shipment, now);
             const seller = so.sellerName ?? "DeluluMart Originals";

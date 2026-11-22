@@ -267,12 +267,47 @@ export interface SellerOrder {
   lines: OrderLine[];
 }
 
+/** Where an order goes (PRD R5.2): the buyer's own copy, decrypted for the buyer only. */
+export type OrderDelivery =
+  | { kind: "FICTIONAL_SPOT"; text: string }
+  | { kind: "ADDRESS"; label: AddressLabel; labelName: string; text: string }
+  | { kind: "ADDRESS_REMOVED" };
+
 export interface OrderResponse {
   id: string;
   createdAt: string;
   totalPaise: string;
   paymentReference: string;
   sellerOrders: SellerOrder[];
+  /** Present on GET /api/v1/orders/{id} only. */
+  delivery?: OrderDelivery | null;
+}
+
+export type AddressLabel = "HOME" | "WORK" | "OTHER";
+
+/** One saved address as GET /api/v1/addresses returns it. */
+export interface SavedAddress {
+  id: string;
+  label: AddressLabel;
+  labelName: string;
+  isDefault: boolean;
+  address: {
+    recipientName: string;
+    line1: string;
+    line2: string | null;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: "IN";
+  };
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AddressesResponse {
+  items: SavedAddress[];
+  max: number;
 }
 
 export interface StatementItem {

@@ -80,6 +80,7 @@ export interface AnalyticsOverview {
 }
 
 const num = (v: unknown): number => Number(v ?? 0);
+const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
 const big = (v: unknown): bigint => BigInt(String(v ?? "0"));
 const bigOrNull = (v: unknown): bigint | null => (v === null || v === undefined ? null : BigInt(String(v)));
 const dateOrNull = (v: unknown): Date | null => (v === null || v === undefined ? null : new Date(String(v)));
@@ -216,9 +217,14 @@ export interface PlaceRow {
   /** Null at country level or when unknown; "Other" when folded. */
   region: string | null;
   city: string | null;
-  visitors: number;
-  signUps: number;
-  purchases: number;
+  /**
+   * Null with `suppressed` for the one "Other" row that is still below the minimum after every
+   * row under the minimum was merged into it (0059): the screen shows "Fewer than N".
+   */
+  visitors: number | null;
+  signUps: number | null;
+  purchases: number | null;
+  suppressed: boolean;
 }
 
 export interface AnalyticsPlaces {
@@ -259,9 +265,10 @@ export async function analyticsPlaces(
       country: String(i.country),
       region: textOrNull(i.region),
       city: textOrNull(i.city),
-      visitors: num(i.visitors),
-      signUps: num(i.signUps),
-      purchases: num(i.purchases),
+      visitors: numOrNull(i.visitors),
+      signUps: numOrNull(i.signUps),
+      purchases: numOrNull(i.purchases),
+      suppressed: i.suppressed === true,
     })),
     trafficDays: num(r.trafficDays),
     asOf: new Date(String(r.asOf)),

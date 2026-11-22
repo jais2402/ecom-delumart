@@ -3100,6 +3100,11 @@ describe("money attacks (security review)", () => {
         // role reads a company's owner column; answers only the actor's own companies
         "core.actor_company_ids()",
         "core.actor_id()",
+        // 0058: the actor's own address book (ciphertext only; no money moves)
+        "core.address_create(text,bytea,boolean)",
+        "core.address_delete(uuid)",
+        "core.address_set_default(uuid)",
+        "core.address_update(uuid,text,bytea)",
         // 0039: Super Admin appeals and report cases (each refuses anyone but the Super Admin; no money moves)
         "core.admin_appeal_resolve(uuid,text,text)",
         // 0037: Super Admin moderation (each refuses anyone but the Super Admin; no money moves)
@@ -3129,6 +3134,7 @@ describe("money attacks (security review)", () => {
         "core.draft_delete(uuid)",
         "core.draft_update(uuid,text,text,text,text,integer,text,bigint,text,integer,boolean,boolean)",
         "core.is_published_version(uuid)",
+        "core.my_addresses()",
         "core.my_appeals()",
         "core.my_blocks()",
         // 0042: the owner's merchant read models (read only; never a buyer's identity)
@@ -3142,6 +3148,8 @@ describe("money attacks (security review)", () => {
         "core.my_earnings(integer)",
         "core.my_inventory()",
         "core.my_order(uuid)",
+        // 0058: the buyer's own order destination
+        "core.my_order_delivery(uuid)",
         "core.my_orders(uuid,integer)",
         "core.my_product(uuid)",
         "core.my_products(text,uuid,integer)",
@@ -3204,7 +3212,10 @@ describe("money attacks (security review)", () => {
         "core.cart_merge(uuid[])",
         "core.cart_quote_inputs(jsonb)",
         "core.cart_remove(uuid)",
+        // 0058: the checkout destination (the actor's own address or the fictional spot)
+        "core.checkout_address_check(uuid)",
         "core.checkout_inputs(jsonb,text)",
+        "core.checkout_set_destination(uuid,uuid)",
         // 0033: the relief grant (a money command)
         "core.claim_relief(uuid)",
         // 0034: company registration (quote and pay transaction)

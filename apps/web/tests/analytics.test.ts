@@ -11,7 +11,7 @@ import * as profile from "../src/app/api/v1/profile/route";
 import { jobsPool } from "../src/server/db";
 import { runJobs } from "../src/server/jobs";
 import { startTestApp, type TestApp } from "./helpers/app";
-import { Browser, type CallResult, str } from "./helpers/browser";
+import { arr, Browser, type CallResult, str } from "./helpers/browser";
 import { checkout, player, R } from "./helpers/flows";
 import { makeAdmin } from "./helpers/studio";
 
@@ -306,6 +306,12 @@ describe("GET /api/v1/admin/analytics/*", () => {
     expect(f?.steps?.[0]).toMatchObject({ step: "visitors", conversionFromPrevious: null });
     const pl = results["/api/v1/admin/analytics/places"]?.json;
     expect(pl).toMatchObject({ level: "country", minVisitors: 10 });
+    // R7.1 (0059): no row below the minimum is shown with counts
+    for (const i of arr(pl?.items)) {
+      expect(typeof i.suppressed).toBe("boolean");
+      if (i.suppressed) expect([i.visitors, i.signUps, i.purchases]).toEqual([null, null, null]);
+      else expect(i.visitors).toBeGreaterThanOrEqual(10);
+    }
     const tp = results["/api/v1/admin/analytics/top"]?.json;
     expect(tp?.items?.[0]).toMatchObject({ orders: 1, units: 1, shop: null });
     expect(tp?.items?.[0]?.spendPaise).toMatch(/^\d+$/);

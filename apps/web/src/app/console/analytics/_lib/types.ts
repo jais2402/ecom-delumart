@@ -74,9 +74,11 @@ export type PlaceItem = {
   country: string;
   region: string | null;
   city: string | null;
-  visitors: number;
-  signUps: number;
-  purchases: number;
+  /** Null for the suppressed "Other" row (below the minimum even after merging). */
+  visitors: number | null;
+  signUps: number | null;
+  purchases: number | null;
+  suppressed: boolean;
 };
 
 export type PlacesResponse = {

@@ -37,7 +37,15 @@ describe("analytics range in the URL", () => {
 });
 
 describe("place labels", () => {
-  const item = { country: "IN", region: null, city: null, visitors: 1, signUps: 0, purchases: 0 };
+  const item = {
+    country: "IN",
+    region: null,
+    city: null,
+    visitors: 1,
+    signUps: 0,
+    purchases: 0,
+    suppressed: false,
+  };
   it("turns the API markers into words", () => {
     expect(placeLabel({ ...item, country: "ZZ" }, "country")).toBe("Unknown location");
     expect(placeLabel({ ...item, country: "Other" }, "country")).toBe("Other (small places combined)");

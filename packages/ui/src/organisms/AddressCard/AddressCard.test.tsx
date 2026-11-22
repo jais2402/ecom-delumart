@@ -23,4 +23,16 @@ describe("AddressCard", () => {
     expect(onEdit).toHaveBeenCalled();
     expect(onDelete).toHaveBeenCalled();
   });
+  it("marks the default address and offers 'Make default' on the others, named after the address", async () => {
+    const onSetDefault = vi.fn();
+    const { rerender } = render(
+      <AddressCard label="Home" text="t" kind="real" isDefault onSetDefault={onSetDefault} />,
+    );
+    expect(screen.getByText("Default")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Make Home the default" })).toBeNull();
+    rerender(<AddressCard label="Work" text="t" kind="real" onSetDefault={onSetDefault} />);
+    expect(screen.queryByText("Default")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Make Work the default" }));
+    expect(onSetDefault).toHaveBeenCalled();
+  });
 });

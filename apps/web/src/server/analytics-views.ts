@@ -144,6 +144,7 @@ export function placesView(p: AnalyticsPlaces) {
       visitors: i.visitors,
       signUps: i.signUps,
       purchases: i.purchases,
+      suppressed: i.suppressed,
     })),
     trafficDays: p.trafficDays,
     asOf: iso(p.asOf),

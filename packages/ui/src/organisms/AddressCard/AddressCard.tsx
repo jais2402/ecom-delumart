@@ -7,11 +7,26 @@ export type AddressCardProps = Omit<ComponentPropsWithRef<"article">, "children"
   label: string;
   text: string;
   kind: "fictional" | "real";
+  /** The address checkout offers first. */
+  isDefault?: boolean;
   onEdit?: () => void;
   onDelete?: () => void;
+  /** Shown only when the address is not already the default. */
+  onSetDefault?: () => void;
 };
 
-export function AddressCard({ label, text, kind, onEdit, onDelete, className, ...props }: AddressCardProps) {
+export function AddressCard({
+  label,
+  text,
+  kind,
+  isDefault = false,
+  onEdit,
+  onDelete,
+  onSetDefault,
+  className,
+  ...props
+}: AddressCardProps) {
+  const setDefault = isDefault ? undefined : onSetDefault;
   return (
     <article
       aria-label={label}
@@ -23,11 +38,25 @@ export function AddressCard({ label, text, kind, onEdit, onDelete, className, ..
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-display text-lg font-bold text-fg">{label}</h3>
-        <Tag>{kind === "fictional" ? "Fictional spot" : "Real address"}</Tag>
-      </div>
-      <p className="text-base text-fg">{text}</p>
-      {onEdit || onDelete ? (
         <div className="flex flex-wrap gap-2">
+          {isDefault ? <Tag>Default</Tag> : null}
+          <Tag>{kind === "fictional" ? "Fictional spot" : "Real address"}</Tag>
+        </div>
+      </div>
+      <p className="break-words text-base text-fg">{text}</p>
+      {onEdit || onDelete || setDefault ? (
+        <div className="flex flex-wrap gap-2">
+          {setDefault ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              aria-label={`Make ${label} the default`}
+              onClick={setDefault}
+            >
+              Make default
+            </Button>
+          ) : null}
           {onEdit ? (
             <Button type="button" variant="secondary" size="sm" aria-label={`Edit ${label}`} onClick={onEdit}>
               Edit

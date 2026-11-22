@@ -148,7 +148,8 @@ export async function setCheckoutDestination(
 ): Promise<{ sessionId: string } & Destination> {
   requireUuid(input.sessionId, "sessionId");
   const addressId = input.destination.deliverTo === "ADDRESS" ? input.destination.addressId : null;
-  if (addressId !== null && !isUuid(addressId)) throw new DomainError("ADDRESS_NOT_FOUND", "address not found");
+  if (addressId !== null && !isUuid(addressId))
+    throw new DomainError("ADDRESS_NOT_FOUND", "address not found");
   return asPay(pool, input.authSessionId, (c) =>
     one<{ sessionId: string } & Destination>(c, "SELECT core.checkout_set_destination($1, $2) AS r", [
       input.sessionId,

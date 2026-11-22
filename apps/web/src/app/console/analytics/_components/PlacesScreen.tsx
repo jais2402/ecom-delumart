@@ -35,7 +35,10 @@ export function PlacesScreen() {
 
   const here = (v: Record<string, string | null>) => `${PATH}?${queryString({ ...v, ...dates })}`;
   const countryText = country
-    ? placeLabel({ country, region: null, city: null, visitors: 0, signUps: 0, purchases: 0 }, "country")
+    ? placeLabel(
+        { country, region: null, city: null, visitors: 0, signUps: 0, purchases: 0, suppressed: false },
+        "country",
+      )
     : "";
   // the last crumb is the current level and is not a link
   const crumbs: { label: string; href?: string }[] = [{ label: "All countries", href: here({}) }];
@@ -79,8 +82,10 @@ export function PlacesScreen() {
                 visitors: item.visitors,
                 signUps: item.signUps,
                 purchases: item.purchases,
-                drillable: placeKey(item, level) !== null,
+                suppressed: item.suppressed,
+                drillable: !item.suppressed && placeKey(item, level) !== null,
               }))}
+              minVisitors={data.minVisitors}
               drillLabel={(row) => `Show ${level === "country" ? "regions" : "cities"} in ${row.label}`}
               onDrill={(row) => {
                 const item = data.items.find((i) => itemKey(i) === row.key);
@@ -91,7 +96,7 @@ export function PlacesScreen() {
               }}
             />
             <Text size="sm" muted>
-              {`Places with fewer than ${data.minVisitors} daily visitors are combined into "Other (small places combined)" to protect privacy. Unknown places are shown as "Unknown".`}
+              {`Places with fewer than ${data.minVisitors} daily visitors are combined into "Other (small places combined)" to protect privacy; if that row is still below ${data.minVisitors}, its counts are not shown. Unknown places are shown as "Unknown".`}
             </Text>
           </div>
         )}

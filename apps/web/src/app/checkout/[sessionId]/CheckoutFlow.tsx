@@ -7,6 +7,7 @@ import {
   CheckoutLayout,
   CheckoutSteps,
   DeliveryOption,
+  DestinationChoice,
   EmptyState,
   FictionLabel,
   Heading,
@@ -22,7 +23,9 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LoadingBlock } from "../../_components/LoadState";
 import { SessionHeader } from "../../_components/SessionHeader";
+import { addAddressHref, FICTIONAL_SPOT } from "../../_lib/addresses";
 import {
+  type AddressesResponse,
   ApiError,
   api,
   describeError,
@@ -42,6 +45,7 @@ import {
 import { parsePaise } from "../../_lib/money";
 import { refreshSession } from "../../_lib/session-store";
 import { requestQuote } from "../../_lib/start-checkout";
+import { useApiGet } from "../../_lib/use-api";
 import { useRequireAccount } from "../../_lib/use-require-account";
 
 type Step = "speed" | "payment" | "review";
@@ -85,6 +89,7 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
   const working = useRef(false);
   const stepHeading = useRef<HTMLHeadingElement>(null);
   const firstStep = useRef(true);
+  const addresses = useApiGet<AddressesResponse>(ok ? "/api/v1/addresses" : null);
 
   const update = useCallback(
     (next: CheckoutContext) => {
@@ -175,6 +180,14 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
         : undefined;
   const effectiveMethod: Method = method === "CARD" && cardReason ? "BALANCE" : method;
   const offered: Speed[] = ["STANDARD", ...ALTERNATIVES.filter((s) => ctx.quotes[s])];
+  const saved = addresses.status === "ready" ? addresses.data.items : [];
+  // the fictional spot is pre-selected (decisions.md #4); a chosen address that is gone falls back to it
+  const destination =
+    ctx.destination && saved.some((a) => a.id === ctx.destination) ? ctx.destination : FICTIONAL_SPOT;
+  const destinationText =
+    destination === FICTIONAL_SPOT
+      ? "Fictional delivery spot"
+      : (saved.find((a) => a.id === destination)?.labelName ?? "Saved address");
 
   function begin(message: string) {
     setNotice(null);
@@ -309,6 +322,15 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
           link: { href: "/account/cards", label: "Open Cards" },
         });
         return;
+      case "ADDRESS_NOT_FOUND":
+        if (ctx) update({ ...ctx, destination: FICTIONAL_SPOT });
+        addresses.reload();
+        setNotice({
+          tone: "warning",
+          title: "That address is no longer saved",
+          text: `Choose another address or the fictional spot. ${nothingMoved}`,
+        });
+        return;
       case "AUTH_REQUIRED":
         router.replace(`/sign-in?next=${encodeURIComponent(`/checkout/${sessionId}`)}`);
         return;
@@ -356,6 +378,11 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
     setPhase("processing");
     begin(effectiveMethod === "CARD" ? "Opening the card check…" : "Starting your payment…");
     try {
+      // where the order goes; the database checks the address is the player's own, again at payment
+      await api(`/api/v1/checkout-sessions/${quote.id}`, {
+        method: "PATCH",
+        body: destination === FICTIONAL_SPOT ? { deliverTo: FICTIONAL_SPOT } : { addressId: destination },
+      });
       const attempt = await api<{ id: string; authenticated: boolean }>(
         `/api/v1/checkout-sessions/${quote.id}/attempts`,
         {
@@ -673,6 +700,10 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
                 </>
               )}
               <div className="flex justify-between gap-3">
+                <dt className="text-fg-muted">Deliver to</dt>
+                <dd className="text-right text-fg">{destinationText}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
                 <dt className="text-fg-muted">Pay with</dt>
                 <dd className="text-fg">{effectiveMethod === "CARD" ? cardAlias : "Bank balance"}</dd>
               </div>
@@ -691,6 +722,42 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
                 </dd>
               </div>
             </dl>
+            <DestinationChoice
+              name="destination"
+              legend="Deliver to"
+              value={destination}
+              onChange={(value) => update({ ...ctx, destination: value })}
+              options={[
+                {
+                  value: FICTIONAL_SPOT,
+                  title: "Fictional delivery spot",
+                  text: "A made-up place in the Delulu world. No real address needed.",
+                  kind: "fictional",
+                },
+                ...saved.map((a) => ({
+                  value: a.id,
+                  title: a.labelName,
+                  text: a.text,
+                  kind: "real" as const,
+                  isDefault: a.isDefault,
+                })),
+              ]}
+              footer={
+                <div className="flex flex-col gap-1">
+                  {saved.length < (addresses.status === "ready" ? addresses.data.max : 5) ? (
+                    <a
+                      className="inline-flex min-h-touch items-center text-action underline"
+                      href={addAddressHref(sessionId)}
+                    >
+                      Add a new address
+                    </a>
+                  ) : null}
+                  <Text size="sm" muted>
+                    Nothing real ships — delivery is simulated. Sellers never see your address.
+                  </Text>
+                </div>
+              }
+            />
             <FictionLabel>Fictional money. No real card or bank details are used.</FictionLabel>
             {balanceAfter !== null && balanceAfter < 0n ? (
               <Alert tone="danger" title="This costs more than your balance">

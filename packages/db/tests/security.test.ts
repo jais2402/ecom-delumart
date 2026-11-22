@@ -38,43 +38,33 @@ describe("roles, grants and row-level security", () => {
     await db.drop();
   });
 
-  it("RLS: as app_web signed in as A, addresses of user B are invisible", async () => {
-    const rows = await withTransaction(
-      pool,
-      async (c) => {
-        await c.query("SET LOCAL ROLE app_web");
-        return (await c.query<{ user_id: string }>("SELECT user_id FROM private.address")).rows;
-      },
-      { sessionId: await sessionFor(pool, userA) },
-    );
-    expect(rows).toEqual([{ user_id: userA }]);
-    const updated = await withTransaction(
-      pool,
-      async (c) => {
-        await c.query("SET LOCAL ROLE app_web");
-        return (await c.query("UPDATE private.address SET label = 'WORK' WHERE user_id = $1", [userB]))
-          .rowCount;
-      },
-      { sessionId: await sessionFor(pool, userA) },
-    );
-    expect(updated).toBe(0);
-  });
-
-  it("RLS: as app_web signed in as A, an address cannot be inserted for user B", async () => {
+  it("0058: app_web has no direct privilege on addresses at all (definer commands only), signed in or not", async () => {
     const insert =
       "INSERT INTO private.address (id, user_id, kind, label, payload_enc) VALUES ($1, $2, 'REAL', 'HOME', '\\x01')";
-    expect(await stateOf(pool, insert, [uuidv7(), userB], { role: "app_web", userId: userA })).toBe("42501");
-    expect(await stateOf(pool, insert, [uuidv7(), userA], { role: "app_web", userId: userA })).toBe(
-      "no error",
-    );
+    for (const userId of [userA, userB]) {
+      expect(await stateOf(pool, insert, [uuidv7(), userId], { role: "app_web", userId: userA })).toBe(
+        "42501",
+      );
+    }
+    expect(
+      await stateOf(pool, "SELECT user_id FROM private.address", [], { role: "app_web", userId: userA }),
+    ).toBe("42501");
+    expect(
+      await stateOf(pool, "UPDATE private.address SET label = 'WORK' WHERE user_id = $1", [userB], {
+        role: "app_web",
+        userId: userA,
+      }),
+    ).toBe("42501");
+    expect(await stateOf(pool, "SELECT 1 FROM private.address", [], { role: "app_web" })).toBe("42501");
   });
 
-  it("RLS: without a sign-in session, app_web sees no addresses (fails closed, no error)", async () => {
-    const rows = await withTransaction(pool, async (c) => {
-      await c.query("SET LOCAL ROLE app_web");
-      return (await c.query("SELECT 1 FROM private.address")).rowCount;
-    });
-    expect(rows).toBe(0);
+  it("RLS stays on private.address as a backstop: the owner policy still scopes app_web to its own rows", async () => {
+    const { rows } = await pool.query<{ rls: boolean; policies: string }>(
+      `SELECT c.relrowsecurity AS rls, (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid)::text AS policies
+         FROM pg_class c WHERE c.oid = 'private.address'::regclass`,
+    );
+    expect(rows[0]?.rls).toBe(true);
+    expect(Number(rows[0]?.policies)).toBeGreaterThan(0);
   });
 
   it("RLS: owner policies hide another user's bank account, card, wallet-linked records and seller orders", async () => {

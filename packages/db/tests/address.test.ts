@@ -24,7 +24,15 @@ import {
   user,
   wallet,
 } from "./checkout-fixtures";
-import { createTestDatabase, inTx, sqlState, stateOf, type TestDatabase, type TestUser, uuidv7 } from "./helpers";
+import {
+  createTestDatabase,
+  inTx,
+  sqlState,
+  stateOf,
+  type TestDatabase,
+  type TestUser,
+  uuidv7,
+} from "./helpers";
 import { asFixture, type Creator, creator, ensureCategories, publishListing } from "./listing-fixtures";
 import { published } from "./selling-fixtures";
 
@@ -62,7 +70,11 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
   let b: TestUser;
   let seedLamp: Awaited<ReturnType<typeof product>>;
 
-  const add = (u: TestUser, tag: string, extra: { label?: "HOME" | "WORK" | "OTHER"; makeDefault?: boolean } = {}) =>
+  const add = (
+    u: TestUser,
+    tag: string,
+    extra: { label?: "HOME" | "WORK" | "OTHER"; makeDefault?: boolean } = {},
+  ) =>
     createAddress(pool, {
       authSessionId: u.authSessionId,
       label: extra.label ?? "HOME",
@@ -72,7 +84,8 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
 
   const list = (u: TestUser) => myAddresses(pool, { authSessionId: u.authSessionId });
   const clear = async (u: TestUser) => {
-    for (const x of await list(u)) await deleteAddress(pool, { authSessionId: u.authSessionId, addressId: x.id });
+    for (const x of await list(u))
+      await deleteAddress(pool, { authSessionId: u.authSessionId, addressId: x.id });
   };
 
   /** One seed purchase; `address` is put on the quote, `destination` set on the open session. */
@@ -80,9 +93,10 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
     u: TestUser,
     opts: { address?: string; destination?: string | null } = {},
   ): Promise<{ orderGroupId: string; sessionId: string; totalPaise: bigint }> {
+    const lamp = await product(pool, { mode: "UNLIMITED_SEED", pricePaise: 100_000n });
     const s = await createCheckoutSession(pool, {
       authSessionId: u.authSessionId,
-      lines: [{ productId: seedLamp.id }],
+      lines: [{ productId: lamp.id }],
       speedBySeller: { SEED: "STANDARD" },
       ...(opts.address ? { addressId: opts.address } : {}),
       idempotencyKey: key(),
@@ -224,7 +238,9 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
       expect(await call("HOME", null)).toBe("DM001");
       // no actor
       expect(
-        await stateOf(pool, "SELECT core.address_create('HOME', $1, false)", [randomBytes(64)], { role: "app_web" }),
+        await stateOf(pool, "SELECT core.address_create('HOME', $1, false)", [randomBytes(64)], {
+          role: "app_web",
+        }),
       ).toBe("DM001");
     });
   });
@@ -244,7 +260,9 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
       for (const role of ["app_web", "app_pay", "app_jobs", "npc_worker", "research_ro"]) {
         for (const sql of statements) {
           const params = sql.includes("$1") ? [a.userId] : [];
-          expect(await stateOf(pool, sql, params, { role, userId: a.userId }), `${role}: ${sql}`).toBe("42501");
+          expect(await stateOf(pool, sql, params, { role, userId: a.userId }), `${role}: ${sql}`).toBe(
+            "42501",
+          );
         }
       }
     });
@@ -261,9 +279,9 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
                 COALESCE('search_path=pg_catalog, pg_temp' = ANY (p.proconfig), false) AS pinned,
                 has_function_privilege('public', p.oid, 'EXECUTE') AS pub
            FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-          WHERE n.nspname = 'core' AND (p.proname LIKE 'address\\_%' OR p.proname IN
-                ('my_addresses', 'my_order_delivery', 'checkout_set_destination', 'checkout_address_check',
-                 'purchase_record_delivery'))`,
+          WHERE n.nspname = 'core' AND p.proname IN ('address_create', 'address_update', 'address_delete',
+                'address_set_default', 'my_addresses', 'my_order_delivery', 'checkout_set_destination',
+                'checkout_address_check', 'purchase_record_delivery')`,
       );
       expect(fns.rows.length).toBe(9);
       for (const r of fns.rows) expect(r, r.f).toMatchObject({ definer: true, pinned: true, pub: false });
@@ -272,17 +290,21 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
 
   describe("checkout and orders", () => {
     it("decisions.md #4: with no choice the order goes to the fictional delivery spot", async () => {
-      const o = await buy(a);
-      expect(await myOrderDelivery(pool, { authSessionId: a.authSessionId, orderGroupId: o.orderGroupId })).toEqual({
+      const u = await user(pool);
+      const o = await buy(u);
+      expect(
+        await myOrderDelivery(pool, { authSessionId: u.authSessionId, orderGroupId: o.orderGroupId }),
+      ).toEqual({
         kind: "FICTIONAL_SPOT",
       });
     });
 
     it("R5.2: an address chosen at checkout is copied onto the order; the shipment references it", async () => {
-      await clear(a);
-      const home = await add(a, "home");
-      const o = await buy(a, { address: home.id });
-      const d = await myOrderDelivery(pool, { authSessionId: a.authSessionId, orderGroupId: o.orderGroupId });
+      const u = await user(pool);
+      await clear(u);
+      const home = await add(u, "home");
+      const o = await buy(u, { address: home.id });
+      const d = await myOrderDelivery(pool, { authSessionId: u.authSessionId, orderGroupId: o.orderGroupId });
       expect(d).toMatchObject({ kind: "ADDRESS", label: "HOME" });
       expect(d?.kind === "ADDRESS" && d.payloadEnc.equals(home.payloadEnc)).toBe(true);
       const shipments = await pool.query<{ address_id: string | null }>(
@@ -294,25 +316,30 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
     });
 
     it("R5.2: the destination can be changed on the open session, and back to the fictional spot", async () => {
-      await clear(a);
-      const home = await add(a, "home2");
-      const work = await add(a, "work2", { label: "WORK" });
-      const viaPatch = await buy(a, { address: home.id, destination: work.id });
-      const d1 = await myOrderDelivery(pool, { authSessionId: a.authSessionId, orderGroupId: viaPatch.orderGroupId });
+      const u = await user(pool);
+      await clear(u);
+      const home = await add(u, "home2");
+      const work = await add(u, "work2", { label: "WORK" });
+      const viaPatch = await buy(u, { address: home.id, destination: work.id });
+      const d1 = await myOrderDelivery(pool, {
+        authSessionId: u.authSessionId,
+        orderGroupId: viaPatch.orderGroupId,
+      });
       expect(d1).toMatchObject({ kind: "ADDRESS", label: "WORK" });
-      const back = await buy(a, { address: home.id, destination: null });
+      const back = await buy(u, { address: home.id, destination: null });
       expect(
-        await myOrderDelivery(pool, { authSessionId: a.authSessionId, orderGroupId: back.orderGroupId }),
+        await myOrderDelivery(pool, { authSessionId: u.authSessionId, orderGroupId: back.orderGroupId }),
       ).toEqual({ kind: "FICTIONAL_SPOT" });
     });
 
     it("IDOR: another player's address id is refused at session create and at destination change, with a stable code", async () => {
+      const u = await user(pool);
       const theirs = await add(b, "not-yours");
-      const balance = await wallet(pool, a.ledgerAccountId);
+      const balance = await wallet(pool, u.ledgerAccountId);
       expect(
         await codeOf(
           createCheckoutSession(pool, {
-            authSessionId: a.authSessionId,
+            authSessionId: u.authSessionId,
             lines: [{ productId: seedLamp.id }],
             speedBySeller: { SEED: "STANDARD" },
             addressId: theirs.id,
@@ -321,7 +348,7 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
         ),
       ).toBe("ADDRESS_NOT_FOUND");
       const s = await createCheckoutSession(pool, {
-        authSessionId: a.authSessionId,
+        authSessionId: u.authSessionId,
         lines: [{ productId: seedLamp.id }],
         speedBySeller: { SEED: "STANDARD" },
         idempotencyKey: key(),
@@ -329,7 +356,7 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
       expect(
         await codeOf(
           setCheckoutDestination(pool, {
-            authSessionId: a.authSessionId,
+            authSessionId: u.authSessionId,
             sessionId: s.sessionId,
             destination: { deliverTo: "ADDRESS", addressId: theirs.id },
           }),
@@ -345,78 +372,92 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
           }),
         ),
       ).toBe("NOT_FOUND");
-      expect(await wallet(pool, a.ledgerAccountId)).toBe(balance);
+      expect(await wallet(pool, u.ledgerAccountId)).toBe(balance);
     });
 
     it("the pay transaction re-checks the destination: an address deleted after it was chosen refuses the payment and moves nothing", async () => {
-      await clear(a);
-      const gone = await add(a, "gone");
+      const u = await user(pool);
+      await clear(u);
+      const gone = await add(u, "gone");
       const s = await createCheckoutSession(pool, {
-        authSessionId: a.authSessionId,
+        authSessionId: u.authSessionId,
         lines: [{ productId: seedLamp.id }],
         speedBySeller: { SEED: "STANDARD" },
         addressId: gone.id,
         idempotencyKey: key(),
       });
-      await deleteAddress(pool, { authSessionId: a.authSessionId, addressId: gone.id });
+      await deleteAddress(pool, { authSessionId: u.authSessionId, addressId: gone.id });
       const at = await createPaymentAttempt(pool, {
-        authSessionId: a.authSessionId,
+        authSessionId: u.authSessionId,
         sessionId: s.sessionId,
         method: "BALANCE",
       });
-      const before = await wallet(pool, a.ledgerAccountId);
-      const orders = await count(pool, "SELECT count(*) AS n FROM core.order_group WHERE buyer_user_id = $1", [
-        a.userId,
-      ]);
+      const before = await wallet(pool, u.ledgerAccountId);
+      const orders = await count(
+        pool,
+        "SELECT count(*) AS n FROM core.order_group WHERE buyer_user_id = $1",
+        [u.userId],
+      );
       expect(
         await codeOf(
-          pay(pool, { authSessionId: a.authSessionId, sessionId: s.sessionId, attemptId: at.attemptId, idempotencyKey: key() }),
+          pay(pool, {
+            authSessionId: u.authSessionId,
+            sessionId: s.sessionId,
+            attemptId: at.attemptId,
+            idempotencyKey: key(),
+          }),
         ),
       ).toBe("ADDRESS_NOT_FOUND");
-      expect(await wallet(pool, a.ledgerAccountId)).toBe(before);
+      expect(await wallet(pool, u.ledgerAccountId)).toBe(before);
       expect(
-        await count(pool, "SELECT count(*) AS n FROM core.order_group WHERE buyer_user_id = $1", [a.userId]),
+        await count(pool, "SELECT count(*) AS n FROM core.order_group WHERE buyer_user_id = $1", [u.userId]),
       ).toBe(orders);
       // the same holds for a destination changed to an address that is then deleted
-      const later = await add(a, "later");
+      const later = await add(u, "later");
       const s2 = await createCheckoutSession(pool, {
-        authSessionId: a.authSessionId,
+        authSessionId: u.authSessionId,
         lines: [{ productId: seedLamp.id }],
         speedBySeller: { SEED: "STANDARD" },
         idempotencyKey: key(),
       });
       await setCheckoutDestination(pool, {
-        authSessionId: a.authSessionId,
+        authSessionId: u.authSessionId,
         sessionId: s2.sessionId,
         destination: { deliverTo: "ADDRESS", addressId: later.id },
       });
-      await deleteAddress(pool, { authSessionId: a.authSessionId, addressId: later.id });
+      await deleteAddress(pool, { authSessionId: u.authSessionId, addressId: later.id });
       const at2 = await createPaymentAttempt(pool, {
-        authSessionId: a.authSessionId,
+        authSessionId: u.authSessionId,
         sessionId: s2.sessionId,
         method: "BALANCE",
       });
       expect(
         await codeOf(
-          pay(pool, { authSessionId: a.authSessionId, sessionId: s2.sessionId, attemptId: at2.attemptId, idempotencyKey: key() }),
+          pay(pool, {
+            authSessionId: u.authSessionId,
+            sessionId: s2.sessionId,
+            attemptId: at2.attemptId,
+            idempotencyKey: key(),
+          }),
         ),
       ).toBe("ADDRESS_NOT_FOUND");
       expect(await reconcile(pool)).toEqual(CLEAN);
     });
 
     it("invariant 3 / R5.2: the address never changes the price", async () => {
-      await clear(a);
-      const home = await add(a, "price");
+      const u = await user(pool);
+      await clear(u);
+      const home = await add(u, "price");
       const plain = await createCheckoutSession(pool, {
-        authSessionId: a.authSessionId,
+        authSessionId: u.authSessionId,
         lines: [{ productId: seedLamp.id }],
-        speedBySeller: { SEED: "EXPRESS" },
+        speedBySeller: { SEED: "STANDARD" },
         idempotencyKey: key(),
       });
       const withAddress = await createCheckoutSession(pool, {
-        authSessionId: a.authSessionId,
+        authSessionId: u.authSessionId,
         lines: [{ productId: seedLamp.id }],
-        speedBySeller: { SEED: "EXPRESS" },
+        speedBySeller: { SEED: "STANDARD" },
         addressId: home.id,
         idempotencyKey: key(),
       });
@@ -425,71 +466,97 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
     });
 
     it("R5.2: editing the address later does not change a past order's copy", async () => {
-      await clear(a);
-      const home = await add(a, "original");
-      const o = await buy(a, { address: home.id });
+      const u = await user(pool);
+      await clear(u);
+      const home = await add(u, "original");
+      const o = await buy(u, { address: home.id });
       await updateAddress(pool, {
-        authSessionId: a.authSessionId,
+        authSessionId: u.authSessionId,
         addressId: home.id,
         label: "WORK",
-        payloadEnc: seal(PLAIN("edited"), a.userId),
+        payloadEnc: seal(PLAIN("edited"), u.userId),
       });
-      const d = await myOrderDelivery(pool, { authSessionId: a.authSessionId, orderGroupId: o.orderGroupId });
+      const d = await myOrderDelivery(pool, { authSessionId: u.authSessionId, orderGroupId: o.orderGroupId });
       expect(d).toMatchObject({ kind: "ADDRESS", label: "HOME" });
       expect(d?.kind === "ADDRESS" && d.payloadEnc.equals(home.payloadEnc)).toBe(true);
     });
 
     it("R5.2: deleting the address removes it from past orders too: they keep only 'Address removed'", async () => {
-      await clear(a);
-      const home = await add(a, "to-delete");
-      const o = await buy(a, { address: home.id });
-      await deleteAddress(pool, { authSessionId: a.authSessionId, addressId: home.id });
-      expect(await myOrderDelivery(pool, { authSessionId: a.authSessionId, orderGroupId: o.orderGroupId })).toEqual({
+      const u = await user(pool);
+      await clear(u);
+      const home = await add(u, "to-delete");
+      const o = await buy(u, { address: home.id });
+      await deleteAddress(pool, { authSessionId: u.authSessionId, addressId: home.id });
+      expect(
+        await myOrderDelivery(pool, { authSessionId: u.authSessionId, orderGroupId: o.orderGroupId }),
+      ).toEqual({
         kind: "ADDRESS_REMOVED",
       });
       // no copy of the ciphertext remains anywhere in the order's delivery record
-      const row = await pool.query("SELECT * FROM private.order_delivery WHERE order_group_id = $1", [o.orderGroupId]);
+      const row = await pool.query("SELECT * FROM private.order_delivery WHERE order_group_id = $1", [
+        o.orderGroupId,
+      ]);
       expect(row.rows[0]).toMatchObject({ payload_enc: null, label: null, address_id: null });
       expect(row.rows[0]?.removed_at).toBeInstanceOf(Date);
     });
 
     it("erasure: an address deleted by any path (an account's cascade too) erases the order copies", async () => {
-      await clear(a);
-      const home = await add(a, "cascade");
-      const o = await buy(a, { address: home.id });
+      const u = await user(pool);
+      await clear(u);
+      const home = await add(u, "cascade");
+      const o = await buy(u, { address: home.id });
       await pool.query("DELETE FROM private.address WHERE id = $1", [home.id]); // as the owner, like a cascade
-      expect(await myOrderDelivery(pool, { authSessionId: a.authSessionId, orderGroupId: o.orderGroupId })).toEqual({
+      expect(
+        await myOrderDelivery(pool, { authSessionId: u.authSessionId, orderGroupId: o.orderGroupId }),
+      ).toEqual({
         kind: "ADDRESS_REMOVED",
       });
     });
 
     it("the order's delivery copy is immutable, except for erasure; it cannot be deleted", async () => {
-      await clear(a);
-      const home = await add(a, "immutable");
-      const o = await buy(a, { address: home.id });
+      const u = await user(pool);
+      await clear(u);
+      const home = await add(u, "immutable");
+      const o = await buy(u, { address: home.id });
       const id = o.orderGroupId;
       expect(
-        await sqlState(pool.query("UPDATE private.order_delivery SET payload_enc = $2 WHERE order_group_id = $1", [id, randomBytes(64)])),
+        await sqlState(
+          pool.query("UPDATE private.order_delivery SET payload_enc = $2 WHERE order_group_id = $1", [
+            id,
+            randomBytes(64),
+          ]),
+        ),
       ).toBe("23514");
       expect(
-        await sqlState(pool.query("UPDATE private.order_delivery SET label = 'WORK' WHERE order_group_id = $1", [id])),
+        await sqlState(
+          pool.query("UPDATE private.order_delivery SET label = 'WORK' WHERE order_group_id = $1", [id]),
+        ),
       ).toBe("23514");
       expect(
-        await sqlState(pool.query("UPDATE private.order_delivery SET kind = 'FICTIONAL_SPOT', label = NULL, payload_enc = NULL, address_id = NULL WHERE order_group_id = $1", [id])),
+        await sqlState(
+          pool.query(
+            "UPDATE private.order_delivery SET kind = 'FICTIONAL_SPOT', label = NULL, payload_enc = NULL, address_id = NULL WHERE order_group_id = $1",
+            [id],
+          ),
+        ),
       ).toBe("23514");
-      expect(await sqlState(pool.query("DELETE FROM private.order_delivery WHERE order_group_id = $1", [id]))).toBe(
-        "23514",
-      );
+      expect(
+        await sqlState(pool.query("DELETE FROM private.order_delivery WHERE order_group_id = $1", [id])),
+      ).toBe("23514");
     });
 
     it("owner only: another player's order has no delivery answer", async () => {
-      const o = await buy(a);
-      expect(await myOrderDelivery(pool, { authSessionId: b.authSessionId, orderGroupId: o.orderGroupId })).toBeNull();
+      const u = await user(pool);
+      const o = await buy(u);
+      expect(
+        await myOrderDelivery(pool, { authSessionId: b.authSessionId, orderGroupId: o.orderGroupId }),
+      ).toBeNull();
     });
   });
 
   describe("privacy (invariant 8, R5.2: never the seller, logs, analytics or outbox)", () => {
     let s: Creator;
+    let u: TestUser;
     let sealedHex: string;
     let sealedB64: string;
     let orderRef: string;
@@ -499,27 +566,36 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
       await ensureCategories(pool);
       const seeds = await published(pool, 3);
       s = await creator(pool, seeds);
+      u = await user(pool);
       const listing = asFixture(await publishListing(pool, s, { quantity: 3 }));
-      await clear(a);
-      const home = await add(a, TAG);
+      await clear(u);
+      const home = await add(u, TAG);
       sealedHex = home.payloadEnc.toString("hex");
       sealedB64 = home.payloadEnc.toString("base64");
-      const co = await checkout(pool, a, [listing], { [s.companyId]: "STANDARD" });
+      const co = await checkout(pool, u, [listing], { [s.companyId]: "STANDARD" });
       await setCheckoutDestination(pool, {
-        authSessionId: a.authSessionId,
+        authSessionId: u.authSessionId,
         sessionId: co.sessionId,
         destination: { deliverTo: "ADDRESS", addressId: home.id },
       });
-      await payFor(pool, a, co);
+      await payFor(pool, u, co);
       const page = await mySellerOrders(pool, { authSessionId: s.u.authSessionId });
       orderRef = page.items[0]?.orderRef ?? "";
       expect(orderRef).not.toBe("");
     }, 240_000);
 
     const leaks = (text: string) =>
-      [sealedHex, sealedB64, sealedHex.slice(0, 40), TAG, "560038", "Bengaluru", "payloadEnc", "addressId", "address"].filter(
-        (needle) => text.toLowerCase().includes(needle.toLowerCase()),
-      );
+      [
+        sealedHex,
+        sealedB64,
+        sealedHex.slice(0, 40),
+        TAG,
+        "560038",
+        "Bengaluru",
+        "payloadEnc",
+        "addressId",
+        "address",
+      ].filter((needle) => text.toLowerCase().includes(needle.toLowerCase()));
 
     it("R5.2: no seller-facing read carries the buyer's address, label, PIN code or any part of the ciphertext", async () => {
       const reads: Record<string, unknown> = {
@@ -539,7 +615,10 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
         [s.companyId],
       );
       expect(
-        await myOrderDelivery(pool, { authSessionId: s.u.authSessionId, orderGroupId: group.rows[0]?.id ?? "" }),
+        await myOrderDelivery(pool, {
+          authSessionId: s.u.authSessionId,
+          orderGroupId: group.rows[0]?.id ?? "",
+        }),
       ).toBeNull();
     });
 
@@ -552,16 +631,20 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
       for (const { t } of tables.rows) {
         const rows = await pool.query<{ j: string }>(`SELECT to_jsonb(x)::text AS j FROM ${t} x`);
         for (const r of rows.rows) {
-          expect(leaks(r.j).filter((n) => n !== "address"), t).toEqual([]);
+          expect(
+            leaks(r.j).filter((n) => n !== "address"),
+            t,
+          ).toEqual([]);
           expect(r.j, t).not.toMatch(/\\\\x[0-9a-f]{40}/i);
         }
       }
       // the checkout session's stored quote holds an id at most, never the address
       const quotes = await pool.query<{ j: string }>(
         "SELECT quote::text AS j FROM core.checkout_session WHERE user_id = $1",
-        [a.userId],
+        [u.userId],
       );
-      for (const q of quotes.rows) expect(leaks(q.j).filter((n) => n !== "addressId" && n !== "address")).toEqual([]);
+      for (const q of quotes.rows)
+        expect(leaks(q.j).filter((n) => n !== "addressId" && n !== "address")).toEqual([]);
     });
   });
 

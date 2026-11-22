@@ -89,9 +89,10 @@ describe("attack surface: app_web acting as user A", () => {
         "SELECT count(*) AS n FROM core.seller_order WHERE order_group_id = $1",
         [group],
       ),
-      addresses: await countRows(c, "SELECT count(*) AS n FROM private.address WHERE user_id = $1", [
-        b.userId,
-      ]),
+      // 0058: no direct read of addresses at all (definer commands only)
+      addresses: await sqlState(
+        c.query("SELECT count(*) AS n FROM private.address WHERE user_id = $1", [b.userId]),
+      ),
     }));
     expect(seen).toEqual({
       profile: 0,
@@ -100,7 +101,7 @@ describe("attack surface: app_web acting as user A", () => {
       idempotency: 0,
       orderGroups: 0,
       sellerOrders: 0,
-      addresses: 0,
+      addresses: "42501",
     });
     // the rows exist: the owner sees them
     expect(

@@ -128,10 +128,12 @@ describe("validateAddress (PRD R5.2)", () => {
     const long = "a".repeat(ADDRESS_RULES.lineMaxChars + 1);
     expect(problemsOf({ ...home, line1: long })).toContainEqual({ field: "line1", code: "TOO_LONG" });
     expect(problemsOf({ ...home, line2: long })).toContainEqual({ field: "line2", code: "TOO_LONG" });
-    expect(problemsOf({ ...home, recipientName: "a".repeat(ADDRESS_RULES.nameMaxChars + 1) })).toContainEqual({
-      field: "recipientName",
-      code: "TOO_LONG",
-    });
+    expect(problemsOf({ ...home, recipientName: "a".repeat(ADDRESS_RULES.nameMaxChars + 1) })).toContainEqual(
+      {
+        field: "recipientName",
+        code: "TOO_LONG",
+      },
+    );
     expect(problemsOf({ ...home, city: "a".repeat(ADDRESS_RULES.cityMaxChars + 1) })).toContainEqual({
       field: "city",
       code: "TOO_LONG",
@@ -139,7 +141,10 @@ describe("validateAddress (PRD R5.2)", () => {
   });
 
   it("R5.2: control characters and markup brackets are refused", () => {
-    expect(problemsOf({ ...home, line1: "Flat 1\u0000" })).toContainEqual({ field: "line1", code: "CHARACTERS" });
+    expect(problemsOf({ ...home, line1: "Flat 1\u0000" })).toContainEqual({
+      field: "line1",
+      code: "CHARACTERS",
+    });
     expect(problemsOf({ ...home, line2: "<script>" })).toContainEqual({ field: "line2", code: "CHARACTERS" });
   });
 

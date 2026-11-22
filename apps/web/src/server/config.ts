@@ -65,6 +65,17 @@ export const SERVER_CONFIG = {
     adminActor: { scope: "admin.write.actor", by: "actor", limit: 60, windowSeconds: 60 },
     /** Reports per account (LLD §11.2: 5 / hour / account; the database also counts committed reports). */
     reportActor: { scope: "reports.write.actor", by: "actor", limit: 5, windowSeconds: 3_600 },
+    /** Address-book writes (add, edit, delete, default) per account (PRD R5.2). */
+    addressWriteActor: { scope: "addresses.write.actor", by: "actor", limit: 30, windowSeconds: 60 },
+    /** Address-book reads per account (each read decrypts on the server). */
+    addressReadActor: { scope: "addresses.read.actor", by: "actor", limit: 120, windowSeconds: 60 },
+    /** Checkout destination changes per account. */
+    checkoutDestinationActor: {
+      scope: "checkout.destination.actor",
+      by: "actor",
+      limit: 30,
+      windowSeconds: 60,
+    },
     /** Blocks and unblocks per account. */
     blockActor: { scope: "blocks.write.actor", by: "actor", limit: 30, windowSeconds: 60 },
     /** Browser analytics events per client address (beyond it events are dropped, still 204). */

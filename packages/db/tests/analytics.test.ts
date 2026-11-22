@@ -718,14 +718,23 @@ describe("0052: the Super Admin's reads", () => {
       region: null,
     });
     expect(countries.minVisitors).toBe(10);
+    // the folded "Other" row is itself below the minimum: no counts, only the flag (0059)
     expect(countries.items).toEqual([
-      { country: "IN", region: null, city: null, visitors: 17, signUps: 1, purchases: 0 },
-      { country: "Other", region: null, city: null, visitors: 1, signUps: 0, purchases: 0 },
+      { country: "IN", region: null, city: null, visitors: 17, signUps: 1, purchases: 0, suppressed: false },
+      {
+        country: "Other",
+        region: null,
+        city: null,
+        visitors: null,
+        signUps: null,
+        purchases: null,
+        suppressed: true,
+      },
     ]);
     const cities = await analyticsPlaces(pool, { ...range(day), level: "city", country: "IN", region: "MH" });
-    expect(cities.items.map((i) => [i.region, i.city, i.visitors])).toEqual([
-      ["MH", "Mumbai", 12],
-      ["MH", "Other", 3],
+    expect(cities.items.map((i) => [i.country, i.region, i.city, i.visitors, i.suppressed])).toEqual([
+      ["IN", "MH", "Mumbai", 12, false],
+      ["IN", "MH", "Other", null, true],
     ]);
     const regions = await analyticsPlaces(pool, {
       ...range(day),
@@ -733,9 +742,10 @@ describe("0052: the Super Admin's reads", () => {
       country: "IN",
       region: null,
     });
-    expect(regions.items.map((i) => [i.region, i.visitors, i.signUps])).toEqual([
-      ["MH", 15, 0],
-      ["Other", 2, 1],
+    // a sign-up from a place of two visitors is not shown at all
+    expect(regions.items.map((i) => [i.region, i.visitors, i.signUps, i.suppressed])).toEqual([
+      ["MH", 15, 0, false],
+      ["Other", null, null, true],
     ]);
     expect(JSON.stringify([countries, cities, regions])).not.toMatch(/Kaza|Lonavala|Paris/);
     expect(
@@ -743,6 +753,91 @@ describe("0052: the Super Admin's reads", () => {
         analyticsPlaces(pool, { ...range(day), level: "street" as "city", country: null, region: null }),
       ),
     ).toBe("VALIDATION_FAILED");
+  });
+
+  it("R7.1 (0059): every returned row below the minimum is merged into one 'Other' row, shown with counts only when it reaches the minimum", async () => {
+    const day = dayAt(-6);
+    // city level, no filter: Mumbai 12 stays; "IN|MH|Other" 3, "IN|Other|Other" 2 (one sign-up) and
+    // "Other|Other|Other" 1 merge into one row of 6, still below 10
+    const all = await analyticsPlaces(pool, { ...range(day), level: "city", country: null, region: null });
+    expect(all.items).toEqual([
+      {
+        country: "IN",
+        region: "MH",
+        city: "Mumbai",
+        visitors: 12,
+        signUps: 0,
+        purchases: 0,
+        suppressed: false,
+      },
+      {
+        country: "Other",
+        region: "Other",
+        city: "Other",
+        visitors: null,
+        signUps: null,
+        purchases: null,
+        suppressed: true,
+      },
+    ]);
+    // eleven one-visitor towns of one state: the state's folded "Other" city reaches the minimum
+    const other = dayAt(-8);
+    const events: PlantedEvent[] = [];
+    for (let i = 0; i < 11; i++)
+      events.push({ day: other, name: "page_view", visitor: `town${i}`, region: "KA", city: `Town ${i}` });
+    events.push({
+      day: other,
+      name: "sign_up",
+      visitor: "town0",
+      region: "KA",
+      city: "Town 0",
+      surface: "account",
+    });
+    await plantEvents(events);
+    await rollup(other);
+    const ka = await analyticsPlaces(pool, { ...range(other), level: "city", country: "IN", region: "KA" });
+    expect(ka.items).toEqual([
+      {
+        country: "IN",
+        region: "KA",
+        city: "Other",
+        visitors: 11,
+        signUps: 1,
+        purchases: 0,
+        suppressed: false,
+      },
+    ]);
+    // the minimum is configuration: at 12 the same row is suppressed
+    await pool.query(
+      `INSERT INTO core.config_version (values, effective_from, note)
+       SELECT values || '{"analytics": {"place_min_visitors": 12}}', now() - interval '1 second', 'test: min 12'
+         FROM core.config_version WHERE id = 1`,
+    );
+    try {
+      const strict = await analyticsPlaces(pool, {
+        ...range(other),
+        level: "city",
+        country: "IN",
+        region: "KA",
+      });
+      expect(strict.minVisitors).toBe(12);
+      expect(strict.items).toEqual([
+        {
+          country: "IN",
+          region: "KA",
+          city: "Other",
+          visitors: null,
+          signUps: null,
+          purchases: null,
+          suppressed: true,
+        },
+      ]);
+    } finally {
+      await pool.query(
+        `INSERT INTO core.config_version (values, effective_from, note)
+         SELECT values, now() - interval '1 second', 'test: restore' FROM core.config_version WHERE id = 1`,
+      );
+    }
   });
 
   it("top products, shops and categories by orders and spend from the order lines; shop name and handle, never an owner id", async () => {

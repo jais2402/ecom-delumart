@@ -287,7 +287,6 @@ describe("security hardening (review findings)", () => {
         ["ownership", "SELECT count(*) AS n FROM core.ownership WHERE user_id = $1", [f.b.userId]],
         ["membership", "SELECT count(*) AS n FROM core.membership WHERE user_id = $1", [f.b.userId]],
         ["redemption", "SELECT count(*) AS n FROM core.coupon_redemption WHERE user_id = $1", [f.b.userId]],
-        ["address", "SELECT count(*) AS n FROM private.address WHERE user_id = $1", [f.b.userId]],
       ];
       const seen = await asActor(pool, web(), async (c) => {
         const out: Record<string, number> = {};
@@ -295,6 +294,15 @@ describe("security hardening (review findings)", () => {
         return out;
       });
       expect(seen).toEqual(Object.fromEntries(probes.map(([label]) => [label, 0])));
+      // 0058: addresses are not readable at all by app_web (definer commands only)
+      expect(
+        await stateOf(
+          pool,
+          "SELECT count(*) AS n FROM private.address WHERE user_id = $1",
+          [f.b.userId],
+          web(),
+        ),
+      ).toBe("42501");
       // the same rows exist (the owner sees them); app_jobs reads no table directly (sixth review, 0047)
       expect(
         await countRows(pool, "SELECT count(*) AS n FROM core.order_group WHERE buyer_user_id = $1", [
@@ -849,8 +857,9 @@ describe("security hardening (review findings)", () => {
       ]) {
         expect(await stateOf(pool, `DELETE FROM ${t}`, [], web()), t).toBe("42501");
       }
+      // 0058: not even its own addresses directly any more: only through core.address_delete
       expect(await stateOf(pool, "DELETE FROM private.address WHERE user_id = $1", [f.a.userId], web())).toBe(
-        "no error",
+        "42501",
       );
     });
 

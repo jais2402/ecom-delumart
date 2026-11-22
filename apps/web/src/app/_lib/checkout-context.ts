@@ -29,6 +29,8 @@ export interface CheckoutContext {
   /** Quotes by delivery speed; each is an immutable priced session of its own. */
   quotes: Partial<Record<Speed, QuoteResponse>>;
   speed: Speed;
+  /** Where to deliver: "FICTIONAL_SPOT" (the default, decisions.md #4) or a saved address id. */
+  destination?: string;
 }
 
 const memory = new Map<string, CheckoutContext>();

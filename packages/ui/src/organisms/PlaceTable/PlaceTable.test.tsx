@@ -25,6 +25,26 @@ describe("PlaceTable", () => {
     await userEvent.click(screen.getByRole("button", { name: "Show places in India" }));
     expect(onDrill).toHaveBeenCalledWith(rows[0]);
   });
+  it("R7.1: a suppressed row shows 'Fewer than N' and no counts, and is left out of the shares", () => {
+    const withSuppressed = [
+      { key: "IN", label: "India", visitors: 750, signUps: 40, purchases: 9 },
+      {
+        key: "Other",
+        label: "Other (small places combined)",
+        visitors: null,
+        signUps: null,
+        purchases: null,
+        suppressed: true,
+      },
+    ];
+    render(<PlaceTable caption="Usage" placeHeader="Country" rows={withSuppressed} minVisitors={10} />);
+    const other = screen.getByRole("row", { name: /Other/ });
+    expect(other).toHaveTextContent("Fewer than 10");
+    expect(within(other).getAllByText("Not shown")).toHaveLength(3);
+    expect(other).not.toHaveTextContent("%");
+    expect(screen.getByRole("row", { name: /India/ })).toHaveTextContent("100%");
+    expect(screen.getAllByTestId("place-bar")).toHaveLength(1);
+  });
   it("shows the empty state, and makes the scroll region focusable", () => {
     const { rerender } = render(<PlaceTable caption="Usage" placeHeader="Country" rows={rows} />);
     expect(screen.getByRole("region", { name: "Usage" })).toHaveAttribute("tabindex", "0");

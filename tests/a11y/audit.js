@@ -22,6 +22,8 @@ const pages = [
   { path: '/store/{handle}' },
   { path: '/account/reports', signedIn: true },
   { path: '/account/blocks', signedIn: true },
+  { path: '/account/addresses', signedIn: true },
+  { path: '/account/addresses?add=1', signedIn: true, label: '/account/addresses (add form)' },
   { path: '/p/{product}', signedIn: true, openDialog: 'Report this product', label: '/p/[id] report dialog' },
   // the Partner Portal and the Commerce Console: operator frames have no site footer
   { path: '/studio', as: 'owner', operator: true },
@@ -143,8 +145,9 @@ async function mockAnalytics(page, mode) {
       return route.fulfill({ json: { ...base, steps: keys.map((step, i) => ({ step, visitors: v[i], conversionFromPrevious: i === 0 || !v[i - 1] ? null : v[i] / v[i - 1] })), overallConversion: empty ? null : 9 / 1284, trafficDays: base.days } });
     }
     if (name === 'places') {
-      const rows = { country: [['IN', null, null, 820], ['US', null, null, 210], ['ZZ', null, null, 40], ['Other', null, null, 30]], region: [['IN', 'Maharashtra', null, 410], ['IN', null, null, 90]], city: [['IN', 'Maharashtra', 'Pune', 120], ['IN', 'Maharashtra', null, 40]] }[q.level] || [];
-      const items = empty ? [] : rows.map(([country, region, city, visitors]) => ({ country, region, city, visitors, signUps: 3, purchases: 1 }));
+      const rows = { country: [['IN', null, null, 820], ['US', null, null, 210], ['ZZ', null, null, 40], ['Other', null, null, null]], region: [['IN', 'Maharashtra', null, 410], ['IN', null, null, 90]], city: [['IN', 'Maharashtra', 'Pune', 120], ['IN', 'Maharashtra', null, 40]] }[q.level] || [];
+      // a row below the minimum even after merging comes back suppressed, with no counts (0059)
+      const items = empty ? [] : rows.map(([country, region, city, visitors]) => (visitors === null ? { country, region, city, visitors: null, signUps: null, purchases: null, suppressed: true } : { country, region, city, visitors, signUps: 3, purchases: 1, suppressed: false }));
       return route.fulfill({ json: { ...base, level: q.level, country: q.country || null, region: q.region || null, minVisitors: 5, items, trafficDays: base.days } });
     }
     if (name === 'top') {

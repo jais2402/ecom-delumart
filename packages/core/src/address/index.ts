@@ -164,14 +164,22 @@ export function validateAddress(input: AddressInput): Address {
   const rules: CountryRules | undefined = (COUNTRY_RULES as Record<string, CountryRules>)[country];
   if (!rules) problems.push({ field: "country", code: "UNSUPPORTED" });
 
-  const recipientName = cleanText(input.recipientName, "recipientName", ADDRESS_RULES.nameMaxChars, true, problems);
+  const recipientName = cleanText(
+    input.recipientName,
+    "recipientName",
+    ADDRESS_RULES.nameMaxChars,
+    true,
+    problems,
+  );
   const line1 = cleanText(input.line1, "line1", ADDRESS_RULES.lineMaxChars, true, problems);
   const line2 = cleanText(input.line2, "line2", ADDRESS_RULES.lineMaxChars, false, problems);
   const city = cleanText(input.city, "city", ADDRESS_RULES.cityMaxChars, true, problems);
 
   const stateCode = typeof input.state === "string" ? input.state.trim().toUpperCase() : "";
-  if (rules && !rules.regions.some((r) => r.code === stateCode)) problems.push({ field: "state", code: "INVALID" });
-  const postalCode = rules && typeof input.postalCode === "string" ? rules.postalCode(input.postalCode) : null;
+  if (rules && !rules.regions.some((r) => r.code === stateCode))
+    problems.push({ field: "state", code: "INVALID" });
+  const postalCode =
+    rules && typeof input.postalCode === "string" ? rules.postalCode(input.postalCode) : null;
   if (rules && postalCode === null) problems.push({ field: "postalCode", code: "INVALID" });
 
   if (problems.length > 0 || !recipientName || !line1 || !city || !postalCode) {
