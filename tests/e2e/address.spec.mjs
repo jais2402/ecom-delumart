@@ -382,8 +382,14 @@ try {
   await step(
     "the seller's order view (API and page) carries no address, name, PIN code or label",
     async () => {
-      const list = await call(seller, "GET", "/api/v1/studio/orders?limit=10");
-      assert.equal(list.status, 200);
+      // A new order reaches the seller only once its minute has ended, so wait for it.
+      let list;
+      for (let i = 0; i < 25; i++) {
+        list = await call(seller, "GET", "/api/v1/studio/orders?limit=10");
+        assert.equal(list.status, 200);
+        if (list.body.items.length > 0) break;
+        await new Promise((r) => setTimeout(r, 3000));
+      }
       assert.equal(list.body.items.length, 1);
       const ref = list.body.items[0].id;
       const one = await call(seller, "GET", `/api/v1/studio/orders/${ref}`);
