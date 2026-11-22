@@ -4,12 +4,19 @@
  *
  *   GET  /auth/v1/.well-known/jwks.json         P-256 public keys (real key pairs, rotated on demand)
  *   POST /auth/v1/otp?redirect_to=              email: user created on first use, a 6-digit code and a
- *                                               link (redirect_to + ?code=<auth code>) "sent" to the outbox;
+ *                                               link "sent" to the outbox: by default the template the
+ *                                               runbook asks for, redirect_to?token_hash=<hash>&type=email
+ *                                               (`emailLink = "code"`: redirect_to?code=<auth code>);
  *                                               phone (create_user false): a code to the user holding it
  *   GET  /auth/v1/authorize?provider=google     302 to redirect_to?code=<auth code> for `googleEmail`
  *   POST /auth/v1/token?grant_type=pkce         auth code + verifier (S256) → session; a code works once
- *   POST /auth/v1/verify                        type email | sms + token → session; sms sets phone_confirmed_at
- *   GET|PUT /auth/v1/admin/users/{id}           secret key only; PUT {phone} (422 when another user has it)
+ *   POST /auth/v1/verify                        type email | sms + token → session; sms sets phone_confirmed_at;
+ *                                               type email | magiclink | signup + token_hash → session (once)
+ *   GET|PUT /auth/v1/admin/users/{id}           secret key only; PUT {phone} (422 when another user has it;
+ *                                               {phone: ""} clears it); phone state mirrored to auth.users
+ *                                               when the database has Supabase's columns
+ *   POST /turnstile/v0/siteverify               a FAKE Cloudflare Turnstile verifier (TURNSTILE_VERIFY_URL):
+ *                                               tokens are fakeChallenge(action); each validates once
  *   POST /auth/v1/logout?scope=local            Bearer access token → that session ends
  *
  * Sessions are rows in the test database's auth.users / auth.sessions (as the real service writes
@@ -102,6 +109,18 @@ export class FakeSupabase {
   private readonly emailCodes = new Map<string, { code: string; userId: string; expiresAt: number }>();
   private readonly authCodes = new Map<string, PendingCode>();
   private readonly phoneCodes = new Map<string, { code: string; userId: string }>();
+  private readonly tokenHashes = new Map<string, { userId: string; used: boolean }>();
+  /** How the fake "emails" the link: the runbook's token-hash template, or Supabase's code redirect. */
+  emailLink: "token_hash" | "code" = "token_hash";
+  /** The fake Turnstile verifier: "pass" validates well-formed unused tokens; "fail" refuses all. */
+  captchaMode: "pass" | "fail" = "pass";
+  /** The host name the fake verifier reports (the app's, unless a test changes it). */
+  captchaHostname = "app.delulu.test";
+  readonly spentChallenges = new Set<string>();
+  /** Every token the fake verifier was asked about (for "never forwarded" assertions). */
+  readonly challengeChecks: string[] = [];
+  /** The field names of every /otp body (the app must never forward a captcha token). */
+  readonly otpBodyKeys: string[][] = [];
   tokenMode: TokenMode = "valid";
   jwksDown = false;
   /** Serve GET /__outbox (the standalone smoke runner only). */
@@ -199,6 +218,40 @@ export class FakeSupabase {
     };
   }
 
+  /** Mirrors the phone state to auth.users when the database has Supabase's columns. */
+  private async mirrorPhone(user: FakeUser): Promise<void> {
+    await this.db
+      ?.query("UPDATE auth.users SET phone = $2, phone_confirmed_at = $3 WHERE id = $1", [
+        user.id,
+        user.phone,
+        user.phoneConfirmedAt,
+      ])
+      .catch(() => undefined); // the local stand-in has no such columns
+  }
+
+  /** A user the fake knows, also written to auth.users (as the real service would). */
+  async createUser(email: string): Promise<FakeUser> {
+    const user = this.userByEmail(email, true) as FakeUser;
+    user.emailConfirmedAt ??= new Date().toISOString();
+    await this.db?.query("INSERT INTO auth.users (id) VALUES ($1) ON CONFLICT (id) DO NOTHING", [user.id]);
+    return user;
+  }
+
+  /** A session minted at the "platform" WITHOUT the app (implicit flow, phone OTP, password sign-up). */
+  async mintPlatformSession(userId: string): Promise<string> {
+    const json = await this.newSession(userId);
+    const token = String(json.access_token);
+    const claims = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString()) as {
+      session_id: string;
+    };
+    return claims.session_id;
+  }
+
+  /** A one-use token of the fake Turnstile verifier, for `action`. */
+  static challenge(action: string): string {
+    return `fake.${action}.${randomBytes(12).toString("base64url")}`;
+  }
+
   private userJson(user: FakeUser | undefined, id: string): Record<string, unknown> {
     return {
       id,
@@ -252,7 +305,12 @@ export class FakeSupabase {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
     const raw = Buffer.concat(chunks).toString("utf8");
-    const body = (raw ? JSON.parse(raw) : {}) as Record<string, unknown>;
+    let body: Record<string, unknown> = {};
+    try {
+      body = (raw ? JSON.parse(raw) : {}) as Record<string, unknown>;
+    } catch {
+      body = {}; // a form-encoded body (the fake Turnstile verifier reads `raw`)
+    }
     const json = (status: number, value: unknown) => {
       res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(value));
     };
@@ -263,8 +321,22 @@ export class FakeSupabase {
       const to = url.searchParams.get("email");
       return json(200, {
         email: to ? (this.lastEmail(to) ?? null) : null,
-        sms: this.sms[this.sms.length - 1] ?? null,
+        sms: url.searchParams.get("phone")
+          ? ([...this.sms].reverse().find((m) => m.phone === url.searchParams.get("phone")) ?? null)
+          : (this.sms[this.sms.length - 1] ?? null),
+        smsCount: this.sms.length,
+        user: url.searchParams.get("user")
+          ? (() => {
+              const u = this.users.get(url.searchParams.get("user") ?? "");
+              return u ? { phone: u.phone, phoneConfirmed: u.phoneConfirmedAt !== null } : null;
+            })()
+          : null,
       });
+    }
+
+    // the standalone runner: a one-use token of the fake Turnstile verifier (local smoke only)
+    if (this.debugRoutes && req.method === "GET" && path === "/__challenge") {
+      return json(200, { token: FakeSupabase.challenge(url.searchParams.get("action") ?? "") });
     }
 
     if (req.method === "GET" && path === "/auth/v1/.well-known/jwks.json") {
@@ -288,21 +360,49 @@ export class FakeSupabase {
       res.writeHead(302, { location: target.toString() }).end();
       return;
     }
+    if (req.method === "POST" && path === "/turnstile/v0/siteverify") {
+      const form = new URLSearchParams(raw);
+      const token = form.get("response") ?? "";
+      this.challengeChecks.push(token);
+      const m = /^fake\.([a-z_]+)\.[A-Za-z0-9_-]+$/.exec(token);
+      if (this.captchaMode === "fail" || !m || !form.get("secret")) {
+        return json(200, { success: false, "error-codes": ["invalid-input-response"] });
+      }
+      if (this.spentChallenges.has(token)) {
+        return json(200, { success: false, "error-codes": ["timeout-or-duplicate"] });
+      }
+      this.spentChallenges.add(token);
+      return json(200, {
+        success: true,
+        action: m[1],
+        hostname: this.captchaHostname,
+        challenge_ts: new Date().toISOString(),
+        "error-codes": [],
+      });
+    }
     if (apikey !== this.publishableKey && apikey !== this.secretKey)
       return json(401, { message: "No API key found" });
 
     if (req.method === "POST" && path === "/auth/v1/otp") {
+      this.otpBodyKeys.push(Object.keys(body));
       if (typeof body.email === "string") {
         const user = this.userByEmail(body.email, body.create_user === true);
         if (!user) return json(422, { error_code: "otp_disabled" });
         const code = String(randomInt(1_000_000)).padStart(6, "0");
         this.emailCodes.set(body.email, { code, userId: user.id, expiresAt: Date.now() + 3_600_000 });
-        const authCode = this.issueAuthCode(
-          user.id,
-          typeof body.code_challenge === "string" ? body.code_challenge : null,
-        );
         const target = new URL(url.searchParams.get("redirect_to") ?? this.url);
-        target.searchParams.set("code", authCode);
+        if (this.emailLink === "code") {
+          const authCode = this.issueAuthCode(
+            user.id,
+            typeof body.code_challenge === "string" ? body.code_challenge : null,
+          );
+          target.searchParams.set("code", authCode);
+        } else {
+          const hash = createHash("sha224").update(randomBytes(16)).digest("hex");
+          this.tokenHashes.set(hash, { userId: user.id, used: false });
+          target.searchParams.set("token_hash", hash);
+          target.searchParams.set("type", "email");
+        }
         this.outbox.push({ email: body.email, code, link: target.toString() });
         return json(200, {});
       }
@@ -330,6 +430,15 @@ export class FakeSupabase {
       return json(200, await this.newSession(pending.userId));
     }
     if (req.method === "POST" && path === "/auth/v1/verify") {
+      if (typeof body.token_hash === "string") {
+        if (!["email", "magiclink", "signup"].includes(String(body.type))) return json(400, {});
+        const pending = this.tokenHashes.get(body.token_hash);
+        if (!pending || pending.used) return json(403, { error_code: "otp_expired" });
+        pending.used = true;
+        const user = this.users.get(pending.userId);
+        if (user) user.emailConfirmedAt ??= new Date().toISOString();
+        return json(200, await this.newSession(pending.userId));
+      }
       if (body.type === "email" && typeof body.email === "string") {
         const pending = this.emailCodes.get(body.email);
         if (!pending || pending.code !== body.token || pending.expiresAt < Date.now()) {
@@ -346,7 +455,10 @@ export class FakeSupabase {
         if (!pending || pending.code !== body.token) return json(403, { error_code: "otp_expired" });
         this.phoneCodes.delete(phone);
         const user = this.users.get(pending.userId);
-        if (user) user.phoneConfirmedAt = new Date().toISOString();
+        if (user) {
+          user.phoneConfirmedAt = new Date().toISOString();
+          await this.mirrorPhone(user);
+        }
         await this.db
           ?.query("UPDATE auth.users SET phone_confirmed_at = now() WHERE id = $1", [pending.userId])
           .catch(() => undefined); // the local stand-in has no such column
@@ -371,11 +483,17 @@ export class FakeSupabase {
       if (!user) return json(404, { error_code: "user_not_found" });
       if (req.method === "PUT" && typeof body.phone === "string") {
         const phone = body.phone.replace(/^\+/, "");
-        if ([...this.users.values()].some((u) => u.id !== user.id && u.phone === phone)) {
-          return json(422, { error_code: "phone_exists" });
+        if (phone === "") {
+          user.phone = null;
+          user.phoneConfirmedAt = null;
+        } else {
+          if ([...this.users.values()].some((u) => u.id !== user.id && u.phone === phone)) {
+            return json(422, { error_code: "phone_exists" });
+          }
+          if (user.phone !== phone) user.phoneConfirmedAt = null;
+          user.phone = phone;
         }
-        if (user.phone !== phone) user.phoneConfirmedAt = null;
-        user.phone = phone;
+        await this.mirrorPhone(user);
       }
       return json(200, this.userJson(user, user.id));
     }

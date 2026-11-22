@@ -31,6 +31,7 @@ import {
 } from "./checkout-fixtures";
 import {
   type Actor,
+  acceptForTest,
   asActor,
   become,
   commitError,
@@ -2273,6 +2274,9 @@ describe("money attacks (security review)", () => {
                                                                   ($2, $3, now() + interval '1 hour')`,
         [expired, later, u.userId],
       );
+      // both accepted by the web server (0074): the expiry alone decides
+      await acceptForTest(pool, expired, u.userId);
+      await acceptForTest(pool, later, u.userId);
       expect(await actorWith("app_pay", expired)).toBeNull();
       expect(await actorWith("app_pay", later)).toBe(u.userId);
       expect(await everyCommand(expired, victimCheckout)).toEqual(ALL_FORBIDDEN);
@@ -3127,6 +3131,9 @@ describe("money attacks (security review)", () => {
         "core.admin_set_switch(text,boolean,text)",
         // sixth review (0046): the console's status (Super Admin only)
         "core.admin_status()",
+        // ninth review (0075): the holder of a number the sign-in service refused as taken, only when
+        // unconfirmed and stale; the id stays on the server
+        "core.auth_phone_holder(text,bytea)",
         // 0039/0040: the actor's own appeals, reports and blocks (no money moves); since the sixth
         // review (0050) creating a report or an appeal is app_pay's (screened text)
         "core.block_store(uuid)",
@@ -3176,6 +3183,9 @@ describe("money attacks (security review)", () => {
         "core.passport_progress()",
         // sixth review (0050): the quiz is graded by the database; the concept is app_pay's
         "core.passport_submit_quiz(jsonb)",
+        // ninth review (0075): the actor's own phone-code bookkeeping (fingerprints only)
+        "core.phone_hold_set(bytea)",
+        "core.phone_number_attempt(bytea)",
         // 0070: the owner's phone verification mode, read only
         "core.phone_verification_mode()",
         "core.product_allocate_and_publish(uuid,integer)",
@@ -3188,8 +3198,12 @@ describe("money attacks (security review)", () => {
         "core.product_submit(uuid)",
         // 0038: a public "unavailable" answer for a hidden or archived product page
         "core.product_unavailable(uuid)",
-        // fifth review (0031): the database rate counter, hit by the server before a call
+        // fifth review (0031): the database rate counter, hit by the server before a call; ninth
+        // review (0076): with the client's network
         "core.rate_hit(text,bytea,integer,integer)",
+        "core.rate_hit(text,bytea,integer,integer,bytea)",
+        // ninth review (0074): the server accepts a sign-in session after verifying its token
+        "core.register_app_session(uuid,uuid)",
         // 0033: the actor's own relief status
         "core.relief_status()",
         "core.reveal_card_number(uuid)",
@@ -3248,6 +3262,7 @@ describe("money attacks (security review)", () => {
         "core.passport_submit_concept(text,text)",
         "core.provision_account(bytea,bytea,text[],text,text)",
         "core.rate_hit(text,bytea,integer,integer)",
+        "core.rate_hit(text,bytea,integer,integer,bytea)",
         "core.record_birthdate(bytea,boolean)",
         "core.record_phone_verified(bytea,bytea)",
         "core.report_create(text,uuid,text,text,jsonb)",
@@ -3268,6 +3283,9 @@ describe("money attacks (security review)", () => {
         "core.jobs_accept_request(bytea,timestamp with time zone)",
         // 0046: the moderation safety net (records overdue reviews; never pauses publication)
         "core.moderation_safety_net()",
+        // ninth review (0075): the release of expired phone holds (fingerprints and user ids only)
+        "core.phone_hold_done(uuid,bytea)",
+        "core.phone_holds_expired(integer)",
         "core.purge_idempotency_records()",
         "core.rate_purge(interval)", // fifth review (0031): expired rate counter windows
         // 0036: the screening job reads the queue and applies its verdicts

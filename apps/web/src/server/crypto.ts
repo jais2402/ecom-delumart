@@ -36,12 +36,15 @@ export function derivedKeyWith(
   return createHmac("sha256", identityKey).update(`delulumart/${purpose}/v1`, "utf8").digest();
 }
 
+/**
+ * What a rate subject is a digest of: a client address, a user id, a normalised email (alone or with
+ * the client's network), a phone number (SMS destination), a client network (IPv6 /48) or a
+ * captcha token (spent once).
+ */
+export type RateSubjectKind = "address" | "actor" | "email" | "phone" | "net" | "token";
+
 /** The 32-byte subject of a database rate counter: no raw address or user id is stored. */
-export function rateSubjectWith(
-  identityKey: Uint8Array,
-  kind: "address" | "actor" | "email",
-  value: string,
-): Buffer {
+export function rateSubjectWith(identityKey: Uint8Array, kind: RateSubjectKind, value: string): Buffer {
   return createHmac("sha256", derivedKeyWith(identityKey, "rate-limit"))
     .update(`${kind}\0${value}`, "utf8")
     .digest();
@@ -54,7 +57,7 @@ export function sessionCsrfTokenWith(identityKey: Uint8Array, sessionId: string)
     .digest("base64url");
 }
 
-export const rateSubject = (kind: "address" | "actor" | "email", value: string): Buffer =>
+export const rateSubject = (kind: RateSubjectKind, value: string): Buffer =>
   rateSubjectWith(env().identityKey, kind, value);
 export const sessionCsrfToken = (sessionId: string): string =>
   sessionCsrfTokenWith(env().identityKey, sessionId);

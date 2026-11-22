@@ -8,8 +8,9 @@ import { enforceRate, RATE_RULES } from "@/server/rate-limit";
 import { clearedFlowCookie } from "@/server/session";
 
 /**
- * GET /api/v1/auth/callback/{state}?code=…: where Supabase sends the browser back after the email
- * link or Google. The state in the path must equal the one sealed in this browser's flow cookie
+ * GET /api/v1/auth/callback/{state}?code=…: where Supabase sends the browser back after Google. An
+ * EMAIL flow is refused here (ninth review, minor 6c): emailed links lead to /sign-in/confirm and
+ * are redeemed only by the POST its button makes, so no GET (a mail scanner's) ever signs in. The state in the path must equal the one sealed in this browser's flow cookie
  * (constant-time compare); the code is exchanged on the server with the flow's PKCE verifier
  * (Supabase accepts each code once); the access token is verified and DROPPED; the database must
  * see the session as live. Then the opaque session cookie is set and the browser goes on to
@@ -50,7 +51,12 @@ export async function GET(
     const state = typeof params.state === "string" ? params.state : "";
     const code = new URL(request.url).searchParams.get("code") ?? "";
     const flow = readFlow(request);
-    if (flow === null || !same(state, flow.state) || !/^[A-Za-z0-9_-]{8,512}$/.test(code))
+    if (
+      flow === null ||
+      flow.kind !== "google" ||
+      !same(state, flow.state) ||
+      !/^[A-Za-z0-9_-]{8,512}$/.test(code)
+    )
       return failed("link");
     let signedIn: { sessionId: string } | null;
     try {

@@ -7,8 +7,10 @@ import "../server-only";
  *   GET  /auth/v1/authorize?provider=google&redirect_to=…&code_challenge=…&code_challenge_method=s256
  *   POST /auth/v1/token?grant_type=pkce    {auth_code, code_verifier} → a session
  *   POST /auth/v1/verify                   {type: email | sms, email | phone, token} → a session
+ *   POST /auth/v1/verify                   {type: email | magiclink | signup, token_hash} → a session
+ *                                          (the emailed link, redeemed only after a button press)
  *   GET  /auth/v1/admin/users/{id}         (secret key) the user's email and phone state
- *   PUT  /auth/v1/admin/users/{id}         (secret key) {phone}
+ *   PUT  /auth/v1/admin/users/{id}         (secret key) {phone}; {phone: ""} clears an unconfirmed one
  *   POST /auth/v1/logout?scope=local       (the session's own access token) ends that session
  *
  * Public endpoints carry the publishable key in `apikey`; admin endpoints the SECRET key in
@@ -131,6 +133,22 @@ export function supabaseApi(config: SupabaseApiConfig) {
       );
     },
 
+    /**
+     * Redeems the token hash of an emailed link (the interstitial's POST); null when wrong, used or
+     * expired. `type` is one of the email link types the server allows.
+     */
+    async verifyTokenHash(
+      type: "email" | "magiclink" | "signup",
+      tokenHash: string,
+    ): Promise<{ session: SupabaseSession | null; email: string | null }> {
+      const result = await call(config, "POST", "/verify", { body: { type, token_hash: tokenHash } });
+      const user = result.json.user as { email?: unknown } | undefined;
+      return {
+        session: sessionOf(result),
+        email: result.status === 200 && typeof user?.email === "string" ? user.email : null,
+      };
+    },
+
     /** Checks a typed email code; null when wrong or expired. */
     async verifyEmailCode(email: string, token: string): Promise<SupabaseSession | null> {
       return sessionOf(await call(config, "POST", "/verify", { body: { type: "email", email, token } }));
@@ -144,6 +162,18 @@ export function supabaseApi(config: SupabaseApiConfig) {
       return call(config, "PUT", `/admin/users/${encodeURIComponent(userId)}`, {
         admin: true,
         body: { phone: e164 },
+      });
+    },
+
+    /**
+     * Clears the user's phone number (an UNCONFIRMED hold being released; the caller checked it is
+     * unconfirmed). Supabase's admin API is asked for an empty number; the caller re-reads the user
+     * to see whether it took (docs/deploy-runbook.md §9 lists this as verify-on-first-deploy).
+     */
+    async adminClearPhone(userId: string): Promise<ApiResult> {
+      return call(config, "PUT", `/admin/users/${encodeURIComponent(userId)}`, {
+        admin: true,
+        body: { phone: "" },
       });
     },
 

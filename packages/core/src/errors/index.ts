@@ -73,6 +73,9 @@ export const ERROR_CODES = [
   // deleted one or none); the actor already has the configured maximum of saved addresses
   "ADDRESS_NOT_FOUND",
   "ADDRESS_LIMIT",
+  // bot protection (ninth review, major 2a): the Cloudflare Turnstile token was missing, already
+  // used, for another action or host, or could not be checked (fail closed)
+  "CAPTCHA_FAILED",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

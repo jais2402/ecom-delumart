@@ -157,7 +157,12 @@ export function describeError(error: unknown): string {
 export interface MeResponse {
   onboarding: {
     hasProfile: boolean;
+    /** True only for a number confirmed by text message. */
     phoneVerified: boolean;
+    /** The phone step is done (in 'unverified' mode without a text message). */
+    phoneRecorded?: boolean;
+    /** The account's number was released to its confirmed owner: a number is needed again. */
+    phoneReverifyRequired?: boolean;
     hasBirthdate: boolean;
     isAdult: boolean;
     provisioned: boolean;

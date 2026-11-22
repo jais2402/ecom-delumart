@@ -31,16 +31,30 @@ export function isPrivatePage(pathname: string): boolean {
   return PRIVATE_PAGE_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
-export function contentSecurityPolicy(nonce: string, development: boolean): string {
+/**
+ * Cloudflare Turnstile (ninth review, major 2a): its script and its iframe come from this origin
+ * only, and only the pages that render the challenge widget allow it.
+ */
+export const CHALLENGE_ORIGIN = "https://challenges.cloudflare.com";
+export const CHALLENGE_PAGES = ["/sign-in", "/onboarding/phone", "/onboarding/verify"] as const;
+
+export function usesChallenge(pathname: string): boolean {
+  return (CHALLENGE_PAGES as readonly string[]).includes(pathname.replace(/\/$/, "") || "/");
+}
+
+export function contentSecurityPolicy(nonce: string, development: boolean, challenge = false): string {
   if (!/^[A-Za-z0-9+/=_-]{16,}$/.test(nonce)) throw new Error("a nonce is at least 16 base64 characters");
+  // with 'strict-dynamic' a CSP3 browser trusts the widget script because a nonced script adds it;
+  // the host is listed for browsers without 'strict-dynamic'
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ""}`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${challenge ? ` ${CHALLENGE_ORIGIN}` : ""}${development ? " 'unsafe-eval'" : ""}`,
     development ? "style-src 'self' 'unsafe-inline'" : `style-src 'self' 'nonce-${nonce}'`,
     "style-src-attr 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self'",
     development ? "connect-src 'self' ws: wss:" : "connect-src 'self'",
+    ...(challenge ? [`frame-src ${CHALLENGE_ORIGIN}`] : []),
     "frame-ancestors 'none'",
     "form-action 'self'",
     "base-uri 'none'",

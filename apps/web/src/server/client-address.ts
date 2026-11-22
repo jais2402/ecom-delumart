@@ -99,6 +99,26 @@ export function placeAddressPrefix(address: string): string {
   return a;
 }
 
+/**
+ * The client network a per-(email, client) sign-in limit counts by (ninth review, major 2b): an
+ * IPv4 address by its /24, an IPv6 address by its /64. Anything else is returned as given.
+ */
+export function clientNetworkKey(address: string): string {
+  const a = rateAddressKey(address);
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/.exec(a);
+  return v4 ? `${v4[1]}.${v4[2]}.${v4[3]}.0/24` : a;
+}
+
+/**
+ * The IPv6 /48 an address belongs to, for the database's per-network cap on new rate subjects
+ * (ninth review, major 2c); null for IPv4 (and IPv4-mapped) and anything unparseable.
+ */
+export function ipv6NetworkKey(address: string): string | null {
+  const a = rateAddressKey(address);
+  const v6 = /^([0-9a-f]{4}):([0-9a-f]{4}):([0-9a-f]{4}):[0-9a-f]{4}::\/64$/.exec(a);
+  return v6 ? `${v6[1]}:${v6[2]}:${v6[3]}::/48` : null;
+}
+
 function expandIpv6(a: string): string[] | null {
   const halves = a.split("::");
   if (halves.length > 2) return null;

@@ -2,15 +2,19 @@ import { DomainError, normalizeEmail } from "@delulu/core";
 import { z } from "zod";
 import { flowIsFor, readFlow, requireSupabase, signedInCookies } from "@/server/auth/sign-in-session";
 import { SignInRefused, supabaseSignIn } from "@/server/auth/supabase";
+import { requireChallenge } from "@/server/captcha";
+import { clientAddress, clientNetworkKey } from "@/server/client-address";
 import { SERVER_CONFIG } from "@/server/config";
+import { env } from "@/server/env";
 import { route } from "@/server/http";
 import { enforceRate, RATE_RULES } from "@/server/rate-limit";
 
 const REFUSED = "That code is not right or has expired. Check it, or ask for a new email.";
 
 /**
- * POST /api/v1/auth/email/verify {email, code}: the code from the sign-in email, typed in the
- * browser that asked for it (the flow cookie must be this browser's flow for this address). On
+ * POST /api/v1/auth/email/verify {email, code, challenge?}: the code from the sign-in email, typed
+ * in the browser that asked for it (the flow cookie must be this browser's flow for this address).
+ * The Turnstile challenge first, then the per-(email, client network) and per-email limits. On
  * success the session cookie and a session-bound CSRF token; Supabase's tokens never leave the
  * server. One answer for every failure.
  */
@@ -20,6 +24,7 @@ export const POST = route(
     body: z.strictObject({
       email: z.string().min(3).max(254),
       code: z.string().regex(new RegExp(`^\\d{6,${SERVER_CONFIG.auth.emailCodeMaxDigits}}$`)),
+      challenge: z.string().max(4096).optional(),
     }),
     rateLimits: [{ rule: RATE_RULES.signInAddress }],
     preSessionCsrf: true,
@@ -27,6 +32,9 @@ export const POST = route(
   async ({ request, body }) => {
     requireSupabase();
     const email = normalizeEmail(body.email);
+    await requireChallenge(body.challenge, "email_verify");
+    const network = clientNetworkKey(clientAddress(request, env().trustedProxyHops));
+    await enforceRate(RATE_RULES.signInCodeEmailClient, `${email}\0${network}`);
     await enforceRate(RATE_RULES.signInCodeEmail, email);
     const flow = readFlow(request);
     if (flow === null || !flowIsFor(flow, email)) throw new DomainError("VALIDATION_FAILED", REFUSED);

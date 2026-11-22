@@ -6,7 +6,7 @@ import pg from "pg";
 import { SERVER_CONFIG } from "../config";
 import { env } from "../env";
 import { devUserId } from "./dev-user-id";
-import type { AuthProvider, PhoneCodeResult } from "./types";
+import type { AuthProvider, PhoneCodeResult, PhoneSendResult } from "./types";
 
 /**
  * DEVELOPMENT SIGN-IN PROVIDER: a stand-in for the sign-in service that signs anyone in by email
@@ -87,6 +87,12 @@ const provider: AuthProvider = {
         "INSERT INTO auth.sessions (id, user_id, not_after) VALUES ($1, $2, now() + make_interval(secs => $3))",
         [sessionId, userId, SERVER_CONFIG.session.ttlSeconds],
       );
+      // accepted as the web server accepts a verified Supabase session (0074), same function
+      const { rows } = await client.query<{ ok: boolean }>("SELECT core.register_app_session($1, $2) AS ok", [
+        sessionId,
+        userId,
+      ]);
+      if (rows[0]?.ok !== true) throw new Error("the dev session was not registered");
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
@@ -107,13 +113,13 @@ const provider: AuthProvider = {
     return state.sessions.get(keyOf(sessionId))?.email ?? null;
   },
 
-  async sendPhoneCode(sessionId, e164) {
+  async sendPhoneCode(sessionId, e164): Promise<PhoneSendResult> {
     const key = keyOf(sessionId);
     const s = state.sessions.get(key) ?? { email: null, pendingPhone: null, wrongCodes: 0 };
     s.pendingPhone = e164;
     s.wrongCodes = 0;
     state.sessions.set(key, s);
-    return { devCode: SERVER_CONFIG.phone.devCode };
+    return { sent: true, devCode: SERVER_CONFIG.phone.devCode };
   },
 
   async verifyPhoneCode(sessionId, code): Promise<PhoneCodeResult> {

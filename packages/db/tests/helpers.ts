@@ -19,9 +19,29 @@ export interface TestDatabase {
   drop: () => Promise<void>;
 }
 
+/**
+ * Supabase-shaped auth.users / auth.sessions (the columns the application and its tests read, with
+ * Supabase's names and types; defaults as the sign-in service fills them). Created before the
+ * migrations when `supabaseAuth` is set, so the migrations choose their Supabase variants (the
+ * strict SMS check of 0070, the phone holder lookup of 0075, the anonymous check of 0074).
+ */
+export const SUPABASE_AUTH_DDL = `
+CREATE SCHEMA auth;
+CREATE TABLE auth.users (
+  id uuid PRIMARY KEY, aud varchar(255), role varchar(255), email varchar(255),
+  email_confirmed_at timestamptz, phone text UNIQUE DEFAULT NULL, phone_confirmed_at timestamptz,
+  banned_until timestamptz, deleted_at timestamptz, is_anonymous boolean NOT NULL DEFAULT false,
+  created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now()
+);
+CREATE TABLE auth.sessions (
+  id uuid PRIMARY KEY, user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(), not_after timestamptz
+);
+CREATE INDEX sessions_user ON auth.sessions (user_id);`;
+
 /** Creates a uniquely named throwaway database, migrates it, and returns a pool to it. */
 export async function createTestDatabase(
-  options: { migrate?: boolean; poolSize?: number } = {},
+  options: { migrate?: boolean; poolSize?: number; supabaseAuth?: boolean } = {},
 ): Promise<TestDatabase> {
   const name = `delulu_test_${randomBytes(6).toString("hex")}`;
   const admin = new pg.Client({ connectionString: ADMIN_URL });
@@ -58,6 +78,7 @@ export async function createTestDatabase(
   };
   if (options.migrate !== false) {
     try {
+      if (options.supabaseAuth) await pool.query(SUPABASE_AUTH_DDL);
       await migrate(pool);
       await grantRawWriter(pool);
     } catch (error) {
@@ -104,10 +125,27 @@ export async function sessionFor(c: pg.Pool | pg.PoolClient, userId: string): Pr
       ORDER BY created_at, id LIMIT 1`,
     [userId],
   );
-  if (rows[0]) return rows[0].id;
-  const id = uuidv7();
-  await c.query("INSERT INTO auth.sessions (id, user_id) VALUES ($1, $2)", [id, userId]);
+  const id = rows[0]?.id ?? uuidv7();
+  if (!rows[0]) await c.query("INSERT INTO auth.sessions (id, user_id) VALUES ($1, $2)", [id, userId]);
+  // as the web server does after verifying the sign-in service's token (migration 0074)
+  await c.query("SELECT core.register_app_session($1, $2)", [id, userId]);
   return id;
+}
+
+/**
+ * OWNER-ONLY TEST PATH: marks a session row as accepted by the web server without the checks of
+ * core.register_app_session, for tests that need an accepted session which is expired, too old or
+ * otherwise refused (they assert core.actor_id() refuses it for THAT reason).
+ */
+export async function acceptForTest(
+  c: pg.Pool | pg.PoolClient,
+  sessionId: string,
+  userId: string,
+): Promise<void> {
+  await c.query("INSERT INTO core.app_session (session_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [
+    sessionId,
+    userId,
+  ]);
 }
 
 /** Postgres SQLSTATE of a rejected promise, for asserting the reason a statement failed. */
@@ -318,7 +356,7 @@ export async function onboard(
 ): Promise<void> {
   const status = await onboardingStatus(pool, { authSessionId });
   if (status.provisioned) return;
-  if (!status.phoneVerified && input.phoneFingerprint) {
+  if (!status.phoneRecorded && input.phoneFingerprint) {
     await recordPhoneVerified(pool, {
       authSessionId,
       phoneFingerprint: input.phoneFingerprint,

@@ -87,7 +87,8 @@ export function nextOnboardingPath(
   onboarding: MeResponse["onboarding"],
   codeSent: boolean,
 ): "/onboarding/phone" | "/onboarding/verify" | "/onboarding/birthdate" | "/onboarding/pin" | "/account" {
-  if (!onboarding.phoneVerified) return codeSent ? "/onboarding/verify" : "/onboarding/phone";
+  if (!(onboarding.phoneRecorded ?? onboarding.phoneVerified))
+    return codeSent ? "/onboarding/verify" : "/onboarding/phone";
   if (!onboarding.hasBirthdate || !onboarding.isAdult) return "/onboarding/birthdate";
   if (!onboarding.provisioned || !onboarding.pinSet) return "/onboarding/pin";
   return "/account";

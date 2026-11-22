@@ -1,5 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { contentSecurityPolicy, isPrivatePage, newNonce, PRIVATE_PAGE_CACHE } from "./server/page-headers";
+import {
+  contentSecurityPolicy,
+  isPrivatePage,
+  newNonce,
+  PRIVATE_PAGE_CACHE,
+  usesChallenge,
+} from "./server/page-headers";
 
 /**
  * Runs before every page request (not API routes or static files): a fresh CSP nonce, handed to
@@ -7,7 +13,11 @@ import { contentSecurityPolicy, isPrivatePage, newNonce, PRIVATE_PAGE_CACHE } fr
  * puts it on its scripts) and sent to the browser in the response; private pages are never cached.
  */
 export function proxy(request: NextRequest): NextResponse {
-  const csp = contentSecurityPolicy(newNonce(), process.env.NODE_ENV !== "production");
+  const csp = contentSecurityPolicy(
+    newNonce(),
+    process.env.NODE_ENV !== "production",
+    usesChallenge(request.nextUrl.pathname),
+  );
   const headers = new Headers(request.headers);
   headers.set("content-security-policy", csp);
   const response = NextResponse.next({ request: { headers } });

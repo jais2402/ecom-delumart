@@ -40,6 +40,21 @@ export function parseOwnerTarget(connectionString: string): OwnerTarget {
   return { host, port, user, database, projectRef, kind, loopback: isLoopbackHost(host) };
 }
 
+/** True when the connection string carries a password (ninth review, minor 6a: it need not). */
+export function connectionHasPassword(connectionString: string): boolean {
+  return new URL(connectionString).password !== "";
+}
+
+/**
+ * The connection string with `password` put in (typed at a hidden prompt, so it never has to be in
+ * an environment variable or the shell's history). The password is URL-encoded.
+ */
+export function withConnectionPassword(connectionString: string, password: string): string {
+  const url = new URL(connectionString);
+  url.password = encodeURIComponent(password);
+  return url.toString();
+}
+
 /** null when the target may be used, else the reason it is refused. */
 export function confirmTarget(target: OwnerTarget, confirm: string | undefined): string | null {
   if (!confirm) {

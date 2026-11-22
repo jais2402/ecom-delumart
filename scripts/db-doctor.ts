@@ -2,8 +2,9 @@
  * pnpm db:doctor — read-only checks of the production database BEFORE and AFTER migrating.
  * Prints PASS / FAIL / WARN / INFO lines. The output contains no secret and is SAFE TO SHARE.
  *
- *   DATABASE_URL_OWNER='postgresql://postgres.<ref>:<password>@aws-0-ap-south-1.pooler.supabase.com:5432/postgres' \
  *   DATABASE_CA_CERT_FILE=~/Downloads/prod-ca-2021.crt pnpm db:doctor
+ * It asks for the owner connection string and its password at prompts that do not echo (or reads
+ * DATABASE_URL_OWNER, with or without the password, from this terminal).
  *
  * Optional, to test the application logins too (the same values you give Vercel):
  *   DATABASE_URL_WEB, DATABASE_URL_PAY, DATABASE_URL_JOBS
@@ -90,7 +91,7 @@ async function dataApiCheck(): Promise<Check[]> {
 }
 
 async function main(): Promise<void> {
-  const { url, target } = ownerTarget({ requireConfirm: false });
+  const { url, target } = await ownerTarget({ requireConfirm: false });
   say(`db:doctor: ${describeTarget(target)}`);
   if (target.kind === "pooler-transaction")
     say("Note: use the Session pooler (port 5432) or the direct connection for the owner.");

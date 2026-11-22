@@ -38,13 +38,37 @@ export const SERVER_CONFIG = {
   rateLimit: {
     /** Sign-in attempts per client address. */
     signInAddress: { scope: "auth.sign_in.address", by: "address", limit: 20, windowSeconds: 60 },
-    /** Sign-in emails requested per email address (keyed fingerprint), whoever asks. */
-    signInEmail: { scope: "auth.sign_in.email", by: "email", limit: 5, windowSeconds: 3_600 },
-    /** Typed email sign-in codes checked per email address. */
-    signInCodeEmail: { scope: "auth.sign_in.code.email", by: "email", limit: 10, windowSeconds: 3_600 },
+    /**
+     * Sign-in emails requested per email address, counted only for requests that passed the
+     * challenge (ninth review, major 2b): per (email, client network: IPv4 /24, IPv6 /64), and a
+     * higher ceiling per email address from all networks together, so a stranger elsewhere cannot
+     * cheaply use up the owner's own allowance.
+     */
+    signInEmailClient: { scope: "auth.sign_in.email.client", by: "email", limit: 5, windowSeconds: 3_600 },
+    signInEmail: { scope: "auth.sign_in.email", by: "email", limit: 20, windowSeconds: 3_600 },
+    /** Typed email sign-in codes checked: per (email, client network) and per email address. */
+    signInCodeEmailClient: {
+      scope: "auth.sign_in.code.email.client",
+      by: "email",
+      limit: 10,
+      windowSeconds: 3_600,
+    },
+    signInCodeEmail: { scope: "auth.sign_in.code.email", by: "email", limit: 30, windowSeconds: 3_600 },
     /** Phone codes requested: per account (LLD: 5 / day / account) and per address. */
     phoneCodeActor: { scope: "phone.code.actor", by: "actor", limit: 5, windowSeconds: 86_400 },
     phoneCodeAddress: { scope: "phone.code.address", by: "address", limit: 30, windowSeconds: 3_600 },
+    /**
+     * New distinct numbers asked for from one client address per day (ninth review, major 1c; the
+     * database also caps distinct numbers per account: 3 a day, 5 before onboarding completes). High
+     * enough for many people behind one shared (carrier NAT) IPv4 address.
+     */
+    phoneNumberAddress: { scope: "phone.number.address", by: "address", limit: 100, windowSeconds: 86_400 },
+    /**
+     * Text messages to one destination number, across all accounts (ninth review, major 1d). The
+     * subject is a keyed digest of the number, never the number.
+     */
+    phoneSmsDestinationHour: { scope: "phone.sms.dest.hour", by: "phone", limit: 3, windowSeconds: 3_600 },
+    phoneSmsDestinationDay: { scope: "phone.sms.dest.day", by: "phone", limit: 5, windowSeconds: 86_400 },
     /** Phone code verifications: per account and per address. */
     phoneVerifyActor: { scope: "phone.verify.actor", by: "actor", limit: 10, windowSeconds: 3_600 },
     phoneVerifyAddress: { scope: "phone.verify.address", by: "address", limit: 60, windowSeconds: 3_600 },
@@ -118,6 +142,19 @@ export const SERVER_CONFIG = {
     /** Typed email sign-in codes: 6 to this many digits (Supabase's OTP length setting). */
     emailCodeMaxDigits: 10,
   },
+  /** Cloudflare Turnstile (ninth review, major 2a; captcha.ts). */
+  captcha: {
+    /** The siteverify call gives up after this long (and the request is refused: fail closed). */
+    timeoutMs: 5_000,
+    /** Largest siteverify response read. */
+    maxResponseBytes: 16 * 1024,
+    /** Longest token accepted (Cloudflare documents at most 2048 characters). */
+    tokenMaxChars: 2_048,
+    /** A token older than this (challenge_ts) is refused; Cloudflare's own validity is 300 s. */
+    tokenMaxAgeSeconds: 300,
+    /** Tokens already presented are remembered (hashed, in core.rate_counter) for this long. */
+    spentWindowSeconds: 600,
+  },
   phone: {
     /** The only code the dev provider accepts (there is no SMS in development). */
     devCode: "000000",
@@ -155,6 +192,8 @@ export const SERVER_CONFIG = {
     maxBudgetMs: 45_000,
     /** Screenings read per batch. */
     screeningBatch: 20,
+    /** Expired phone holds released per run (each is two or three Auth admin calls). */
+    phoneHoldBatch: 20,
     /** The development-only inline run after a submission. */
     inlineBudgetMs: 5_000,
   },

@@ -1,14 +1,21 @@
 import "../server-only";
-import { DomainError, normalizePhone } from "@delulu/core";
-import { endSession, sessionActor } from "@delulu/db/runtime";
+import { DomainError, normalizeEmail, normalizePhone } from "@delulu/core";
+import {
+  authPhoneHolder,
+  endSession,
+  phoneHoldSet,
+  registerAppSession,
+  sessionActor,
+} from "@delulu/db/runtime";
 import { SERVER_CONFIG } from "../config";
-import { derivedKeyWith } from "../crypto";
+import { derivedKeyWith, phoneFingerprint } from "../crypto";
 import { webPool } from "../db";
 import { env } from "../env";
+import { emailBinding } from "./flow";
 import { JwksCache } from "./jwks";
 import { verifyAccessToken } from "./jwt";
 import { type SupabaseApi, type SupabaseSession, SupabaseUnavailable, supabaseApi } from "./supabase-api";
-import type { AuthProvider, PhoneCodeResult } from "./types";
+import type { AuthProvider, PhoneCodeResult, PhoneSendResult } from "./types";
 
 /**
  * SUPABASE SIGN-IN PROVIDER (server-only). Email link / code and Google through Supabase Auth with
@@ -34,8 +41,21 @@ import type { AuthProvider, PhoneCodeResult } from "./types";
  * SMS code is sent with /otp (create_user false), and the typed code is checked with /verify type
  * sms, which sets auth.users.phone_confirmed_at (required by the database in 'sms' mode, 0070).
  * That verification returns a NEW Supabase session, which is logged out at once with its own
- * access token. A number that belongs to another Supabase user is answered exactly like a sent
- * code (no SMS goes out, the code then never matches), so the answer does not reveal it.
+ * access token and is never registered as an application session (0074).
+ *
+ * PHONE HOLDS (ninth review, major 1). Setting the number makes it the user's (unconfirmed) phone
+ * at Supabase, which keeps numbers unique, so a number can be squatted. Now:
+ *  - a number that could not be set is NEVER answered as sent: the provider says why (internal);
+ *    the route answers one neutral message for every reason, so it does not reveal a holder;
+ *  - a refused number (422) is released when its holder's number is UNCONFIRMED and older than the
+ *    code lifetime (core.auth_phone_holder names that holder to the server only), through the
+ *    admin API, then set once more; a CONFIRMED holder is never touched;
+ *  - asking for another number releases the user's own previous unconfirmed one; the job runner
+ *    releases holds whose code expired (releaseExpiredPhoneHolds).
+ *
+ * SESSIONS (ninth review, minor 4): a session is accepted only after its access token is verified
+ * here, and then registered with core.register_app_session(), which re-checks it; core.actor_id()
+ * signs in only registered sessions.
  */
 interface State {
   jwks: JwksCache | undefined;
@@ -91,7 +111,15 @@ export function flowEmailKey(): Buffer {
   return derivedKeyWith(env().identityKey, "auth-flow-email");
 }
 
-/** Where Supabase sends the browser back to: the callback, with the flow's state in the path. */
+/**
+ * Where an emailed link leads (ninth review, minor 6c): the interstitial page, which redeems the
+ * link only when the person presses its button (a POST). Must be in Supabase's Redirect URLs.
+ */
+export function confirmUrl(appOrigin: string): string {
+  return `${appOrigin}/sign-in/confirm`;
+}
+
+/** Where Supabase sends the browser back to after Google: the callback, with the flow's state in the path. */
 export function callbackUrl(appOrigin: string, flowState: string): string {
   return `${appOrigin}/api/v1/auth/callback/${flowState}`;
 }
@@ -140,6 +168,11 @@ export async function acceptSession(
     console.error("[auth] access token refused", "USER_MISMATCH");
     throw new SignInRefused("USER");
   }
+  // the token is verified: register the session (the database re-checks it, 0074)
+  if (!(await registerAppSession(webPool(), { authSessionId: sessionId, userId: sub }))) {
+    console.error("[auth] session not registered");
+    throw new SignInRefused("SESSION");
+  }
   const actor = await sessionActor(webPool(), { authSessionId: sessionId });
   if (actor === null || actor.userId !== sub) {
     // the token is valid, but the database does not see the session (auth.* not readable by the
@@ -183,6 +216,40 @@ export const supabaseSignIn = {
       unavailable(error);
     }
     return session === null ? null : acceptSession(session);
+  },
+
+  /**
+   * The emailed link, redeemed by the interstitial's POST (never by a GET): the token hash is
+   * verified with Supabase, and the session it returns is accepted only when its user's email is the
+   * address this browser's flow was started for (`binding`); otherwise that session is ended and
+   * the sign-in refused.
+   */
+  async confirmEmailLink(
+    type: "email" | "magiclink" | "signup",
+    tokenHash: string,
+    binding: string,
+  ): Promise<{ sessionId: string; userId: string } | null> {
+    let result: Awaited<ReturnType<SupabaseApi["verifyTokenHash"]>>;
+    try {
+      result = await api().verifyTokenHash(type, tokenHash);
+    } catch (error) {
+      unavailable(error);
+    }
+    if (result.session === null) return null;
+    let same = false;
+    try {
+      same = result.email !== null && emailBinding(flowEmailKey(), normalizeEmail(result.email)) === binding;
+    } catch {
+      same = false;
+    }
+    if (!same) {
+      console.error("[auth] link refused", "OTHER_ADDRESS");
+      await api()
+        .logout(result.session.accessToken)
+        .catch(() => false);
+      throw new SignInRefused("USER");
+    }
+    return acceptSession(result.session);
   },
 
   async verifyEmailCode(email: string, code: string): Promise<{ sessionId: string; userId: string } | null> {
@@ -243,26 +310,35 @@ const provider: AuthProvider = {
     return typeof email === "string" && email.length > 0 && typeof confirmed === "string" ? email : null;
   },
 
-  async sendPhoneCode(sessionId, e164) {
+  async sendPhoneCode(sessionId, e164): Promise<PhoneSendResult> {
     const userId = await actorOf(sessionId);
+    const digits = e164.replace(/^\+/, "");
+    const fp = phoneFingerprint(e164);
     try {
-      const set = await api().adminSetPhone(userId, e164);
-      if (set.status !== 200) {
-        // most likely the number belongs to another user: answered like a sent code
-        console.error("[auth] phone not set", set.status);
-        return { devCode: null };
-      }
-      const sent = await api().sendPhoneOtp(e164);
-      if (sent.status === 429) {
-        throw new DomainError("RATE_LIMITED", "Too many codes. Wait a while and try again.", {
-          retryAfterSeconds: 60,
+      let set = await api().adminSetPhone(userId, e164);
+      if (set.status === 422) {
+        // the number is someone's at Supabase (or this user's own old number blocks nothing here)
+        await releaseOwnOtherNumber(userId, digits);
+        const holder = await authPhoneHolder(webPool(), {
+          authSessionId: sessionId,
+          phoneDigits: digits,
+          phoneFingerprint: fp,
         });
+        if (holder !== null && (await releaseUnconfirmedPhone(holder, digits))) {
+          set = await api().adminSetPhone(userId, e164);
+        }
       }
-      if (sent.status !== 200) console.error("[auth] phone code not sent", sent.status);
+      if (set.status !== 200) {
+        return { sent: false, reason: set.status === 422 ? "NUMBER_HELD" : "NOT_SET" };
+      }
+      await phoneHoldSet(webPool(), { authSessionId: sessionId, phoneFingerprint: fp });
+      const sent = await api().sendPhoneOtp(e164);
+      if (sent.status === 429) return { sent: false, reason: "PROVIDER_LIMIT" };
+      if (sent.status !== 200) return { sent: false, reason: "NOT_SENT" };
     } catch (error) {
       unavailable(error);
     }
-    return { devCode: null };
+    return { sent: true, devCode: null };
   },
 
   async verifyPhoneCode(sessionId, code): Promise<PhoneCodeResult> {
@@ -288,6 +364,64 @@ const provider: AuthProvider = {
     }
   },
 };
+
+/** The user's phone (E.164 digits, no '+') and whether Supabase marks it confirmed; null if unknown. */
+async function phoneState(userId: string): Promise<{ phone: string; confirmed: boolean } | null> {
+  const user = await api().adminGetUser(userId);
+  if (user.status !== 200) return null;
+  const phone = typeof user.json.phone === "string" ? user.json.phone.replace(/^\+/, "") : "";
+  const confirmed = typeof user.json.phone_confirmed_at === "string" && user.json.phone_confirmed_at !== "";
+  return { phone, confirmed };
+}
+
+/**
+ * Clears an UNCONFIRMED number `digits` from `userId` (admin API) and checks that it took. Never
+ * touches a confirmed number or a different one. True when the number is free of that user now.
+ */
+export async function releaseUnconfirmedPhone(userId: string, digits: string): Promise<boolean> {
+  const before = await phoneState(userId);
+  if (before === null || before.confirmed) return false; // unknown, or confirmed: never touched
+  if (before.phone !== digits) return true; // that user no longer holds it
+  const cleared = await api().adminClearPhone(userId);
+  const after = cleared.status === 200 ? await phoneState(userId) : null;
+  const released = after !== null && after.phone !== digits;
+  if (!released) console.error("[auth] phone hold not released", cleared.status);
+  return released;
+}
+
+/** Asking for another number releases this user's own previous unconfirmed number. */
+async function releaseOwnOtherNumber(userId: string, requested: string): Promise<void> {
+  const own = await phoneState(userId);
+  if (own !== null && own.phone !== "" && own.phone !== requested && !own.confirmed) {
+    await releaseUnconfirmedPhone(userId, own.phone);
+  }
+}
+
+/**
+ * The job runner (jobs.ts): holds the server set whose code lifetime has passed are released
+ * through the admin API when the user's number is still that one and still unconfirmed. Returns
+ * how many numbers were released.
+ */
+export async function releaseExpiredPhoneHolds(
+  holds: readonly { userId: string; phoneFingerprint: Buffer }[],
+  done: (hold: { userId: string; phoneFingerprint: Buffer }) => Promise<void>,
+): Promise<number> {
+  let released = 0;
+  for (const hold of holds) {
+    const state = await phoneState(hold.userId);
+    if (state !== null && state.phone !== "" && !state.confirmed) {
+      let same = false;
+      try {
+        same = phoneFingerprint(`+${state.phone}`).equals(hold.phoneFingerprint);
+      } catch {
+        same = false;
+      }
+      if (same && (await releaseUnconfirmedPhone(hold.userId, state.phone))) released += 1;
+    }
+    if (state !== null) await done(hold);
+  }
+  return released;
+}
 
 export function supabaseAuthProvider(): AuthProvider {
   return provider;

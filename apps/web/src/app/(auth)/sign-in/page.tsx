@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { challengeSiteKey } from "@/server/captcha";
 import { SignInScreen } from "./SignInScreen";
 
 export const metadata: Metadata = { title: "Sign in" };
@@ -16,5 +17,11 @@ export default async function Page({
 }) {
   const params = await searchParams;
   const error = typeof params.error === "string" ? params.error : null;
-  return <SignInScreen devProvider={process.env.AUTH_PROVIDER === "dev"} callbackError={error} />;
+  return (
+    <SignInScreen
+      devProvider={process.env.AUTH_PROVIDER === "dev"}
+      callbackError={error}
+      challengeSiteKey={challengeSiteKey()}
+    />
+  );
 }

@@ -134,6 +134,7 @@ export {
   endSession,
   type PhoneVerificationMode,
   phoneVerificationMode,
+  registerAppSession,
 } from "./deployment";
 export {
   type AnalyticsRollupDay,
@@ -238,6 +239,15 @@ export {
   submitPassportQuiz,
   unsaveProduct,
 } from "./passport";
+export {
+  authPhoneHolder,
+  type ExpiredPhoneHold,
+  expiredPhoneHolds,
+  type PhoneNumberAttempt,
+  phoneHoldDone,
+  phoneHoldSet,
+  phoneNumberAttempt,
+} from "./phone";
 export {
   type OwnProfile,
   type ProfilePrivacy,

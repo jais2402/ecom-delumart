@@ -7,7 +7,8 @@
 export interface OnboardingGateway {
   startGoogleSignIn(): Promise<void>;
   requestEmailLink(email: string): Promise<void>;
-  submitPhone(e164: string): Promise<void>; // triggers a verification code
+  /** Triggers a verification code; `challenge` is the security check's one-use token, if any. */
+  submitPhone(e164: string, challenge?: string | null): Promise<void>;
   verifyPhoneCode(code: string): Promise<void>;
   submitBirthdate(isoDate: string): Promise<void>;
   setPin(pin: string): Promise<void>;

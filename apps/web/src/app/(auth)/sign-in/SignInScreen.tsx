@@ -3,6 +3,7 @@
 import { Alert, Button, FormField, Input, SignInPanel } from "@delulu/ui";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
+import { Challenge } from "../../_components/Challenge";
 import { describeError } from "../../_lib/api";
 import { useDevProvider } from "../../_lib/dev-mode";
 import { useGateway } from "../../_lib/gateway-context";
@@ -23,13 +24,18 @@ import { useArrival } from "../../_lib/use-arrival";
 
 const CODE = /^\d{6,10}$/;
 
+const CHECK_FIRST = "Complete the security check below first.";
+
 export function SignInScreen({
   devProvider = false,
   callbackError = null,
+  challengeSiteKey = null,
 }: {
   devProvider?: boolean;
   /** The ?error= the sign-in callback sent the browser back with. */
   callbackError?: string | null;
+  /** Cloudflare Turnstile's public site key, or null when this deployment asks for no check. */
+  challengeSiteKey?: string | null;
 }) {
   const devSeen = useDevProvider();
   const gateway = useGateway();
@@ -40,7 +46,17 @@ export function SignInScreen({
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [codeError, setCodeError] = useState<string | null>(null);
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [generation, setGeneration] = useState(0);
   const dev = devProvider || devSeen;
+  const siteKey = dev ? null : challengeSiteKey;
+  /** The current token, spent: the widget resets for the next request. */
+  const spendChallenge = (): string | null => {
+    const token = challenge;
+    setChallenge(null);
+    setGeneration((g) => g + 1);
+    return token;
+  };
 
   if (!ready) return null;
 
@@ -54,7 +70,11 @@ export function SignInScreen({
     setError(null);
     try {
       if (!dev) {
-        await startEmailSignIn(email);
+        if (siteKey !== null && challenge === null) {
+          setError(CHECK_FIRST);
+          return;
+        }
+        await startEmailSignIn(email, spendChallenge());
         setSentTo(email);
         return;
       }
@@ -77,10 +97,14 @@ export function SignInScreen({
       setCodeError("Enter the code from the email: 6 or more digits.");
       return;
     }
+    if (siteKey !== null && challenge === null) {
+      setCodeError(CHECK_FIRST);
+      return;
+    }
     setCodeError(null);
     setPending(true);
     try {
-      const next = await verifyEmailCode(sentTo, code);
+      const next = await verifyEmailCode(sentTo, code, spendChallenge());
       await goOn(next);
     } catch (err) {
       setCodeError(describeError(err));
@@ -90,53 +114,61 @@ export function SignInScreen({
   }
 
   return (
-    <SignInPanel
-      headingRef={headingRef}
-      pending={pending}
-      devMode={dev}
-      error={error}
-      sentTo={sentTo}
-      onUseDifferentEmail={() => {
-        setSentTo(null);
-        setCode("");
-        setCodeError(null);
-      }}
-      afterSent={
-        sentTo === null ? null : (
-          <form noValidate onSubmit={submitCode} className="flex flex-col gap-4">
-            <Alert tone="info">
-              The link works only in this browser. You can also type the code from the email.
-            </Alert>
-            <FormField label="Code from the email" hint="Only digits." error={codeError}>
-              {(control) => (
-                <Input
-                  {...control}
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={10}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                  className="font-mono tracking-widest"
-                />
-              )}
-            </FormField>
-            <Button type="submit" loading={pending}>
-              Sign in with the code
-            </Button>
-          </form>
-        )
-      }
-      onGoogle={async () => {
-        setError(null);
-        try {
-          if (dev) await gateway.startGoogleSignIn();
-          else await startGoogleSignIn();
-        } catch (err) {
-          setError(describeError(err) || messageOf(err));
+    <div className="flex flex-col gap-6">
+      <SignInPanel
+        headingRef={headingRef}
+        pending={pending}
+        devMode={dev}
+        error={error}
+        sentTo={sentTo}
+        onUseDifferentEmail={() => {
+          setSentTo(null);
+          setCode("");
+          setCodeError(null);
+        }}
+        afterSent={
+          sentTo === null ? null : (
+            <form noValidate onSubmit={submitCode} className="flex flex-col gap-4">
+              <Alert tone="info">
+                The link works only in this browser. You can also type the code from the email.
+              </Alert>
+              <FormField label="Code from the email" hint="Only digits." error={codeError}>
+                {(control) => (
+                  <Input
+                    {...control}
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={10}
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                    className="font-mono tracking-widest"
+                  />
+                )}
+              </FormField>
+              <Button type="submit" loading={pending}>
+                Sign in with the code
+              </Button>
+            </form>
+          )
         }
-      }}
-      onEmailSubmit={emailSignIn}
-    />
+        onGoogle={async () => {
+          setError(null);
+          try {
+            if (dev) await gateway.startGoogleSignIn();
+            else await startGoogleSignIn();
+          } catch (err) {
+            setError(describeError(err) || messageOf(err));
+          }
+        }}
+        onEmailSubmit={emailSignIn}
+      />
+      <Challenge
+        siteKey={siteKey}
+        action={sentTo === null ? "email_start" : "email_verify"}
+        onToken={setChallenge}
+        generation={generation}
+      />
+    </div>
   );
 }

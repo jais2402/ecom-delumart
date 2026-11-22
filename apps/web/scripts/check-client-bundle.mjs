@@ -21,6 +21,8 @@ const NAMES = [
   "ANALYTICS_KEY",
   "CRON_SECRET",
   "SUPABASE_SECRET_KEY",
+  // ninth review, major 2a: the Turnstile SECRET (the site key is public and may reach the browser)
+  "TURNSTILE_SECRET_KEY",
 ];
 // Any Supabase secret key at all (sb_secret_...), whatever variable it came from.
 const PATTERNS = [/sb_secret_[A-Za-z0-9_-]{10,}/];

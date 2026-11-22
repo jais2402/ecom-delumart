@@ -2,8 +2,10 @@ import "./server-only";
 import { DomainError, screenListing } from "@delulu/core";
 import {
   applyScreening,
+  expiredPhoneHolds,
   moderationSafetyNet,
   pendingScreenings,
+  phoneHoldDone,
   purgeAnalyticsEvents,
   purgeIdempotencyRecords,
   purgeRateCounters,
@@ -28,7 +30,10 @@ import { env } from "./env";
  *     long; it never switches publication off);
  *  3. the rate counter purge, the idempotency record purge and the stuck-session watchdog;
  *  4. analytics (0052): the daily rollup of yesterday and today (idempotent, suppressed places) and
- *     the purge of raw events past their retention (rollups are kept).
+ *     the purge of raw events past their retention (rollups are kept);
+ *  5. phone holds (ninth review, major 1b; Supabase only): numbers the server set on a sign-in user
+ *     whose code lifetime has passed and that are still unconfirmed are cleared through the Auth
+ *     admin API, so an abandoned (or squatted) number is free again.
  * Every step is idempotent, so overlapping or repeated runs are safe. The report holds counts only
  * (no listing text, no ids of people).
  */
@@ -47,6 +52,8 @@ export interface JobsReport {
   /** Events rolled up for yesterday and today (UTC), or null when the step did not run. */
   analyticsRollup: { yesterdayEvents: number; todayEvents: number } | null;
   analyticsPurged: number | null;
+  /** Unconfirmed phone numbers released at the sign-in service, or null when the step did not run. */
+  phoneHoldsReleased: number | null;
   budgetExhausted: boolean;
 }
 
@@ -82,6 +89,7 @@ export async function runJobs(options: RunJobsOptions = {}): Promise<JobsReport>
     terminated: null,
     analyticsRollup: null,
     analyticsPurged: null,
+    phoneHoldsReleased: null,
     budgetExhausted: false,
   };
 
@@ -145,6 +153,13 @@ export async function runJobs(options: RunJobsOptions = {}): Promise<JobsReport>
     return { yesterdayEvents: r.yesterday.events, todayEvents: r.today.events };
   });
   report.analyticsPurged = await step("analytics.purge", () => purgeAnalyticsEvents(pool));
+  report.phoneHoldsReleased = await step("phone.release", async () => {
+    if (env().authProvider !== "supabase" || env().supabase === null) return 0;
+    const holds = await expiredPhoneHolds(pool, SERVER_CONFIG.jobs.phoneHoldBatch);
+    if (holds.length === 0) return 0;
+    const { releaseExpiredPhoneHolds } = await import("./auth/supabase");
+    return releaseExpiredPhoneHolds(holds, (hold) => phoneHoldDone(pool, hold));
+  });
   report.budgetExhausted = !left();
   return report;
 }

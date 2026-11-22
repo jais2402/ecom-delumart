@@ -8,6 +8,11 @@
 #   DELULU_JOBS_SIGNING_KEY  the same value as JOBS_SIGNING_KEY in Vercel (64 hex characters)
 # The key never appears in the log: it is only used by openssl to sign. Every job is idempotent and
 # each signature is accepted once, so a late, skipped or doubled run is harmless.
+#
+# The log shows only the HTTP status and ONE count (listings screened); the job report itself is
+# never printed (a public repository's Actions logs are public). No pull_request trigger (a fork's
+# pull request must never run with these secrets), no permissions for the token, no third-party
+# actions (nothing to pin): one shell step with curl, openssl and jq from the runner image.
 name: jobs-scheduler
 
 on:
@@ -40,14 +45,16 @@ jobs:
           body='{}'
           ts="$(date +%s)"
           sig="$(printf '%s.%s' "${ts}" "${body}" | openssl dgst -sha256 -mac HMAC -macopt "hexkey:${JOBS_SIGNING_KEY}" -r | cut -d' ' -f1)"
-          status="$(curl --silent --show-error --output /tmp/jobs.json --write-out '%{http_code}' \
+          report="$(mktemp)"
+          trap 'rm -f "${report}"' EXIT
+          status="$(curl --silent --show-error --output "${report}" --write-out '%{http_code}' \
             --max-time 90 --proto '=https' \
             -X POST "${APP_ORIGIN}/api/internal/jobs/run" \
             -H 'content-type: application/json' \
             -H "x-delulu-timestamp: ${ts}" \
             -H "x-delulu-signature: ${sig}" \
-            --data "${body}")"
-          echo "HTTP ${status}"
-          # the report holds counts only (no ids, no personal data)
-          cat /tmp/jobs.json; echo
+            --data "${body}" 2>/dev/null || true)"
+          screened="$(jq -r '.report.screening.processed // 0' "${report}" 2>/dev/null || echo 0)"
+          case "${screened}" in ''|*[!0-9]*) screened=0 ;; esac
+          echo "HTTP ${status}; listings screened: ${screened}"
           if [ "${status}" != "200" ]; then exit 1; fi

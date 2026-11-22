@@ -1,8 +1,24 @@
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { myStatement } from "../src/account";
-import { myBrandProgress, myEarnings, myInventory, mySellerOrder, mySellerOrders } from "../src/merchant";
-import { aMinuteLater, CLEAN, checkout, codeOf, payFor, reconcile, user } from "./checkout-fixtures";
+import {
+  myBrandProgress,
+  myCoupons,
+  myEarnings,
+  myInventory,
+  mySellerOrder,
+  mySellerOrders,
+} from "../src/merchant";
+import {
+  aMinuteLater,
+  CLEAN,
+  checkout,
+  codeOf,
+  merchantCoupon,
+  payFor,
+  reconcile,
+  user,
+} from "./checkout-fixtures";
 import {
   become,
   createTestDatabase,
@@ -202,6 +218,152 @@ describe("eighth security review: no application role reads an order's time-orde
       }
     }
     expect(leaks).toEqual([]);
+  });
+
+  /**
+   * Ninth security review, minor 5: `role:schema.table.column` -> why a viewer who is NOT the buyer
+   * may see that column's value change in the very transaction of a purchase. Every entry needs a
+   * reason; anything else readable must not tick at the instant of sale.
+   */
+  const SALE_INSTANT_EXCEPTIONS: Readonly<Record<string, string>> = {
+    "app_web:ledger.wallet.available_paise":
+      "the seller's OWN wallet (RLS: own accounts only): the balance is spendable at once (PRD R4 'pay from balance', R5 wallet = bank balance, one ledger balance), so a sale's credit is live; it names no buyer, order or product",
+    "app_web:ledger.wallet.version":
+      "the seller's OWN wallet (RLS: own accounts only): the balance is spendable at once (PRD R4 'pay from balance', R5 wallet = bank balance, one ledger balance), so a sale's credit is live; it names no buyer, order or product",
+    "app_web:ledger.posting.id":
+      "the seller's OWN credit postings (RLS: own accounts only): the same amount and instant the live balance shows; journal and seller order are not readable (0060) and the statement rounds to the minute",
+    "app_web:ledger.posting.account_id":
+      "the seller's OWN credit postings (RLS: own accounts only): the same amount and instant the live balance shows; journal and seller order are not readable (0060) and the statement rounds to the minute",
+    "app_web:ledger.posting.amount":
+      "the seller's OWN credit postings (RLS: own accounts only): the same amount and instant the live balance shows; journal and seller order are not readable (0060) and the statement rounds to the minute",
+    "app_web:ledger.posting.memo":
+      "the seller's OWN credit postings (RLS: own accounts only): the same amount and instant the live balance shows; journal and seller order are not readable (0060) and the statement rounds to the minute",
+    "app_pay:ledger.wallet.available_paise":
+      "the seller's OWN wallet (RLS: own accounts only): the balance is spendable at once (PRD R4 'pay from balance', R5 wallet = bank balance, one ledger balance), so a sale's credit is live; it names no buyer, order or product",
+    "app_pay:ledger.wallet.version":
+      "the seller's OWN wallet (RLS: own accounts only): the balance is spendable at once (PRD R4 'pay from balance', R5 wallet = bank balance, one ledger balance), so a sale's credit is live; it names no buyer, order or product",
+    "app_pay:ledger.posting.id":
+      "the seller's OWN credit postings (RLS: own accounts only): the same amount and instant the live balance shows; journal and seller order are not readable (0060) and the statement rounds to the minute",
+    "app_pay:ledger.posting.account_id":
+      "the seller's OWN credit postings (RLS: own accounts only): the same amount and instant the live balance shows; journal and seller order are not readable (0060) and the statement rounds to the minute",
+    "app_pay:ledger.posting.amount":
+      "the seller's OWN credit postings (RLS: own accounts only): the same amount and instant the live balance shows; journal and seller order are not readable (0060) and the statement rounds to the minute",
+    "app_pay:ledger.posting.memo":
+      "the seller's OWN credit postings (RLS: own accounts only): the same amount and instant the live balance shows; journal and seller order are not readable (0060) and the statement rounds to the minute",
+  };
+
+  /**
+   * As `role` signed in as `viewer` (or with no session): for every relation the role can read,
+   * one digest per readable column over all the rows it can see. Relations it cannot query are
+   * left out (the same on both sides of the diff).
+   */
+  async function readableSnapshot(role: string, viewer: Viewer): Promise<Map<string, string>> {
+    const { rows: cols } = await pool.query<{ rel: string; col: string }>(
+      `SELECT format('%I.%I', n.nspname, cl.relname) AS rel, a.attname AS col
+         FROM pg_class cl JOIN pg_namespace n ON n.oid = cl.relnamespace
+         JOIN pg_attribute a ON a.attrelid = cl.oid AND a.attnum > 0 AND NOT a.attisdropped
+        WHERE cl.relkind IN ('r', 'p', 'v', 'm', 'f')
+          AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_%'
+          AND has_schema_privilege($1, n.nspname, 'USAGE') AND has_column_privilege($1, cl.oid, a.attname, 'SELECT')
+        ORDER BY 1, 2`,
+      [role],
+    );
+    const byRel = new Map<string, string[]>();
+    for (const c of cols) byRel.set(c.rel, [...(byRel.get(c.rel) ?? []), c.col]);
+    const out = new Map<string, string>();
+    await asViewer(role, viewer, async (x) => {
+      for (const [rel, names] of byRel) {
+        const aggs = names.map(
+          (col, i) =>
+            `md5(COALESCE(string_agg(COALESCE(${JSON.stringify(col)}::text, '<null>'), '|' ORDER BY COALESCE(${JSON.stringify(col)}::text, '<null>')), '')) AS c${i}`,
+        );
+        await x.query("SAVEPOINT snap");
+        try {
+          const { rows } = await x.query<Record<string, string>>(`SELECT ${aggs.join(", ")} FROM ${rel}`);
+          for (const [i, col] of names.entries()) out.set(`${role}:${rel}.${col}`, rows[0]?.[`c${i}`] ?? "");
+          await x.query("RELEASE SAVEPOINT snap");
+        } catch {
+          await x.query("ROLLBACK TO SAVEPOINT snap");
+        }
+      }
+    });
+    return out;
+  }
+
+  it("minor 5 (generated): no column a non-buyer can read changes in the transaction of a purchase (seller, stranger, no session), except the listed ones", async () => {
+    const p = asFixture(await publishListing(pool, s, { quantity: 5 }));
+    const coupon = await merchantCoupon(
+      pool,
+      { owner: s.u, companyId: s.companyId, warehouseId: s.warehouseId },
+      {
+        percent: 10,
+        maxRedemptions: 50,
+        publicCode: `SALE${Date.now().toString(36).toUpperCase()}`,
+      },
+    );
+    const b = await user(pool);
+    const viewers: Viewer[] = [
+      { name: "seller", userId: s.u.userId },
+      { name: "stranger", userId: stranger.userId },
+      { name: "no session", userId: null },
+    ];
+    const snapshotAll = async () => {
+      const all = new Map<string, Map<string, string>>();
+      for (const role of ROLES)
+        for (const v of viewers) all.set(`${v.name}`.concat("|", role), await readableSnapshot(role, v));
+      return all;
+    };
+    const before = await snapshotAll();
+    await payFor(pool, b, await checkout(pool, b, [p], { [s.companyId]: "STANDARD" }, coupon.code));
+    const after = await snapshotAll();
+    const ticks: string[] = [];
+    for (const [who, snap] of before) {
+      const next = after.get(who) ?? new Map<string, string>();
+      for (const [key, digest] of snap) {
+        if (key in SALE_INSTANT_EXCEPTIONS) continue;
+        if (next.get(key) !== digest) ticks.push(`${key} (${who.split("|")[0]})`);
+      }
+    }
+    // the scan reaches the stock tables (it is not vacuous)
+    expect(
+      [...(before.get("stranger|app_web")?.keys() ?? [])].some((k) => k.startsWith("app_web:core.product.")),
+    ).toBe(true);
+    expect(ticks.sort()).toEqual([]);
+  }, 240_000);
+
+  it("minor 5: a coupon's redemptions reach the seller's coupon list only once the minute of the order has ended", async () => {
+    const as = { authSessionId: s.u.authSessionId };
+    const p = asFixture(await publishListing(pool, s, { quantity: 3 }));
+    const coupon = await merchantCoupon(
+      pool,
+      { owner: s.u, companyId: s.companyId, warehouseId: s.warehouseId },
+      {
+        percent: 10,
+        publicCode: `MIN${Date.now().toString(36).toUpperCase()}`,
+      },
+    );
+    await aMinuteLater(pool);
+    const mine = async () => (await myCoupons(pool, as)).items.find((i) => i.couponId === coupon.id);
+    expect(await mine()).toMatchObject({ redeemed: 0, discountGivenPaise: 0n });
+    let settled = false;
+    for (let attempt = 0; attempt < 3 && !settled; attempt++) {
+      const minute = async () =>
+        (await pool.query<{ m: string }>("SELECT date_trunc('minute', clock_timestamp())::text AS m")).rows[0]
+          ?.m;
+      const b = await user(pool);
+      const start = await minute();
+      const before = await mine();
+      await payFor(pool, b, await checkout(pool, b, [p], { [s.companyId]: "STANDARD" }, coupon.code));
+      const during = await mine();
+      if ((await minute()) !== start) continue;
+      expect(during).toEqual(before);
+      settled = true;
+      await aMinuteLater(pool);
+      const after = await mine();
+      expect(after?.redeemed).toBe((before?.redeemed ?? 0) + 1);
+      expect(after?.discountGivenPaise).toBeGreaterThan(before?.discountGivenPaise ?? 0n);
+    }
+    expect(settled).toBe(true);
   });
 
   it("major 1: the reviewer's reproductions are refused or empty", async () => {

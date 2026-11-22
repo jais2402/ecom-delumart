@@ -1,15 +1,23 @@
 /**
  * Shared by the owner-terminal scripts (db-doctor, db-migrate-prod, admin-grant). They run on the
- * OWNER'S OWN COMPUTER, never on Vercel or in CI: the owner (postgres) connection string is read
- * from DATABASE_URL_OWNER in that terminal only. Nothing secret is ever printed: no connection
- * string, password, key or email; only the host, the project ref and results.
+ * OWNER'S OWN COMPUTER, never on Vercel or in CI. The owner (postgres) connection string comes from
+ * DATABASE_URL_OWNER in that terminal, or is ASKED FOR at a prompt that does not echo; when the
+ * string has no password, the password is asked for the same way (ninth review, minor 6a), so the
+ * secret never has to be in an environment variable or the shell's history. Nothing secret is ever
+ * printed: no connection string, password, key or email; only the host, the project ref and results.
  */
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { createInterface } from "node:readline";
 import type { Pool as PgPool } from "pg";
 import { connectionConfig, decodeCaCertificate } from "../../packages/db/src/connection.ts";
-import { confirmTarget, type OwnerTarget, parseOwnerTarget } from "../../packages/db/src/prod-tools.ts";
+import {
+  confirmTarget,
+  connectionHasPassword,
+  type OwnerTarget,
+  parseOwnerTarget,
+  withConnectionPassword,
+} from "../../packages/db/src/prod-tools.ts";
 
 const require = createRequire(new URL("../../packages/db/package.json", import.meta.url));
 const pg = require("pg") as typeof import("pg");
@@ -28,23 +36,38 @@ export function argValue(name: string): string | undefined {
 
 export const hasFlag = (name: string) => process.argv.includes(name);
 
-/** The owner connection string from this terminal; refused on Vercel or in CI. */
-export function ownerTarget(options: { requireConfirm: boolean }): { url: string; target: OwnerTarget } {
+/**
+ * The owner connection string from this terminal (DATABASE_URL_OWNER, or a hidden prompt), with the
+ * password asked for at a hidden prompt when the string has none; refused on Vercel or in CI.
+ */
+export async function ownerTarget(options: {
+  requireConfirm: boolean;
+}): Promise<{ url: string; target: OwnerTarget }> {
   if (process.env.VERCEL === "1" || process.env.VERCEL_ENV) {
     fail("Refused: this script runs on your own computer, never on Vercel.");
   }
-  const url = process.env.DATABASE_URL_OWNER;
+  let url = process.env.DATABASE_URL_OWNER ?? "";
   if (!url) {
-    fail(
-      "Set DATABASE_URL_OWNER in THIS terminal first (Supabase: Connect -> Session pooler, port 5432).\n" +
-        "Never put it in Vercel or in a file you commit.",
+    if (!process.stdin.isTTY) {
+      fail(
+        "Set DATABASE_URL_OWNER in THIS terminal (without the password is fine), or run this in an interactive terminal.\n" +
+          "Never put it in Vercel or in a file you commit.",
+      );
+    }
+    url = await ask(
+      "Owner connection string (Supabase: Connect -> Session pooler, port 5432; the password may be left out; not shown): ",
+      true,
     );
   }
   let target: OwnerTarget;
   try {
     target = parseOwnerTarget(url);
+    if (!connectionHasPassword(url) && process.stdin.isTTY) {
+      const password = await ask(`Database password for ${target.user || "the owner"} (not shown): `, true);
+      if (password !== "") url = withConnectionPassword(url, password);
+    }
   } catch {
-    fail("DATABASE_URL_OWNER is not a valid postgres:// connection string.");
+    fail("The owner connection string is not a valid postgres:// connection string.");
   }
   if (options.requireConfirm) {
     const problem = confirmTarget(target, argValue("--confirm"));

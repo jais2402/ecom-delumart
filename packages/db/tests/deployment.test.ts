@@ -6,6 +6,7 @@ import { acceptJobsRequest } from "../src/jobs";
 import { onboardingStatus, recordPhoneVerified } from "../src/onboarding";
 import { sessionActor } from "../src/session-actor";
 import {
+  acceptForTest,
   countRows,
   createTestDatabase,
   inTx,
@@ -126,7 +127,9 @@ describe("deployment settings, phone mode, session lifetime and sign-out (0070-0
           phoneFingerprint,
           emailFingerprint: randomBytes(32),
         });
-        expect(status.phoneVerified).toBe(true); // the phone STEP is done
+        // ninth review, major 1: the step is done, but the number is NOT reported as verified
+        expect(status.phoneRecorded).toBe(true);
+        expect(status.phoneVerified).toBe(false);
         const { rows } = await pool.query<{ v: boolean | null }>(
           "SELECT phone_verified AS v FROM core.user_profile WHERE id = $1",
           [a.userId],
@@ -176,6 +179,9 @@ describe("deployment settings, phone mode, session lifetime and sign-out (0070-0
            ($1, $3, now() - interval '8 days'), ($2, $3, now() - interval '6 days')`,
         [old, young, userId],
       );
+      // both accepted by the web server (0074): the age alone decides
+      await acceptForTest(pool, old, userId);
+      await acceptForTest(pool, young, userId);
       expect(await sessionActor(pool, { authSessionId: old })).toBeNull();
       expect((await sessionActor(pool, { authSessionId: young }))?.userId).toBe(userId);
       // the owner shortens the lifetime: the 6-day-old session ends too

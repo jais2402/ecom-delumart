@@ -59,7 +59,10 @@ const iso = (d: Date): string => d.toISOString();
 export function onboardingView(s: OnboardingStatus) {
   return {
     hasProfile: s.hasProfile,
+    // ninth review, major 1: true only for a number confirmed by SMS; phoneRecorded says the step is done
     phoneVerified: s.phoneVerified,
+    phoneRecorded: s.phoneRecorded,
+    phoneReverifyRequired: s.phoneReverifyRequired,
     hasBirthdate: s.hasBirthdate,
     isAdult: s.isAdult,
     provisioned: s.provisioned,

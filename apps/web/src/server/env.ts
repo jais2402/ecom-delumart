@@ -69,7 +69,19 @@ export interface Env {
   serverless: boolean;
   /** The first 12 characters of the deployed git commit (VERCEL_GIT_COMMIT_SHA), for /api/health. */
   commit: string | null;
+  /**
+   * Cloudflare Turnstile (ninth review, major 2a) on email sign-in start, email-code check and the
+   * phone step. `siteKey` is public (it reaches the browser); `secretKey` is server-only. `verifyUrl`
+   * is Cloudflare's siteverify endpoint unless TURNSTILE_VERIFY_URL names a verifier on this machine
+   * (tests and the local smoke only). Null: no challenge (development without keys, or CAPTCHA=off).
+   */
+  captcha: { siteKey: string; secretKey: string; verifyUrl: string } | null;
+  /** CAPTCHA=off was set explicitly: /api/v1/admin/health reports `captcha: "off"` as a warning. */
+  captchaOff: boolean;
 }
+
+/** Cloudflare's documented server-side validation endpoint. */
+export const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 /**
  * The example key values of apps/web/.env.example. They are public, so a server holding one has no
@@ -177,7 +189,37 @@ const schema = z.object({
     })
     .optional(),
   VERCEL_GIT_COMMIT_SHA: z.string().optional(),
+  TURNSTILE_SITE_KEY: z
+    .string()
+    .regex(/^[0-9A-Za-z_-]{10,100}$/, { error: "must be the Turnstile site key (letters, digits, '-', '_')" })
+    .optional(),
+  TURNSTILE_SECRET_KEY: z
+    .string()
+    .regex(/^[0-9A-Za-z_-]{20,200}$/, {
+      error: "must be the Turnstile secret key (letters, digits, '-', '_')",
+    })
+    .optional(),
+  TURNSTILE_VERIFY_URL: z
+    .string()
+    .refine(
+      (v) => {
+        try {
+          const u = new URL(v);
+          return (u.protocol === "http:" || u.protocol === "https:") && isLoopbackHost(u.hostname);
+        } catch {
+          return false;
+        }
+      },
+      {
+        error: "must be a verifier on this machine (http://127.0.0.1:<port>/...); tests and local smoke only",
+      },
+    )
+    .optional(),
+  CAPTCHA: z.enum(["on", "off"], { error: "must be 'on' or 'off'" }).optional(),
 });
+
+/** Cloudflare's documented test secret keys (always pass / always fail / already spent). */
+const TURNSTILE_TEST_SECRET = /^[123]x0{30,}AA$/;
 
 function hostOf(url: string): string {
   try {
@@ -264,6 +306,21 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
         problems.push("CRON_SECRET is a placeholder (too few different characters); generate a random one");
       }
     }
+    const hasSite = v.TURNSTILE_SITE_KEY !== undefined;
+    const hasSecret = v.TURNSTILE_SECRET_KEY !== undefined;
+    if (hasSite !== hasSecret) {
+      problems.push("TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY are set together or not at all");
+    }
+    if (production && v.AUTH_PROVIDER === "supabase" && !(hasSite && hasSecret) && v.CAPTCHA !== "off") {
+      problems.push(
+        "TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY are required when NODE_ENV is production and AUTH_PROVIDER is 'supabase' (or set CAPTCHA=off explicitly)",
+      );
+    }
+    if (production && hasSecret && TURNSTILE_TEST_SECRET.test(v.TURNSTILE_SECRET_KEY ?? "")) {
+      problems.push(
+        "TURNSTILE_SECRET_KEY is one of Cloudflare's public test keys; use the site's real secret",
+      );
+    }
     if (production && v.AUTH_PROVIDER === "dev") {
       problems.push("AUTH_PROVIDER 'dev' is refused when NODE_ENV is production");
     }
@@ -330,6 +387,15 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
         commit: /^[0-9a-f]{12,40}$/i.test(v.VERCEL_GIT_COMMIT_SHA ?? "")
           ? (v.VERCEL_GIT_COMMIT_SHA ?? "").slice(0, 12).toLowerCase()
           : null,
+        captcha:
+          v.CAPTCHA !== "off" && v.TURNSTILE_SITE_KEY && v.TURNSTILE_SECRET_KEY
+            ? {
+                siteKey: v.TURNSTILE_SITE_KEY,
+                secretKey: v.TURNSTILE_SECRET_KEY,
+                verifyUrl: v.TURNSTILE_VERIFY_URL ?? TURNSTILE_SITEVERIFY_URL,
+              }
+            : null,
+        captchaOff: v.CAPTCHA === "off",
       };
     }
   }

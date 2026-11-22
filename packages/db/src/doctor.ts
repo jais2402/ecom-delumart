@@ -32,7 +32,7 @@ export const APP_LOGIN_ROLES = ["app_web", "app_pay", "app_jobs"] as const;
 
 /** Columns of the sign-in service's tables that the migrations and core.actor_id() read. */
 export const REQUIRED_AUTH_COLUMNS: Readonly<Record<string, readonly string[]>> = {
-  users: ["id", "banned_until", "deleted_at", "phone_confirmed_at", "created_at"],
+  users: ["id", "banned_until", "deleted_at", "phone", "phone_confirmed_at", "is_anonymous", "created_at"],
   sessions: ["id", "user_id", "not_after", "created_at"],
 };
 

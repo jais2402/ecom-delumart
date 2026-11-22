@@ -30,6 +30,8 @@ const messageOf = (p: Promise<unknown>) =>
 const NOTHING = {
   hasProfile: false,
   phoneVerified: false,
+  phoneRecorded: false,
+  phoneReverifyRequired: false,
   hasBirthdate: false,
   isAdult: false,
   provisioned: false,
@@ -73,11 +75,17 @@ describe("onboarding (LLD §7.1): phone, birthdate, then provisioning", () => {
   it("US-01: the step flags follow the user through phone, birthdate, provisioning", async () => {
     const u = await signedIn();
     expect(await onboardingStatus(pool, u)).toEqual(NOTHING);
-    expect(await phone(u)).toEqual({ ...NOTHING, hasProfile: true, phoneVerified: true });
+    expect(await phone(u)).toEqual({
+      ...NOTHING,
+      hasProfile: true,
+      phoneVerified: true,
+      phoneRecorded: true,
+    });
     expect(await birthdate(u)).toEqual({
       ...NOTHING,
       hasProfile: true,
       phoneVerified: true,
+      phoneRecorded: true,
       hasBirthdate: true,
       isAdult: true,
     });
@@ -86,6 +94,8 @@ describe("onboarding (LLD §7.1): phone, birthdate, then provisioning", () => {
     expect(await onboardingStatus(pool, u)).toEqual({
       hasProfile: true,
       phoneVerified: true,
+      phoneRecorded: true,
+      phoneReverifyRequired: false,
       hasBirthdate: true,
       isAdult: true,
       provisioned: true,

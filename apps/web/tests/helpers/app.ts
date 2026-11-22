@@ -111,10 +111,10 @@ async function closeDevAuth(): Promise<void> {
  * themselves are never changed; the server refuses the multiplier in production).
  */
 export async function startTestApp(
-  options: { env?: Record<string, string | undefined> } = {},
+  options: { env?: Record<string, string | undefined>; supabaseAuth?: boolean } = {},
 ): Promise<TestApp> {
   await ensureTestLogins();
-  const db = await createTestDatabase();
+  const db = await createTestDatabase(options.supabaseAuth ? { supabaseAuth: true } : {});
   try {
     const seeds = cheapestSeedProducts();
     await seedCatalog(db.pool, seeds, CATEGORIES);

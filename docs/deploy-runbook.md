@@ -46,8 +46,25 @@ openssl rand -hex 24   # APP_JOBS_PASSWORD  (database login of the job runner)
 | `PIN_PEPPER` | Stored PIN hashes include it. A new pepper makes every PIN wrong. |
 | `FIELD_KEY` | Birthdates and addresses are encrypted with it. A new key makes them unreadable. |
 
-`JOBS_SIGNING_KEY`, `ANALYTICS_KEY`, `CRON_SECRET`, the three database passwords and the Supabase
-secret key **can** be rotated (see [section 11](#11-backup-and-rotation-of-keys)).
+`JOBS_SIGNING_KEY`, `ANALYTICS_KEY`, `CRON_SECRET`, the three database passwords, the Supabase
+secret key and the Turnstile secret key **can** be rotated (see [section 11](#11-backup-and-rotation-of-keys)).
+
+**Typing a secret into a terminal.** Never write a password into a command line (`export X='...'`
+ends up in your shell history). The owner scripts ask for what they need at prompts that do not
+echo (the owner connection string and its password, the three login passwords, `IDENTITY_KEY`, the
+admin email). If you prefer to put a value into the terminal's environment, read it without echo:
+
+```bash
+# bash
+read -rsp 'DATABASE_URL_OWNER: ' DATABASE_URL_OWNER; echo; export DATABASE_URL_OWNER
+# zsh
+read -rs 'DATABASE_URL_OWNER?DATABASE_URL_OWNER: '; echo; export DATABASE_URL_OWNER
+```
+
+(the same for `APP_WEB_PASSWORD`, `APP_PAY_PASSWORD`, `APP_JOBS_PASSWORD` and `ADMIN_EMAIL`). The
+owner connection string may also be given WITHOUT its password, e.g.
+`postgresql://postgres.<project-ref>@aws-0-ap-south-1.pooler.supabase.com:5432/postgres` (not secret):
+the scripts then ask for the password alone.
 
 ## 2. Supabase settings (dashboard)
 
@@ -83,27 +100,52 @@ turn the Data API off. If you cannot, set **Exposed schemas** to nothing (remove
 Authentication → **URL Configuration**:
 
 - *Site URL*: your app origin, e.g. `https://delulumart.example` (or `https://<project>.vercel.app`).
-- *Redirect URLs*: add exactly `https://<your-origin>/api/v1/auth/callback/**`.
+- *Redirect URLs*: add exactly `https://<your-origin>/api/v1/auth/callback/**` (Google) and
+  `https://<your-origin>/sign-in/confirm` (the emailed link's page).
 
 Authentication → **Sign In / Providers**:
 
 - *Allow new users to sign up*: on. *Anonymous sign-ins*: **off**. *Manual linking*: off.
-- **Email**: enabled; *Confirm email* on. *Email OTP expiration*: 900 seconds (15 minutes). *Email
-  OTP length*: 6.
+- **Email**: enabled; *Confirm email* **on** (an address must be proven before an account can sign
+  in with it, and Supabase links a Google identity automatically only to an account whose email is
+  confirmed: with *Confirm email* off, someone could create an unconfirmed account for your address
+  first and later share it). *Secure email change* on. *Email OTP expiration*: 900 seconds (15
+  minutes). *Email OTP length*: 6. The app itself never accepts a session it did not create through
+  its own sign-in (password, phone-OTP or implicit-flow sessions minted directly at Supabase are
+  refused by the database, migration 0074).
 - **Google**: in Google Cloud Console create an OAuth client ("Web application") whose
   *Authorized redirect URI* is `https://<project-ref>.supabase.co/auth/v1/callback`; paste its client
   id and secret here and enable Google.
 - **Phone**: only if you choose SMS verification (section 2.6). Otherwise leave it off.
 
-Authentication → **Emails** → *Magic Link* template: make sure it contains both
-`{{ .ConfirmationURL }}` (the link) and `{{ .Token }}` (the code people can type when they open the
-email on another device). For example: `Sign in: {{ .ConfirmationURL }} — or type this code: {{ .Token }}`.
+Authentication → **Emails**: edit **both** templates, *Magic Link* (existing users) and *Confirm
+signup* (a first sign-in creates the user and Supabase sends this one instead). Each must contain the
+app's link (NOT `{{ .ConfirmationURL }}`) and the code:
 
-Authentication → **Rate Limits**: the built-in email sender sends only a few emails per hour for
-the whole project. For more than a handful of sign-ups set up custom SMTP (Authentication → Emails →
-SMTP settings; e.g. Resend or Brevo free tier, needs a domain). All of the app's calls to Supabase
-come from Vercel's servers, so raise *Token verifications* and *Sign-ups and sign-ins* limits from
-their defaults if real users get "too many requests" (the app has its own per-person limits).
+```html
+<p><a href="{{ .SiteURL }}/sign-in/confirm?token_hash={{ .TokenHash }}&type=email">Sign in to DeluluMart</a></p>
+<p>Or type this code: {{ .Token }}</p>
+```
+
+Why: mail scanners open links in emails before people do. `{{ .ConfirmationURL }}` points at
+Supabase's own verify endpoint, which spends the one-time token on that first GET. The app's link
+only opens a page with a **Sign in** button; the token is redeemed when the person presses it (a
+POST from the browser that asked for the email), never on a GET. The page checks `type` and the
+token's format on the server. *Site URL* must be your app origin for `{{ .SiteURL }}` to be right.
+
+Authentication → **Rate Limits**: Supabase's limits are shared by EVERY user of the app. All of the
+app's calls to Supabase come from Vercel's servers, so Supabase sees a handful of Vercel addresses,
+not your players: its per-IP limits (*Sign-ups and sign-ins*, *Token verifications*, *OTP*) and the
+project's **email quota** are one pool for everybody, and one abuser can use them up for all. The app
+keeps its own per-person, per-network and per-address limits and a Turnstile check in front of every
+email and text message (section 2.7). Before real traffic:
+
+- set up **custom SMTP** (Authentication → Emails → SMTP settings; e.g. Resend or Brevo free tier,
+  needs a domain): the built-in sender sends only a few emails per hour for the whole project;
+- raise *Sign-ups and sign-ins*, *Token verifications* and *Email/SMS OTP* limits from their defaults
+  (the app's own limits are the ones that separate people);
+- **Attack Protection → Captcha protection: leave it OFF.** The app verifies Cloudflare Turnstile
+  itself; Supabase's captcha would need the same single-use token a second time and refuse sign-ins.
 
 Authentication → **Sessions**: nothing to set on the free plan. The app ends every session 7 days
 after sign-in itself (owner setting `auth.session_max_age_seconds`, section 6).
@@ -121,7 +163,11 @@ copy a **secret** key (`sb_secret_...`). The app uses only these new-style keys,
 
 - **`sms`** (default, costs money per message): Authentication → Providers → Phone: enable it and
   connect an SMS provider (Twilio, MessageBird, Vonage or Textlocal; Indian numbers usually need
-  sender registration). Keep its spend limit low.
+  sender registration). Keep its spend limit low. Set *SMS OTP Expiry* to **600** seconds: the app
+  releases a number someone asked a code for but never confirmed after the same 10 minutes
+  (`phone_code_lifetime_seconds`), so a squatted number is freed for its owner. The app also sends at
+  most 3 texts an hour and 5 a day to one number, whoever asks, and lets one account try at most 3
+  different numbers a day (5 in all before onboarding completes).
 - **`unverified`** (free at launch): no SMS. The app still allows only one account per phone number,
   but cannot tell whether the number is really the person's. After the migrations (section 4), run in
   Supabase's SQL editor:
@@ -129,17 +175,42 @@ copy a **secret** key (`sb_secret_...`). The app uses only these new-style keys,
   UPDATE core.deployment_setting SET value = 'unverified', updated_at = now()
    WHERE key = 'identity.phone_verification';
   ```
-  To go back: the same with `'sms'`. Only the owner can change this (no app login can).
+  To go back: the same with `'sms'`. Only the owner can change this (no app login can). A number
+  recorded this way is shown as **not verified**; if its real owner later confirms it by text message
+  (in `sms` mode) the number moves to them and the other account is asked for a number again (nothing
+  else about that account changes). Two unverified claims of one number: the first wins, but lapses
+  after 24 hours if that account has not finished onboarding.
+
+### 2.7 Bot protection: Cloudflare Turnstile
+
+The app asks for a Turnstile check before it sends a sign-in email, checks a typed email code, or
+sends a phone code. Production with `AUTH_PROVIDER=supabase` refuses to start without the two keys
+(unless `CAPTCHA=off` is set explicitly, which `/api/v1/admin/health` then reports as a warning).
+
+1. Cloudflare dashboard (a free account is enough) → **Turnstile** → **Add site** (or *Add widget*).
+2. *Site name*: DeluluMart. *Hostname*: your app's host name only, e.g. `delulumart.example` (no
+   `https://`, no path; add the `*.vercel.app` name too only if people use it). *Widget mode*:
+   **Managed**. Pre-clearance: no.
+3. Copy the **Site key** into Vercel as `TURNSTILE_SITE_KEY` (public: it is sent to browsers) and the
+   **Secret key** as `TURNSTILE_SECRET_KEY` (server-only; the build fails if it reaches browser code).
+   Store the secret in your password manager.
+4. After deploying: the sign-in page shows the check under the form, and `/api/v1/admin/health`
+   reports `captcha: "on"`.
+
+The server checks every token with Cloudflare (`https://challenges.cloudflare.com/turnstile/v0/siteverify`)
+with a 5-second timeout and refuses the request if Cloudflare cannot be reached (fail closed). A token
+works once, only for the action and the host name it was issued for.
 
 ## 3. Pre-flight check (your computer)
 
 ```bash
-export DATABASE_URL_OWNER='postgresql://postgres.<project-ref>:<database password>@aws-0-ap-south-1.pooler.supabase.com:5432/postgres'
 export DATABASE_CA_CERT_FILE=~/Downloads/prod-ca-2021.crt
 pnpm db:doctor
 ```
 
-(Type a space before `export DATABASE_URL_OWNER=...` so most shells keep it out of your history.)
+It asks for the owner connection string (Supabase → Connect → Session pooler, port 5432; the
+password may be left out) and then for the database password, at prompts that do not echo. (Or read
+`DATABASE_URL_OWNER` into the terminal first with the hidden `read` of section 1.)
 
 Before migrating, expect `INFO` for pending migrations and roles not created yet. Any **FAIL** must be
 fixed or reported first. **Safe to share**: the whole db:doctor output.
@@ -147,18 +218,18 @@ fixed or reported first. **Safe to share**: the whole db:doctor output.
 ## 4. Migrate (your computer)
 
 ```bash
- export APP_WEB_PASSWORD='<from your password manager>'
- export APP_PAY_PASSWORD='...'
- export APP_JOBS_PASSWORD='...'
 pnpm db:migrate:prod --confirm <project-ref>
 ```
 
-It prints the plan, asks you to type the project ref again, installs `btree_gist` and `pgcrypto` in
+It asks (prompts that do not echo) for the owner connection string and its password, then for
+`APP_WEB_PASSWORD`, `APP_PAY_PASSWORD` and `APP_JOBS_PASSWORD` from your password manager (paste
+each; empty keeps the current one). It prints the plan, asks you to type the project ref again, installs `btree_gist` and `pgcrypto` in
 the `extensions` schema, applies each migration in its own transaction, clears the API roles,
 sets the three login passwords (sent as salted verifiers; never printed), and runs the doctor.
 Expect **0 FAIL**. Re-running later applies only new migrations. **Safe to share**: the whole output.
 
-Then close the terminal (or `unset DATABASE_URL_OWNER APP_WEB_PASSWORD APP_PAY_PASSWORD APP_JOBS_PASSWORD`).
+Then close the terminal (if you read any of them into the environment:
+`unset DATABASE_URL_OWNER APP_WEB_PASSWORD APP_PAY_PASSWORD APP_JOBS_PASSWORD`).
 
 ## 5. Vercel settings and environment variables
 
@@ -190,9 +261,13 @@ Project → Settings:
 | `ANALYTICS_KEY` | step 1 | optional (no key: no analytics) |
 | `CRON_SECRET` | step 1 | Vercel Cron sends it as a bearer |
 | `TRUSTED_PROXY_HOPS` | the number `1` | Vercel's edge sets X-Forwarded-For |
+| `TURNSTILE_SITE_KEY` | Cloudflare → Turnstile (2.7) | public: sent to browsers |
+| `TURNSTILE_SECRET_KEY` | Cloudflare → Turnstile (2.7) | **server-only**; required in production with Supabase |
 
 Never set in Vercel: `DATABASE_URL_OWNER` (owner only, on your computer), `AUTH_PROVIDER=dev`,
-`RATE_LIMIT_MULTIPLIER`, `DEV_GEO`, `DATABASE_TLS=disable`. The app refuses to start with most of
+`RATE_LIMIT_MULTIPLIER`, `DEV_GEO`, `DATABASE_TLS=disable`, `TURNSTILE_VERIFY_URL` (local tests
+only). `CAPTCHA=off` only in an emergency (Cloudflare down for hours): it removes the bot protection
+and the health page warns. The app refuses to start with most of
 them in production, and the build fails if a secret ever appears in browser code.
 
 `GEO_SOURCE` needs no value on Vercel (it defaults to `vercel`).
@@ -207,7 +282,7 @@ them in production, and the build fails if a secret ever appears in browser code
 6. Open `https://<origin>/api/v1/admin/health` while signed in. Check: `authProvider: "supabase"`,
    `databaseTls: "verify-full"`, `databaseCaPinned: true`, `serverless: true`, `jobsEnabled: true`,
    `dailyCronEnabled: true`, `trustedProxyHops: 1`, the latest `migrationVersion`, your
-   `phoneVerification` choice. **Safe to share**: the whole JSON.
+   `phoneVerification` choice, `captcha: "on"` and `warnings: []`. **Safe to share**: the whole JSON.
 7. Buy something with your fictional money.
 
 Session lifetime (default 7 days) can be changed by the owner in the SQL editor:
@@ -219,13 +294,12 @@ Session lifetime (default 7 days) can be changed by the owner in the SQL editor:
 After you signed in once and finished the phone step:
 
 ```bash
- export DATABASE_URL_OWNER='postgresql://postgres.<project-ref>:...@aws-0-ap-south-1.pooler.supabase.com:5432/postgres'
 export DATABASE_CA_CERT_FILE=~/Downloads/prod-ca-2021.crt
 pnpm admin:grant --confirm <project-ref>
 ```
 
-It asks for `IDENTITY_KEY` (not shown while you type; the same value as in Vercel), then the email
-address, and the project ref again. It never prints or stores the email or the key. There is only
+It asks for the owner connection string and password, `IDENTITY_KEY` (the same value as in Vercel)
+and the email address, all at prompts that do not echo, then the project ref again. It never prints or stores the email or the key. There is only
 ever one Super Admin; running it for another email moves the role. **Safe to share**: its output.
 
 ## 8. Scheduled jobs
@@ -239,6 +313,10 @@ ever one Super Admin; running it for another email moves the role. **Safe to sha
   same value as `JOBS_SIGNING_KEY`). The workflow `.github/workflows/jobs-scheduler.yml` then runs
   every 10 minutes (GitHub may delay or skip scheduled runs under load; every job is safe to run
   late, twice, or not at all for a while). Actions → *jobs-scheduler* → *Run workflow* runs it now.
+  The run's log shows only `HTTP <status>; listings screened: <n>`, never the job report. Keep the
+  repository **private** if you can (a public repository's Actions logs are public); the workflow has
+  no `pull_request` trigger (a fork's pull request can never run it with your secrets) and its token
+  has no permissions.
 - Check: `/api/v1/admin/health` → `jobsLastRunAt` moves forward.
 
 ## 9. Verify on first deploy
@@ -250,7 +328,7 @@ real services. Check each once; `pnpm db:doctor` and `/api/v1/admin/health` cove
    one privilege on **every** table and sequence in `auth` (migrations 0001 and 0047 revoke on all
    of them and fail with "permission denied" otherwise), SELECT on `auth.users` / `auth.sessions`,
    REFERENCES on `auth.users`.
-2. (doctor) `auth.users` has `id, banned_until, deleted_at, phone_confirmed_at, created_at`;
+2. (doctor) `auth.users` has `id, banned_until, deleted_at, phone, phone_confirmed_at, is_anonymous, created_at`;
    `auth.sessions` has `id, user_id, not_after, created_at`.
 3. (doctor) `postgres` may DELETE from `auth.sessions` (WARN if not: sign-out still works through
    `core.ended_session`, the Supabase row stays).
@@ -286,6 +364,44 @@ real services. Check each once; `pnpm db:doctor` and `/api/v1/admin/health` cove
     them out on their next request.
 18. Supabase links a Google identity to an existing email account with the same verified address
     automatically; the app treats them as one account.
+19. **Both** email templates (*Magic Link* and *Confirm signup*) carry the app's
+    `{{ .SiteURL }}/sign-in/confirm?token_hash={{ .TokenHash }}&type=email` link and `{{ .Token }}`:
+    sign in once with a NEW address and once with an existing one; each email has both, the link
+    opens the page with the **Sign in** button, and pressing it signs in.
+20. **Which template new `/otp` users get**: the first email to a new address is the *Confirm signup*
+    template (not *Magic Link*); check that it arrives with the code and the app's link (19).
+21. **`/verify` with `type: "email"`** returns a session both for a typed code and for a
+    `token_hash`, also for a sign-in started with PKCE (`code_challenge` on `/otp`). If the link
+    fails but the code works, try `type=magiclink` in the template for existing users and
+    `type=signup` in *Confirm signup* (the app accepts all three).
+22. **Link scanners**: forward a sign-in email through a scanning mail service (e.g. a work
+    Microsoft 365 or Gmail account) and check the link still signs in after the scanner opened it
+    (it only opens the page; nothing is redeemed on a GET).
+23. **Automatic identity linking with unconfirmed emails** (pre-account takeover): with *Confirm
+    email* on, create a password user for an address you own through Supabase's API without
+    confirming it, then sign in with Google for that address: the two must NOT be merged into one
+    account that the password holder can use. Keep *Confirm email* on, *Manual linking* off,
+    *Anonymous sign-ins* off; the app refuses sessions it did not create (0074).
+24. **Admin PUT phone conflict behaviour**: `PUT /admin/users/{id}` with another user's number
+    answers 422 (the app then releases only an UNCONFIRMED hold older than 10 minutes and retries);
+    `PUT` with `{"phone": ""}` clears an unconfirmed number. Check in Authentication → Users that a
+    released number disappears from the squatting user; if Supabase ignores the empty number, the
+    logs show `[auth] phone hold not released` and the number stays held until you remove it there.
+25. **Per-IP limits vs Vercel egress**: Supabase counts every user against Vercel's few outbound
+    addresses (2.4); raise its limits and use custom SMTP before real traffic.
+26. **X-Forwarded-For overwrite**: Vercel replaces (does not append to) a client-sent
+    `X-Forwarded-For`, so `TRUSTED_PROXY_HOPS=1` reads the real client address: send a request with
+    a forged `X-Forwarded-For: 1.2.3.4` and check (rate limits, analytics place) that it is ignored.
+27. **`app_*` logins through the pooler**: `app_web.<ref>`, `app_pay.<ref>` and `app_jobs.<ref>`
+    log in through the transaction pooler (port 6543) with their own passwords and keep their role
+    settings (doctor `login.*` lines).
+28. **`postgres` can DELETE `auth.sessions`** (doctor item 3; WARN is acceptable) and can SELECT
+    `auth.users.phone` / `phone_confirmed_at` (the phone-holder lookup of 0075 needs it).
+29. **Repository visibility for Actions logs**: the repository is private, or you accept that the
+    jobs-scheduler log (status and one count only) is public.
+30. **Turnstile**: the widget loads on `/sign-in` (CSP allows `https://challenges.cloudflare.com` for
+    scripts and frames on the challenge pages only), Cloudflare's siteverify answers your host name
+    and the action (`email_start`, `email_verify`, `phone_code`), and Supabase's own captcha is off.
 
 ## 10. Errors and what to send back
 
@@ -298,7 +414,9 @@ real services. Check each once; `pnpm db:doctor` and `/api/v1/admin/health` cove
 | `FAIL api.*` | an API role can still read app tables | the whole doctor output |
 | Vercel build: `check-client-bundle: server secrets found` | a server value reached browser code | the build log lines (they name files, not values) |
 | Vercel function log: `Invalid server configuration ...: X is required` | a missing or malformed variable `X` | that line (it never contains values) |
-| `/sign-in?error=link` after clicking the email | link expired, used twice, opened in another browser, or a token check failed | the Vercel log lines starting `[auth]` |
+| "That sign-in link did not work" after pressing **Sign in** | link expired, used twice, opened in another browser, or a token check failed | the Vercel log lines starting `[auth]` |
+| Sign-in or phone step: "Complete the check below" | Turnstile token missing, expired or refused | the Vercel log lines starting `[captcha]` |
+| Phone step: "We couldn't send a code to that number right now" | the number is held by another account, a text limit, or the SMS provider refused | the `[auth] phone code not sent` log lines (they name a reason, never a number) |
 | `/sign-in?error=busy` | Supabase or the database did not answer | the `[auth]` / `[db:...]` log lines |
 | Log `[auth] access token refused KEY` | JWKS unreachable or a key id the project does not publish | that line; check JWT Keys (2.4) |
 | Log `[auth] access token refused ISSUER` / `AUDIENCE` | `SUPABASE_URL` differs from the project | check `SUPABASE_URL` |
@@ -321,6 +439,8 @@ or a full Vercel environment export.
   delete the old key in Supabase.
 - **JOBS_SIGNING_KEY**: change it in Vercel and in the GitHub secret at the same time.
 - **CRON_SECRET**, **ANALYTICS_KEY** (analytics visitor keys restart): change and redeploy.
+- **TURNSTILE_SECRET_KEY**: Cloudflare → Turnstile → the site → *Rotate secret key*; put the new one
+  in Vercel and redeploy (Cloudflare keeps the old one valid for a while).
 - **JWT signing key**: rotate in Supabase (create standby key → make it current); the app re-reads
   the public keys within minutes. Revoke the old key only after an hour (signed-in sessions are not
   affected: the app does not keep tokens).
@@ -339,7 +459,5 @@ or a full Vercel environment export.
 
 ## 13. Recommended next
 
-- Bot protection (Cloudflare Turnstile) on email sign-in and the phone step, before opening sign-ups
-  widely (SMS pumping costs money in `sms` mode).
-- Custom SMTP for sign-in emails; a custom domain.
+- Custom SMTP for sign-in emails (required before real traffic, 2.4); a custom domain.
 - An uptime monitor on `/api/health`.

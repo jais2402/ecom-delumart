@@ -11,6 +11,11 @@ export interface RateHitInput {
   subject: Uint8Array;
   windowSeconds: number;
   maxHits: number;
+  /**
+   * A 32-byte digest of the client's network (the IPv6 /48) for an address subject; the database
+   * caps how many distinct live subjects one network may create (migration 0076). Omit otherwise.
+   */
+  net?: Uint8Array | null;
 }
 
 /**
@@ -27,11 +32,12 @@ export async function rateHit(
     return await withTransaction(
       pool,
       async (c) => {
-        const { rows } = await c.query<{ ok: boolean }>("SELECT core.rate_hit($1, $2, $3, $4) AS ok", [
+        const { rows } = await c.query<{ ok: boolean }>("SELECT core.rate_hit($1, $2, $3, $4, $5) AS ok", [
           input.scope,
           Buffer.from(input.subject),
           input.windowSeconds,
           input.maxHits,
+          input.net ? Buffer.from(input.net) : null,
         ]);
         return rows[0]?.ok === true;
       },

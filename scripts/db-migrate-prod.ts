@@ -2,10 +2,11 @@
  * pnpm db:migrate:prod --confirm <project-ref> — applies the pending migrations to the production
  * database, from the owner's own terminal.
  *
- *   DATABASE_URL_OWNER='postgresql://postgres.<ref>:<password>@aws-0-ap-south-1.pooler.supabase.com:5432/postgres' \
- *   DATABASE_CA_CERT_FILE=~/Downloads/prod-ca-2021.crt \
- *   APP_WEB_PASSWORD=… APP_PAY_PASSWORD=… APP_JOBS_PASSWORD=… \
- *   pnpm db:migrate:prod --confirm <project-ref>
+ *   DATABASE_CA_CERT_FILE=~/Downloads/prod-ca-2021.crt pnpm db:migrate:prod --confirm <project-ref>
+ *
+ * It asks (prompts that do not echo) for the owner connection string and its password, and for the
+ * three login passwords APP_WEB_PASSWORD, APP_PAY_PASSWORD, APP_JOBS_PASSWORD (empty: unchanged),
+ * unless they are in this terminal's environment; with --yes nothing is asked.
  *
  * 1. refuses unless --confirm names the project in DATABASE_URL_OWNER (and never on Vercel);
  * 2. prints the plan (the pending migrations) and asks you to type the project ref again
@@ -40,7 +41,18 @@ const ROLE_PASSWORDS = [
 ] as const;
 
 async function main(): Promise<void> {
-  const { url, target } = ownerTarget({ requireConfirm: true });
+  const { url, target } = await ownerTarget({ requireConfirm: true });
+  // the login passwords: from this terminal's environment, or typed at prompts that do not echo
+  if (!hasFlag("--yes") && process.stdin.isTTY) {
+    for (const [role, variable] of ROLE_PASSWORDS) {
+      if (process.env[variable] !== undefined) continue;
+      const typed = await ask(
+        `${variable} for ${role} (not shown; leave empty to keep the current password): `,
+        true,
+      );
+      if (typed !== "") process.env[variable] = typed;
+    }
+  }
   for (const [, variable] of ROLE_PASSWORDS) {
     const value = process.env[variable];
     if (value !== undefined && !strongPassword(value)) {

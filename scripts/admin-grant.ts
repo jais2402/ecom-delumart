@@ -3,14 +3,15 @@
  * terminal (never through the web app). The account must have signed in on the site and finished
  * the phone step first (that creates its profile).
  *
- *   DATABASE_URL_OWNER='postgresql://postgres.<ref>:<password>@aws-0-ap-south-1.pooler.supabase.com:5432/postgres' \
  *   DATABASE_CA_CERT_FILE=~/Downloads/prod-ca-2021.crt pnpm admin:grant --confirm <project-ref>
+ * It asks for the owner connection string and its password at prompts that do not echo (or reads
+ * DATABASE_URL_OWNER, with or without the password, from this terminal).
  *
  * It asks for IDENTITY_KEY (hidden; the same value as in Vercel) and the email address, computes
  * the keyed email fingerprint here (the database stores only that), and marks that profile
  * SUPER_ADMIN; any previous Super Admin becomes a player. The email and key are never printed,
- * stored or sent anywhere but into this computation. ADMIN_EMAIL and IDENTITY_KEY may instead be
- * set in this terminal's environment.
+ * stored or sent anywhere but into this computation; both prompts do not echo. ADMIN_EMAIL and
+ * IDENTITY_KEY may instead be set in this terminal's environment (the runbook shows a hidden `read`).
  */
 import { fingerprint, normalizeEmail } from "../packages/core/src/identity/index.ts";
 import { grantSuperAdmin } from "../packages/db/src/prod-tools.ts";
@@ -26,12 +27,13 @@ import {
 } from "./lib/owner-terminal.ts";
 
 async function main(): Promise<void> {
-  const { url, target } = ownerTarget({ requireConfirm: true });
+  const { url, target } = await ownerTarget({ requireConfirm: true });
   say(`admin:grant: ${describeTarget(target)}`);
   const key = process.env.IDENTITY_KEY ?? (await ask("IDENTITY_KEY (64 hex characters, not shown): ", true));
   if (!/^[0-9a-fA-F]{64}$/.test(key)) fail("That is not a 64-character hex key.");
   const rawEmail =
-    process.env.ADMIN_EMAIL ?? (await ask("Email address of the account to make Super Admin: "));
+    process.env.ADMIN_EMAIL ??
+    (await ask("Email address of the account to make Super Admin (not shown): ", true));
   let fp: Buffer;
   try {
     fp = Buffer.from(fingerprint(Buffer.from(key, "hex"), normalizeEmail(rawEmail)), "hex");

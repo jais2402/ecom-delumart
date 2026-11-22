@@ -24,10 +24,11 @@ import { randomBytes } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createCheckoutSession, createPaymentAttempt } from "../src/checkout";
-import { endSession } from "../src/deployment";
+import { endSession, registerAppSession } from "../src/deployment";
 import { runDoctor } from "../src/doctor";
 import { listMigrations, migrate } from "../src/migrate";
 import { recordPhoneVerified } from "../src/onboarding";
+import { authPhoneHolder } from "../src/phone";
 import { sessionActor } from "../src/session-actor";
 import {
   authenticateCard,
@@ -174,6 +175,8 @@ describe("Supabase-shaped database: the migrations as a non-superuser owner, the
       sessionId,
       userId,
     ]);
+    // the web server accepts it after verifying the token (0074)
+    await platform.query("SELECT core.register_app_session($1, $2)", [sessionId, userId]);
     return { userId, sessionId };
   }
 
@@ -284,6 +287,71 @@ describe("Supabase-shaped database: the migrations as a non-superuser owner, the
     expect(await sessionActor(platform, { authSessionId: d.sessionId })).toBeNull();
   });
 
+  it("ninth review, minor 4: a session minted at the platform but never accepted by the web server, or an anonymous user's, signs nobody in", async () => {
+    const userId = uuidv7();
+    const sessionId = uuidv7();
+    await platform.query(
+      "INSERT INTO auth.users (id, aud, role) VALUES ($1, 'authenticated', 'authenticated')",
+      [userId],
+    );
+    await platform.query("INSERT INTO auth.sessions (id, user_id, created_at) VALUES ($1, $2, now())", [
+      sessionId,
+      userId,
+    ]);
+    expect(await sessionActor(platform, { authSessionId: sessionId })).toBeNull();
+    const anon = uuidv7();
+    const anonSession = uuidv7();
+    await platform.query(
+      "INSERT INTO auth.users (id, aud, role, is_anonymous) VALUES ($1, 'authenticated', 'authenticated', true)",
+      [anon],
+    );
+    await platform.query("INSERT INTO auth.sessions (id, user_id, created_at) VALUES ($1, $2, now())", [
+      anonSession,
+      anon,
+    ]);
+    expect(await registerAppSession(platform, { authSessionId: anonSession, userId: anon })).toBe(false);
+    expect(await sessionActor(platform, { authSessionId: anonSession })).toBeNull();
+    expect(await registerAppSession(platform, { authSessionId: sessionId, userId })).toBe(true);
+    expect((await sessionActor(platform, { authSessionId: sessionId }))?.userId).toBe(userId);
+  });
+
+  it("ninth review, major 1: core.auth_phone_holder names only an UNCONFIRMED holder older than the code lifetime, never a confirmed one or the caller", async () => {
+    const victim = await signUp();
+    const fp = randomBytes(32);
+    const holderOf = (phone: string) =>
+      authPhoneHolder(platform, {
+        authSessionId: victim.sessionId,
+        phoneDigits: phone,
+        phoneFingerprint: fp,
+      });
+    const squatter = await signUp();
+    await platform.query("UPDATE auth.users SET phone = '919800000001', created_at = now() WHERE id = $1", [
+      squatter.userId,
+    ]);
+    expect(await holderOf("919800000001")).toBeNull(); // young
+    await platform.query("UPDATE auth.users SET created_at = now() - interval '11 minutes' WHERE id = $1", [
+      squatter.userId,
+    ]);
+    expect(await holderOf("919800000001")).toBe(squatter.userId);
+    // a hold the server recorded for that number counts from when it set it
+    await owner.query("INSERT INTO core.phone_hold (user_id, phone_fp, set_at) VALUES ($1, $2, now())", [
+      squatter.userId,
+      fp,
+    ]);
+    expect(await holderOf("919800000001")).toBeNull();
+    const confirmed = await signUp();
+    await platform.query(
+      "UPDATE auth.users SET phone = '919800000002', phone_confirmed_at = now(), created_at = now() - interval '1 day' WHERE id = $1",
+      [confirmed.userId],
+    );
+    expect(await holderOf("919800000002")).toBeNull();
+    await platform.query(
+      "UPDATE auth.users SET phone = '919800000003', created_at = now() - interval '1 day' WHERE id = $1",
+      [victim.userId],
+    );
+    expect(await holderOf("919800000003")).toBeNull(); // the caller itself
+  });
+
   it("sign-out without DELETE on auth.sessions: the session ends here, the platform's row stays", async () => {
     const a = await signUp();
     await endSession(platform, { authSessionId: a.sessionId });
@@ -309,7 +377,8 @@ describe("Supabase-shaped database: the migrations as a non-superuser owner, the
     );
     try {
       const b = await signUp();
-      await expect(record(b.sessionId)).resolves.toMatchObject({ phoneVerified: true });
+      // ninth review, major 1: recorded, but not reported as verified
+      await expect(record(b.sessionId)).resolves.toMatchObject({ phoneRecorded: true, phoneVerified: false });
       const { rows } = await owner.query<{ v: boolean }>(
         "SELECT phone_verified AS v FROM core.user_profile WHERE id = $1",
         [b.userId],

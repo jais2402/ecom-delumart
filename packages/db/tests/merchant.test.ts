@@ -205,6 +205,8 @@ describe("the merchant side", () => {
         idempotencyKey: key(),
       });
       expect(["SELF_PURCHASE", "COUPON_NOT_APPLICABLE"]).toContain(await codeOf(owner));
+      // ninth review, minor 5: redemptions reach the seller once the order's minute has ended
+      await aMinuteLater(pool);
       const mine = (await myCoupons(pool, as(c.u))).items.find((i) => i.couponId === pub.couponId);
       expect(mine).toMatchObject({ redeemed: 1, discountGivenPaise: 1_000n * RUPEE });
     });

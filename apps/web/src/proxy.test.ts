@@ -4,7 +4,13 @@ import { fileURLToPath } from "node:url";
 import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 import { config, proxy } from "./proxy";
-import { contentSecurityPolicy, isPrivatePage, PRIVATE_PAGE_PREFIXES } from "./server/page-headers";
+import {
+  CHALLENGE_PAGES,
+  contentSecurityPolicy,
+  isPrivatePage,
+  PRIVATE_PAGE_PREFIXES,
+  usesChallenge,
+} from "./server/page-headers";
 
 const APP = fileURLToPath(new URL("./app", import.meta.url));
 const ORIGIN = "https://app.delulu.test";
@@ -71,7 +77,8 @@ describe("page headers (fifth security review: CSP and private page caching)", (
       const nonce = /'nonce-([^']+)'/.exec(csp)?.[1] ?? "";
       expect(nonce.length).toBeGreaterThanOrEqual(22);
       expect(b.headers.get("content-security-policy")).not.toBe(csp);
-      expect(csp).toBe(contentSecurityPolicy(nonce, false));
+      // ninth review, major 2a: only the challenge pages may load Turnstile
+      expect(csp).toBe(contentSecurityPolicy(nonce, false, usesChallenge(path)));
       // the renderer receives the same policy (it reads the nonce from it)
       expect(a.headers.get("x-middleware-request-content-security-policy")).toBe(csp);
       const isPrivate = PRIVATE_SECTIONS.has(path.split("/")[1] ?? "");
@@ -104,6 +111,34 @@ describe("page headers (fifth security review: CSP and private page caching)", (
     expect(d["object-src"]).toBe("'none'");
     expect(csp).not.toMatch(/unsafe-eval|ws:|\*/);
     expect(d["script-src"]).not.toContain("unsafe-inline");
+  });
+
+  it("ninth review, major 2a: the challenge pages add Cloudflare's challenge origin to script-src and frame-src, and nothing else; other pages do not", () => {
+    const plain = contentSecurityPolicy("AAAAAAAAAAAAAAAAAAAAAA==", false, false);
+    const challenge = contentSecurityPolicy("AAAAAAAAAAAAAAAAAAAAAA==", false, true);
+    const d = Object.fromEntries(
+      challenge.split("; ").map((x) => [x.split(" ")[0], x.split(" ").slice(1).join(" ")]),
+    );
+    expect(d["script-src"]).toBe(
+      "'self' 'nonce-AAAAAAAAAAAAAAAAAAAAAA==' 'strict-dynamic' https://challenges.cloudflare.com",
+    );
+    expect(d["frame-src"]).toBe("https://challenges.cloudflare.com");
+    expect(d["connect-src"]).toBe("'self'");
+    expect(
+      challenge
+        .replace(" https://challenges.cloudflare.com", "")
+        .replace("frame-src https://challenges.cloudflare.com; ", ""),
+    ).toBe(plain);
+    expect(plain).not.toContain("cloudflare");
+    expect([...CHALLENGE_PAGES]).toEqual(["/sign-in", "/onboarding/phone", "/onboarding/verify"]);
+    for (const p of CHALLENGE_PAGES) {
+      expect(run(p).headers.get("content-security-policy")).toContain(
+        "frame-src https://challenges.cloudflare.com",
+      );
+    }
+    for (const p of ["/", "/account", "/sign-in/confirm", "/onboarding/birthdate"]) {
+      expect(run(p).headers.get("content-security-policy")).not.toContain("cloudflare");
+    }
   });
 
   it("development adds only what the dev server needs (eval for React debugging, the websocket, inline dev styles)", () => {

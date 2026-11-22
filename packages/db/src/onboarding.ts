@@ -9,7 +9,15 @@ import { asPay, one } from "./command";
 
 export interface OnboardingStatus {
   hasProfile: boolean;
+  /**
+   * True only for a number confirmed by SMS (or by the trusted local stand-in); a number recorded
+   * in 'unverified' mode is false (ninth review, major 1).
+   */
   phoneVerified: boolean;
+  /** The phone step is done: a number is recorded, confirmed or not. */
+  phoneRecorded: boolean;
+  /** The account's unverified number was released to its confirmed owner: ask for a number again. */
+  phoneReverifyRequired: boolean;
   hasBirthdate: boolean;
   isAdult: boolean;
   provisioned: boolean;
@@ -35,12 +43,16 @@ export async function onboardingStatus(
       is_adult: boolean;
       provisioned: boolean;
       pin_set: boolean;
+      phone_recorded: boolean;
+      phone_reverify_required: boolean;
     }>("SELECT * FROM core.onboarding_status()");
     const r = rows[0];
     if (!r) throw new Error("onboarding_status returned nothing");
     return {
       hasProfile: r.has_profile,
       phoneVerified: r.phone_verified,
+      phoneRecorded: r.phone_recorded,
+      phoneReverifyRequired: r.phone_reverify_required,
       hasBirthdate: r.has_birthdate,
       isAdult: r.is_adult,
       provisioned: r.provisioned,

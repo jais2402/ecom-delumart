@@ -3,14 +3,28 @@ import pg from "pg";
 import { describe, expect, it } from "vitest";
 import {
   confirmTarget,
+  connectionHasPassword,
   grantSuperAdmin,
   parseOwnerTarget,
   scramSha256Verifier,
   strongPassword,
+  withConnectionPassword,
 } from "../src/prod-tools";
 import { ADMIN_URL, createTestDatabase, provisionAccount, provisionInput } from "./helpers";
 
 describe("owner-terminal tools: target, confirmation, passwords", () => {
+  it("ninth review, minor 6a: the owner connection string may come without its password, which is then typed at a hidden prompt and URL-encoded in", () => {
+    const bare =
+      "postgresql://postgres.abcdefghijklmnopqrst@aws-0-ap-south-1.pooler.supabase.com:5432/postgres";
+    expect(connectionHasPassword(bare)).toBe(false);
+    const full = withConnectionPassword(bare, "p@ss:w/rd #1");
+    expect(connectionHasPassword(full)).toBe(true);
+    const u = new URL(full);
+    expect(decodeURIComponent(u.password)).toBe("p@ss:w/rd #1");
+    expect(u.username).toBe("postgres.abcdefghijklmnopqrst");
+    expect(u.host).toBe("aws-0-ap-south-1.pooler.supabase.com:5432");
+  });
+
   it("reads the project ref from a direct connection host and from a pooler user name", () => {
     const direct = parseOwnerTarget(
       "postgresql://postgres:secret@db.abcdefghijklmnopqrst.supabase.co:5432/postgres",

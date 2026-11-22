@@ -1,6 +1,6 @@
 # Build status
 
-What exists in the codebase, what has been verified, and what is not built. Updated 21 November 2026.
+What exists in the codebase, what has been verified, and what is not built. Updated 22 November 2026.
 
 ## How to check it yourself
 
@@ -72,7 +72,7 @@ node tests/a11y/audit.js
 |---|---|---|
 | Design system (Daydream) | Tokens for light and dark; atoms, molecules, organisms and page layouts following atomic design | 354 component tests; scripted accessibility audit with 0 issues |
 | Domain logic (`core`) | Money, the pricing function, card numbers, PIN rules, identity, delivery schedule, progression, passport quiz, text screening, handle rules including look-alike checks, listing rules | 374 unit and property tests |
-| Database (`db`) | 67 migrations (numbered to 0073). Ledger with zero-sum, append-only and sealing rules; row-level security on every table; application roles with no direct writes to money, order, stock or identity tables; all commands as owner-defined functions; acting user derived from a live sign-in session | 980 tests on PostgreSQL, including attack-replay suites from eight review rounds |
+| Database (`db`) | 71 migrations (numbered to 0077). Ledger with zero-sum, append-only and sealing rules; row-level security on every table; application roles with no direct writes to money, order, stock or identity tables; all commands as owner-defined functions; acting user derived from a live sign-in session | 1,001 tests on PostgreSQL, including attack-replay suites from nine review rounds |
 | Money path | Provisioning, checkout and all-or-nothing pay for multi-seller carts with merchant coupons, stock units, ownership, shipments, creator unlock, relief, company registration, idempotency, per-actor limits | Race tests (last unit, overspend, same key ×10, coupon cap) |
 | Card PIN | Set, change, reset and verify inside the database with limits and lockout; the database never sees a PIN | PIN suite including parallel guesses |
 | Cart | Storage, add, remove, clear, sign-in merge, priced preview sharing one pricing path with checkout | 50-random-cart preview-equals-checkout test |
@@ -81,15 +81,15 @@ node tests/a11y/audit.js
 | Analytics | Events with no user id, session, address or search text; a visitor key that rotates daily; place taken from the host's location headers; places under 10 daily visitors folded into their parent; daily rollups; money and order figures read from real tables, not browser events; opted-out accounts and browsers sending a do-not-track signal produce no events | Analytics suites in db and web; dashboards loaded as a real Super Admin against seeded data |
 | Delivery addresses | Up to 5 per player, encrypted on the web server, chosen at checkout with the fictional spot pre-selected, copied onto the order, never shown to sellers, never affecting price; deleting one wipes it from past orders | Address suites; address journey |
 | Jobs | Signed, replay-protected jobs endpoint; the jobs database role has no direct table access and works only through seven narrow functions; watchdog with a 5-second floor | Generated privilege test over every application table |
-| Web server | Typed configuration with server-only secrets, separate database pools per role, opaque session cookie, session-bound CSRF token and origin check, uniform error envelope, database-backed rate limits, content security policy with per-request nonce, private pages uncacheable | 433 web tests against PostgreSQL; production build checked for secrets in browser code |
+| Web server | Typed configuration with server-only secrets, separate database pools per role, opaque session cookie, session-bound CSRF token and origin check, uniform error envelope, database-backed rate limits, content security policy with per-request nonce, private pages uncacheable | 462 web tests against PostgreSQL; production build checked for secrets in browser code |
 | Screens | Storefront, sign-in and onboarding, cart, checkout, receipt and tracking, account, selling hub, passport, shop registration, public shop page, studio (products, orders, earnings, inventory, coupons, appeals), console (moderation, reports, analytics) | Seven browser journeys (21, 19, 15, 17, 15, 10 and 9 steps) |
 | Process | Standards, test catalogue, review mechanism, project agents with model tiers | `docs/engineering-standards.md`, `CLAUDE.md`, `.claude/agents/` |
 
-Total: 2,141 automated tests passing; lint, typecheck and production build clean.
+Total: 2,191 automated tests passing; lint, typecheck and production build clean.
 
 ## Security review history
 
-Eight independent adversarial reviews, each followed by a fix round with tests that replay the attacks.
+Nine independent adversarial reviews, each followed by a fix round with tests that replay the attacks.
 
 | Round | Outcome |
 |---|---|
@@ -104,14 +104,16 @@ Eight independent adversarial reviews, each followed by a fix round with tests t
 
 | 8 | No blocker. Majors: sellers could read exact order times and buyer-side ids by direct SQL; raw analytics events could be tied to a person by someone with full database access |
 
-**Not independently reviewed:** the ninth fix round (migrations 0060–0063), delivery addresses (0058), and the Supabase sign-in and deployment work (0070–0073).
+| 9 | No blocker. Majors: a person could claim someone else's phone number and lock them out of it; sign-in could be shut down for one person or for everyone. Covered delivery addresses, Supabase sign-in and deployment |
+
+**Not independently reviewed:** the tenth fix round (migrations 0074–0077): phone-claim release, the Turnstile check, per-network sign-in limits, app-registered sessions, the sign-in link confirmation page and the extra seller-timing revokes.
 
 ## Not built
 
 | Area | Missing |
 |---|---|
 | Real sign-in | Built (email link, email code, Google, optional SMS) and tested against a local fake of Supabase only. It has never run against a real Supabase project. |
-| Deployment | Scripts, Vercel configuration, a scheduled-jobs workflow and `docs/deploy-runbook.md` exist. The migrations have never run on real Supabase; the runbook lists 18 assumptions to verify on first deploy. No captcha on sign-in. |
+| Deployment | Scripts, Vercel configuration, a scheduled-jobs workflow and `docs/deploy-runbook.md` exist. The migrations have never run on real Supabase; the runbook lists 30 assumptions to verify on first deploy. The Turnstile check on sign-in and phone steps has only run against a local stand-in; Cloudflare's own widget has never loaded. |
 | Back office | Console configuration areas (catalogue, delivery, payments, platform coupons). Analytics has no hourly figures and no export. |
 | Payments | DeluluPay ID and net banking methods, platform coupons, membership, warehouse purchases, reversals |
 | Shopping extras | Public shelf, share cards, Express on seed products |
@@ -129,7 +131,9 @@ Eight independent adversarial reviews, each followed by a fix round with tests t
 - **Owner publishing while publication is off** stays blocked; only the Super Admin's approve and restore work during a pause.
 - **Not exercised:** load testing, a restore drill, deployment, real Supabase, two-seller carts in the browser.
 - **Usage by place needs the host's location headers,** which exist only once deployed on Vercel; locally everything is "Unknown location" unless `DEV_GEO` is set or synthetic data is seeded with `SEED_ANALYTICS=1 pnpm dev:setup`.
-- **A seller can still time a sale** by watching their own stock count or wallet balance, which change the instant an order is paid. The order itself appears only after its minute ends.
+- **A seller can still time a sale** by watching their own wallet balance, which must be live because it pays for their purchases. Anyone can see a product's stock band (in stock, low, sold out) and an exclusive edition's issued count change at the moment of a sale. Exact stock, coupon use and the order itself appear only after the minute ends.
+- **One number per account, first claim wins, in unverified phone mode.** A claim by an account that has not finished onboarding lapses after 24 hours; a later SMS-confirmed claim always wins.
+- **One web test (`eighth-review`, studio rate limit) failed once in five full runs** and passed alone every time; cause not confirmed.
 - **The purchase funnel's last step counts purchases, not people.** Place data rolled up before migration 0061 shows as suppressed.
 - **Browser journeys assume a fresh local database.** After many runs, test listings crowd seeded products off the first catalogue page and three journeys fail at setup; drop `delulu_dev` and run `pnpm dev:setup` again.
 - **One browser journey (`selling.spec`) timed out once** in a round 7 run and passed on every re-run; treated as flaky, cause not found.

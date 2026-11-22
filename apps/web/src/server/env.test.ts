@@ -21,6 +21,9 @@ function valid(overrides: Record<string, string | undefined> = {}): Record<strin
     SUPABASE_URL: "https://abcdefghijklmnopqrst.supabase.co",
     SUPABASE_PUBLISHABLE_KEY: "sb_publishable_Abc123def456ghi789",
     SUPABASE_SECRET_KEY: "sb_secret_Zyx987wvu654tsr321qpo",
+    // ninth review, major 2a: production with Supabase needs Turnstile (or CAPTCHA=off)
+    TURNSTILE_SITE_KEY: "0x4AAAAAAAexampleSiteKey",
+    TURNSTILE_SECRET_KEY: "0x4AAAAAAAexampleSecretKeyNotReal00",
     ...overrides,
   };
 }
@@ -354,5 +357,60 @@ describe("deployment configuration (Vercel + Supabase)", () => {
       "0123456789ab",
     );
     expect(parseEnv(prod({ VERCEL_GIT_COMMIT_SHA: "not a sha" })).commit).toBeNull();
+  });
+});
+
+describe("ninth review, major 2a: Cloudflare Turnstile configuration", () => {
+  const production = (overrides: Record<string, string | undefined> = {}) =>
+    valid({ NODE_ENV: "production", AUTH_PROVIDER: "supabase", DATABASE_URL_OWNER: undefined, ...overrides });
+
+  it("major 2a: production with AUTH_PROVIDER=supabase requires both keys unless CAPTCHA=off is set explicitly", () => {
+    const ok = parseEnv(production());
+    expect(ok.captcha).toEqual({
+      siteKey: "0x4AAAAAAAexampleSiteKey",
+      secretKey: "0x4AAAAAAAexampleSecretKeyNotReal00",
+      verifyUrl: "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    });
+    expect(ok.captchaOff).toBe(false);
+    const none = { TURNSTILE_SITE_KEY: undefined, TURNSTILE_SECRET_KEY: undefined };
+    expect(() => parseEnv(production(none))).toThrow(
+      /TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY are required/,
+    );
+    const off = parseEnv(production({ ...none, CAPTCHA: "off" }));
+    expect(off.captcha).toBeNull();
+    expect(off.captchaOff).toBe(true);
+    // CAPTCHA=off wins over configured keys
+    expect(parseEnv(production({ CAPTCHA: "off" })).captcha).toBeNull();
+    // development without keys: no challenge
+    expect(parseEnv(valid(none)).captcha).toBeNull();
+  });
+
+  it("major 2a: the two keys come together; Cloudflare's public test secrets are refused in production, never echoed", () => {
+    expect(() => parseEnv(valid({ TURNSTILE_SECRET_KEY: undefined }))).toThrow(/set together/);
+    const testSecret = "1x0000000000000000000000000000000AA";
+    let message = "";
+    try {
+      parseEnv(
+        production({ TURNSTILE_SITE_KEY: "1x00000000000000000000AA", TURNSTILE_SECRET_KEY: testSecret }),
+      );
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain("TURNSTILE_SECRET_KEY is one of Cloudflare's public test keys");
+    expect(message).not.toContain(testSecret);
+    // development and tests may use them
+    expect(
+      parseEnv(valid({ TURNSTILE_SITE_KEY: "1x00000000000000000000AA", TURNSTILE_SECRET_KEY: testSecret }))
+        .captcha?.secretKey,
+    ).toBe(testSecret);
+  });
+
+  it("major 2a: TURNSTILE_VERIFY_URL may only name a verifier on this machine", () => {
+    expect(
+      parseEnv(valid({ TURNSTILE_VERIFY_URL: "http://127.0.0.1:3402/siteverify" })).captcha?.verifyUrl,
+    ).toBe("http://127.0.0.1:3402/siteverify");
+    expect(() => parseEnv(valid({ TURNSTILE_VERIFY_URL: "https://evil.example/siteverify" }))).toThrow(
+      /TURNSTILE_VERIFY_URL/,
+    );
   });
 });

@@ -1,4 +1,4 @@
-import { api, type MeResponse, resetCsrf, type WalletResponse } from "./api";
+import { ApiError, api, type MeResponse, resetCsrf, type WalletResponse } from "./api";
 import { markDevProvider } from "./dev-mode";
 import type { OnboardingGateway } from "./onboarding-gateway";
 import { nextOnboardingPath, refreshSession } from "./session-store";
@@ -34,14 +34,23 @@ export function createApiGateway(): OnboardingGateway {
       resetCsrf(); // the CSRF token is now bound to the new session
       await refreshSession();
     },
-    async submitPhone(e164) {
-      const result = await api<{ sent?: boolean; devCode?: string; recorded?: boolean }>(
+    async submitPhone(e164, challenge) {
+      const result = await api<{ sent?: boolean; devCode?: string; recorded?: boolean; message?: string }>(
         "/api/v1/onboarding/phone",
         {
           method: "POST",
-          body: { phone: e164 },
+          body: challenge ? { phone: e164, challenge } : { phone: e164 },
         },
       );
+      if (result.sent === false) {
+        // no code went out: one honest, neutral message whatever the reason
+        throw new ApiError(
+          "PHONE_NOT_SENT",
+          result.message ?? "We couldn't send a code to that number right now.",
+          true,
+          200,
+        );
+      }
       if (result.recorded) {
         // 'unverified' mode: the number is recorded without a code
         codeSent = false;

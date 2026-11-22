@@ -36,6 +36,9 @@ describe("sign-in, onboarding and a first purchase", () => {
     expect(fresh.json.onboarding).toEqual({
       hasProfile: false,
       phoneVerified: false,
+      // ninth review, major 1: the step (recorded) and the proof (verified) are reported apart
+      phoneRecorded: false,
+      phoneReverifyRequired: false,
       hasBirthdate: false,
       isAdult: false,
       provisioned: false,
