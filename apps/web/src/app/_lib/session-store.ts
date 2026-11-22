@@ -16,6 +16,8 @@ export type SessionState =
       balancePaise: bigint | null;
       onboarding: MeResponse["onboarding"];
       account: WalletResponse | null;
+      /** How the phone step works right now (an owner setting); "sms" when the server does not say. */
+      phoneVerification?: "sms" | "unverified";
     };
 
 const LOADING: SessionState = { status: "loading" };
@@ -41,6 +43,7 @@ export function refreshSession(): Promise<void> {
         balancePaise: me.account ? parsePaise(me.account.balancePaise) : null,
         onboarding: me.onboarding,
         account: me.account,
+        phoneVerification: me.phoneVerification === "unverified" ? "unverified" : "sms",
       });
     } catch (error) {
       if (error instanceof ApiError && error.code === "AUTH_REQUIRED") set({ status: "signedOut" });

@@ -62,7 +62,13 @@ export type FunnelResponse = {
   from: string;
   to: string;
   days: number;
-  steps: { step: FunnelStepKey; visitors: number; conversionFromPrevious: number | null }[];
+  /** `visitors`: daily visitors (summed); for the purchases step (unit "events"), purchases. */
+  steps: {
+    step: FunnelStepKey;
+    visitors: number;
+    unit: "visitors" | "events";
+    conversionFromPrevious: number | null;
+  }[];
   overallConversion: number | null;
   trafficDays: number;
   asOf: string;
@@ -76,6 +82,7 @@ export type PlaceItem = {
   city: string | null;
   /** Null for the suppressed "Other" row (below the minimum even after merging). */
   visitors: number | null;
+  /** Also null on a shown row when between 1 and the cell minimum. */
   signUps: number | null;
   purchases: number | null;
   suppressed: boolean;
@@ -89,6 +96,8 @@ export type PlacesResponse = {
   to: string;
   days: number;
   minVisitors: number;
+  /** Sign-up and purchase cells below this (and above 0) are null. */
+  minCellCount: number;
   items: PlaceItem[];
   trafficDays: number;
   asOf: string;

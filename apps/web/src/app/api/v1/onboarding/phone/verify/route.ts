@@ -1,9 +1,9 @@
 import { DomainError } from "@delulu/core";
-import { recordPhoneVerified } from "@delulu/db/runtime";
+import { phoneVerificationMode, recordPhoneVerified } from "@delulu/db/runtime";
 import { z } from "zod";
 import { authProvider } from "@/server/auth";
 import { emailFingerprint, phoneFingerprint } from "@/server/crypto";
-import { payPool } from "@/server/db";
+import { payPool, webPool } from "@/server/db";
 import { route } from "@/server/http";
 import { RATE_RULES } from "@/server/rate-limit";
 import { onboardingView } from "@/server/views";
@@ -25,6 +25,10 @@ export const POST = route(
     rateLimits: [{ rule: RATE_RULES.phoneVerifyAddress }, { rule: RATE_RULES.phoneVerifyActor }],
   },
   async ({ body, session }) => {
+    if ((await phoneVerificationMode(webPool())) === "unverified") {
+      // no codes are sent in this mode: POST /api/v1/onboarding/phone records the number
+      throw new DomainError("NOT_FOUND", "Phone codes are not used right now.");
+    }
     const provider = await authProvider();
     const result = await provider.verifyPhoneCode(session.id, body.code);
     if (!result.ok)

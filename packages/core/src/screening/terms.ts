@@ -134,27 +134,41 @@ export const RESERVED_HANDLES: readonly string[] = [
 ];
 
 /**
- * Handle words (seventh security review, minor 4), for store and user handles alike. PROTECTED: the
- * brand and authority words, refused anywhere in a handle (in any confusable spelling). GENERIC:
- * ordinary words that are only refused as the whole handle (leading and trailing digits ignored),
- * so `cake-shop` or `pay-day` are fine. Together they cover RESERVED_HANDLES. Mirrored by
- * core.handle_protected_words() and core.handle_generic_words() (migration 0056).
+ * Handle words (seventh security review, minor 4; eighth review, minor 4), for store and user
+ * handles alike. Mirrored by core.handle_long_words(), core.handle_short_words(),
+ * core.handle_adjacent_words() and core.handle_generic_words() (migration 0063).
+ *
+ * LONG protected words (the brand and authority words of six letters or more) are refused anywhere
+ * in a handle in any confusable spelling, and also within one edit (or missing up to two final
+ * letters) as the whole handle or a hyphen-separated part.
  */
-export const PROTECTED_HANDLE_WORDS: readonly string[] = [
-  "delulu",
+export const LONG_PROTECTED_HANDLE_WORDS: readonly string[] = [
   "delulumart",
-  "admin",
-  "administrator",
-  "superadmin",
+  "delulu",
   "official",
-  "support",
-  "staff",
-  "moderator",
-  "security",
   "verified",
-  "system",
+  "moderator",
+  "superadmin",
+  "administrator",
+  "support",
+  "security",
 ];
 
+/**
+ * SHORT protected words match only as a whole hyphen-separated part or the whole handle (a plural
+ * `s` included), with digits before or after, or joined to another protected, generic or
+ * ADJACENT word (`adminteam`, `staffsupport`) — never as an arbitrary substring, so `badminton`,
+ * `mustafa` and `ecosystem` are ordinary handles.
+ */
+export const SHORT_PROTECTED_HANDLE_WORDS: readonly string[] = ["admin", "staff", "mod", "system"];
+
+/** Every protected word (LONG and SHORT). */
+export const PROTECTED_HANDLE_WORDS: readonly string[] = [
+  ...LONG_PROTECTED_HANDLE_WORDS,
+  ...SHORT_PROTECTED_HANDLE_WORDS,
+];
+
+/** GENERIC words: only refused as the whole handle (leading and trailing digits ignored). */
 export const GENERIC_HANDLE_WORDS: readonly string[] = [
   "help",
   "root",
@@ -171,4 +185,26 @@ export const GENERIC_HANDLE_WORDS: readonly string[] = [
   "orders",
   "console",
   "partner",
+];
+
+/**
+ * Words that make a SHORT protected word next to them read as an authority name (`adminteam`,
+ * `mysystem`, `staffpicks`), besides the protected and generic words themselves.
+ */
+export const ADJACENT_HANDLE_WORDS: readonly string[] = [
+  "team",
+  "desk",
+  "crew",
+  "hq",
+  "ops",
+  "info",
+  "real",
+  "the",
+  "my",
+  "care",
+  "service",
+  "office",
+  "pick",
+  "picks",
+  "news",
 ];

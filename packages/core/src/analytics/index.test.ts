@@ -166,6 +166,44 @@ describe("parsePlace (R7.1: labels from the hosting edge, validated and capped)"
     });
   });
 
+  it("eighth review, minor 5: a region is only an ISO 3166-2 subdivision code part (what the edge sends); free text is dropped", () => {
+    for (const ok of ["MH", "ka", "BY", "TG", "01", "13", "ENG", "N"]) {
+      expect(parsePlace({ country: "IN", region: ok, city: null }).region, ok).toBe(ok.toUpperCase());
+    }
+    for (const bad of ["Maharashtra", "MHX1", "M H", "Karnataka state", "M-H", "hello world", "ÉÉ"]) {
+      expect(parsePlace({ country: "IN", region: bad, city: null }).region, bad).toBeNull();
+    }
+  });
+
+  it("eighth review, minor 5: a city is letters of any script, spaces, apostrophes, hyphens and dots only — no digits or symbols", () => {
+    for (const ok of [
+      "Navi%20Mumbai",
+      "S%C3%A3o%20Paulo",
+      "%E0%A4%AE%E0%A5%81%E0%A4%82%E0%A4%AC%E0%A4%88",
+      "O'Fallon",
+      "St.%20Louis",
+      "Winston-Salem",
+      "%E5%8C%97%E4%BA%AC",
+    ]) {
+      expect(parsePlace({ country: "IN", region: null, city: ok }).city, ok).toBe(decodeURIComponent(ok));
+    }
+    for (const bad of [
+      "Pune1",
+      "Pune 411001",
+      "Sector 17",
+      "Mumbai,",
+      "Delhi (NCR)",
+      "call me 98765",
+      "a@b.example",
+      "%E0%A5%A7%E0%A5%A8",
+      "%F0%9F%98%80town",
+      "%E2%84%82ity",
+      "x".repeat(PLACE_LABEL_MAX + 1),
+    ]) {
+      expect(parsePlace({ country: "IN", region: null, city: bad }).city, bad).toBeNull();
+    }
+  });
+
   it("any input yields a valid place (property)", () => {
     fc.assert(
       fc.property(
@@ -181,6 +219,8 @@ describe("parsePlace (R7.1: labels from the hosting edge, validated and capped)"
             expect(label.length).toBeLessThanOrEqual(PLACE_LABEL_MAX);
             expect(label).not.toMatch(/[|<>"\\\p{Cc}]/u);
           }
+          if (p.region !== null) expect(p.region).toMatch(/^[A-Z0-9]{1,3}$/);
+          if (p.city !== null) expect(p.city).not.toMatch(/\p{N}/u);
           if (p.country === "ZZ") expect([p.region, p.city]).toEqual([null, null]);
         },
       ),

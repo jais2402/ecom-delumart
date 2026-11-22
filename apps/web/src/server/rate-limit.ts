@@ -16,8 +16,11 @@ import { env } from "./env";
 export interface RateRule {
   /** The counter's name in core.rate_counter. */
   scope: string;
-  /** "address": the client address (before authentication); "actor": the signed-in user. */
-  by: "address" | "actor";
+  /**
+   * "address": the client address (before authentication); "actor": the signed-in user; "email":
+   * a normalised email address (sign-in; enforced by the sign-in routes, never by route()).
+   */
+  by: "address" | "actor" | "email";
   limit: number;
   windowSeconds: number;
 }

@@ -16,6 +16,7 @@ import {
   storeCoupons,
 } from "../src/merchant";
 import {
+  aMinuteLater,
   CLEAN,
   checkout,
   codeOf,
@@ -227,6 +228,7 @@ describe("the merchant side", () => {
       });
       const buyer = await user(pool);
       await payFor(pool, buyer, await checkout(pool, buyer, [p], std(a), "AOWN10"));
+      await aMinuteLater(pool); // 0060: a seller sees an order once its minute has ended
 
       const page = await mySellerOrders(pool, as(a.u));
       expect(page.items).toHaveLength(1);
@@ -373,6 +375,7 @@ describe("the merchant side", () => {
           );
         }
       }
+      await aMinuteLater(pool);
       const e = await myEarnings(pool, { ...as(c.u), days: 30 });
       expect(e.current.orders).toBe(30);
       expect(e.current.distinctBuyers).toBe(10);
@@ -488,6 +491,7 @@ describe("the merchant side", () => {
       await payFor(pool, young, await checkout(pool, young, [p], std(c), "QUARTER"));
       await payFor(pool, old, await checkout(pool, old, [p], std(c)));
       await payFor(pool, staff, await checkout(pool, staff, [p], std(c)));
+      await aMinuteLater(pool);
       let progress = await myBrandProgress(pool, as(c.u));
       expect(progress).toMatchObject({
         qualifyingGrossPaise: 3_000n * RUPEE + 4_000n * RUPEE,
@@ -522,6 +526,7 @@ describe("the merchant side", () => {
       const buyer = await user(pool);
       await payFor(pool, buyer, await checkout(pool, buyer, [asFixture(plenty), asFixture(edition)], std(c)));
       await retireUnits(pool, { ...as(c.u), productId: plenty.productId, quantity: 1 });
+      await aMinuteLater(pool);
       const inv = await myInventory(pool, as(c.u));
       expect(inv.warehouses).toEqual([
         { id: c.warehouseId, kind: "STARTER", capacity: 100, used: 9, free: 91, zapHub: false },

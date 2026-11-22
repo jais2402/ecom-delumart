@@ -24,6 +24,9 @@ import {
  * signature problem (the same answer whatever it is); 503 when the server has no jobs key or
  * jobs credential.
  */
+// one run may take up to the 45 s budget (Vercel: allow the function that long)
+export const maxDuration = 60;
+
 const body = z.strictObject({
   budgetMs: z.number().int().min(1).max(SERVER_CONFIG.jobs.maxBudgetMs).optional(),
 });

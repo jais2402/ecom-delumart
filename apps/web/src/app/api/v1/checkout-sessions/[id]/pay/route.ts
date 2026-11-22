@@ -1,7 +1,7 @@
 import { amountBucket, DomainError } from "@delulu/core";
 import { cartIssues, PayFailure, payOutcome } from "@delulu/db/runtime";
 import { z } from "zod";
-import { track } from "@/server/analytics";
+import { trackAfter } from "@/server/analytics";
 import { payPool, webPool } from "@/server/db";
 import { pathId, route } from "@/server/http";
 import { RATE_RULES } from "@/server/rate-limit";
@@ -16,7 +16,8 @@ const LINE_REFUSALS = new Set(["SOLD_OUT", "PRODUCT_UNAVAILABLE", "ALREADY_OWNED
  * line sold out or hidden since the quote fails the payment with no debit, and the error's
  * `details.issues` lists the cart lines that can no longer be bought. A fresh (not replayed) order
  * records a `purchase` analytics event (and `creator_unlock` when it unlocked creator access), after
- * the commit and without the amount: only its bucket.
+ * the commit and without the amount: only its bucket. Tracking runs after the response is sent
+ * (trackAfter): the payment's answer never waits for it.
  */
 export const POST = route(
   {
@@ -35,8 +36,8 @@ export const POST = route(
       });
       if (!replayed) {
         const analytics = { surface: "checkout", authSessionId: session.id } as const;
-        await track(request, "purchase", { amount_bucket: amountBucket(receipt.totalPaise) }, analytics);
-        if (receipt.creatorUnlocked) await track(request, "creator_unlock", {}, analytics);
+        trackAfter(request, "purchase", { amount_bucket: amountBucket(receipt.totalPaise) }, analytics);
+        if (receipt.creatorUnlocked) trackAfter(request, "creator_unlock", {}, analytics);
       }
       return { json: receiptView(receipt) };
     } catch (error) {

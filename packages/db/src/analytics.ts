@@ -1,5 +1,5 @@
 /**
- * The analytics engine's database calls (migration 0052). Events are written only through
+ * The analytics engine's database calls (migrations 0052, 0061). Events are written only through
  * analytics.record_event as app_web, for the caller's session when there is one (the database
  * derives whether the request is signed in, and records nothing for a research opt-out or a test
  * account). The Super Admin's reads run as app_web for the admin's session; each function checks
@@ -15,8 +15,13 @@ export interface RecordEventInput {
   authSessionId: string | null;
   name: string;
   surface: string;
-  /** 16 bytes: the web server's daily-rotating keyed hash (never the address or user agent). */
-  visitorKey: Uint8Array;
+  /**
+   * Browser events: 16 bytes, the web server's keyed hash under the day's salt (never the address
+   * or user agent). Server events (purchase, sign_up, creator_unlock, shop_registered): null (0061).
+   */
+  visitorKey: Uint8Array | null;
+  /** Browser events: 8 bytes, the keyed hash of the address prefix only; server events: null. */
+  placeKey: Uint8Array | null;
   country: string;
   region: string | null;
   city: string | null;
@@ -28,11 +33,12 @@ export interface RecordEventInput {
 export async function recordEvent(pool: Pool, input: RecordEventInput): Promise<boolean> {
   return asWeb(pool, input.authSessionId, async (c) => {
     const { rows } = await c.query<{ ok: boolean }>(
-      "SELECT analytics.record_event($1, $2, $3, $4, $5, $6, $7, $8::jsonb) AS ok",
+      "SELECT analytics.record_event($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb) AS ok",
       [
         input.name,
         input.surface,
-        Buffer.from(input.visitorKey),
+        input.visitorKey === null ? null : Buffer.from(input.visitorKey),
+        input.placeKey === null ? null : Buffer.from(input.placeKey),
         input.country,
         input.region,
         input.city,
@@ -41,6 +47,21 @@ export async function recordEvent(pool: Pool, input: RecordEventInput): Promise<
       ],
     );
     return rows[0]?.ok === true;
+  });
+}
+
+/**
+ * Today's (UTC, the database's clock) random analytics salt, created on first use (0061). Only
+ * today's is ever returned; the purge job deletes old ones, so past keys cannot be recomputed.
+ */
+export async function todaySalt(pool: Pool): Promise<{ day: string; salt: Buffer }> {
+  return asWeb(pool, null, async (c) => {
+    const { rows } = await c.query<{ day: string; salt: Buffer }>(
+      "SELECT day::text AS day, salt FROM analytics.today_salt()",
+    );
+    const row = rows[0];
+    if (!row) throw new Error("analytics.today_salt returned nothing");
+    return { day: row.day, salt: row.salt };
   });
 }
 
@@ -182,8 +203,16 @@ export interface AnalyticsFunnel {
   from: string;
   to: string;
   days: number;
-  /** Visitors who reached each step (sums of daily unique visitors). */
-  steps: { step: FunnelStep; visitors: number; conversionFromPrevious: number | null }[];
+  /**
+   * Visitors who reached each step (sums of daily unique visitors); the purchases step counts
+   * purchase events instead (`unit` "events"): a purchase carries no visitor key (0061).
+   */
+  steps: {
+    step: FunnelStep;
+    visitors: number;
+    unit: "visitors" | "events";
+    conversionFromPrevious: number | null;
+  }[];
   overallConversion: number | null;
   trafficDays: number;
   asOf: Date;
@@ -201,6 +230,7 @@ export async function analyticsFunnel(pool: Pool, input: AdminRange): Promise<An
     steps: (r.steps as Json[]).map((s) => ({
       step: s.step as FunnelStep,
       visitors: num(s.visitors),
+      unit: s.unit === "events" ? ("events" as const) : ("visitors" as const),
       conversionFromPrevious: ratio(s.conversionFromPrevious),
     })),
     overallConversion: ratio(r.overallConversion),
@@ -222,6 +252,7 @@ export interface PlaceRow {
    * row under the minimum was merged into it (0059): the screen shows "Fewer than N".
    */
   visitors: number | null;
+  /** Also null (without `suppressed`) when above 0 but below `minCellCount` (0061). */
   signUps: number | null;
   purchases: number | null;
   suppressed: boolean;
@@ -235,6 +266,8 @@ export interface AnalyticsPlaces {
   to: string;
   days: number;
   minVisitors: number;
+  /** Sign-up and purchase cells between 1 and this minus one are returned null (0061). */
+  minCellCount: number;
   items: PlaceRow[];
   trafficDays: number;
   asOf: Date;
@@ -261,6 +294,7 @@ export async function analyticsPlaces(
     to: String(r.to),
     days: num(r.days),
     minVisitors: num(r.minVisitors),
+    minCellCount: num(r.minCellCount),
     items: (r.items as Json[]).map((i) => ({
       country: String(i.country),
       region: textOrNull(i.region),

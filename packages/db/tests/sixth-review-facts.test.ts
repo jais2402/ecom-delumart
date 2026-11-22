@@ -6,7 +6,7 @@ import { createDraft } from "../src/listing";
 import { createCoupon, mySellerOrders } from "../src/merchant";
 import { passportProgress, submitPassportQuiz } from "../src/passport";
 import { createReport } from "../src/safety";
-import { CLEAN, checkout, codeOf, payFor, reconcile, user } from "./checkout-fixtures";
+import { aMinuteLater, CLEAN, checkout, codeOf, payFor, reconcile, user } from "./checkout-fixtures";
 import { asActor, countRows, createTestDatabase, stateOf, type TestDatabase, type TestUser } from "./helpers";
 import {
   asFixture,
@@ -181,6 +181,7 @@ describe("sixth security review: server-trusted facts and the seller's order vie
     await payFor(pool, b1, await checkout(pool, b1, [p], std, priv.code ?? ""));
     const b2 = await user(pool);
     await payFor(pool, b2, await checkout(pool, b2, [p], std, "SHOWN05"));
+    await aMinuteLater(pool); // 0060: a seller sees an order once its minute has ended
     const items = (await mySellerOrders(pool, as(s.u))).items;
     expect(items.map((o) => [o.couponCode, o.couponKind])).toEqual([
       ["SHOWN05", "PUBLIC"],

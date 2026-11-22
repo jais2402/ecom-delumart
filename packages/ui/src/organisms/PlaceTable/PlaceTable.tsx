@@ -22,6 +22,11 @@ export type PlaceTableProps = Omit<ComponentPropsWithRef<"section">, "children">
   rows: readonly PlaceRow[];
   /** The minimum count below which a row is suppressed ("Fewer than {minVisitors}"). */
   minVisitors?: number;
+  /**
+   * The minimum below which a shown row's sign-up or purchase count is withheld (the API sends
+   * null): such a cell reads "Fewer than {minCellCount}".
+   */
+  minCellCount?: number;
   onDrill?: (row: PlaceRow) => void;
   /** Accessible name of the drill button; defaults to "Show places in {label}". */
   drillLabel?: (row: PlaceRow) => string;
@@ -40,6 +45,7 @@ export function PlaceTable({
   placeHeader,
   rows,
   minVisitors,
+  minCellCount,
   onDrill,
   drillLabel = (row) => `Show places in ${row.label}`,
   className,
@@ -55,7 +61,8 @@ export function PlaceTable({
   const shown = (r: PlaceRow): r is PlaceRow & { visitors: number } => !r.suppressed && r.visitors !== null;
   const total = rows.reduce((n, r) => n + (shown(r) ? r.visitors : 0), 0);
   const hidden = <span className="text-fg-muted">Not shown</span>;
-  const count = (n: number | null) => (n === null ? hidden : fmt(n));
+  const fewer = <span className="text-fg-muted">{`Fewer than ${fmt(minCellCount ?? 0)}`}</span>;
+  const count = (n: number | null) => (n === null ? (minCellCount === undefined ? hidden : fewer) : fmt(n));
   const th = "px-3 py-2 font-bold";
   return (
     <section

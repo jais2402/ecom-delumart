@@ -8,7 +8,7 @@ import {
   pay,
   type SellerQuote,
 } from "../src/checkout";
-import { inTx, provisionAccount, provisionInput, type TestUser, uuidv7 } from "./helpers";
+import { inTx, plant, provisionAccount, provisionInput, type TestUser, uuidv7 } from "./helpers";
 
 /** A test PIN's HMAC (the database only ever sees the 32-byte mac, never a PIN). */
 export const TEST_PIN_MAC = Buffer.alloc(32, 7);
@@ -316,3 +316,18 @@ export const CLEAN = {
   warehouseUsed: [],
   succeededWithoutOneOrder: [],
 };
+
+/**
+ * Test-only stand-in for waiting until the current minute has ended (0060, eighth review minor 7:
+ * a seller sees an order only once the minute in which it was placed is over). Moves the orders
+ * placed in the current minute back by one minute, written as the owner with triggers off
+ * (helpers.plant), so the seller reads show them without the test sleeping up to a minute.
+ */
+export async function aMinuteLater(pool: pg.Pool): Promise<void> {
+  await plant(pool, (c) =>
+    c.query(
+      `UPDATE core.order_group SET created_at = created_at - interval '1 minute'
+        WHERE created_at >= date_trunc('minute', clock_timestamp())`,
+    ),
+  );
+}

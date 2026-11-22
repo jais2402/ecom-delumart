@@ -7,6 +7,7 @@ import { createCheckoutSession, createPaymentAttempt, pay } from "../src/checkou
 import { MINT_ACCOUNT_ID, SINK_ACCOUNT_ID } from "../src/provision";
 import { type TransactionOptions, withTransaction } from "../src/transaction";
 import {
+  aMinuteLater,
   authenticateCard,
   CLEAN,
   CRORE,
@@ -1482,7 +1483,14 @@ describe("money attacks (security review)", () => {
       // the owner, derived from the session alone, sees all of it (control)
       const owner = await asActor(pool, web(s.owner), look);
       expect(owner).toMatchObject({ privateCoupon: 1, draft: 1, draftVersion: 1 });
-      expect(owner.sellerOrders).toBeGreaterThan(0);
+      // 0060 (eighth review): the owner reads its seller orders only through the definer reads,
+      // never the rows (whose v7 ids and buyer-side group give the sale's exact time)
+      expect(owner.sellerOrders).toBe(0);
+      await aMinuteLater(pool);
+      const reads = await asActor(pool, web(s.owner), (c) =>
+        countRows(c, "SELECT jsonb_array_length(core.my_seller_orders(NULL, NULL) -> 'items') AS n"),
+      );
+      expect(reads).toBeGreaterThan(0);
     });
 
     it("the owner creates coupons and draft products on their own company only", async () => {
@@ -3107,6 +3115,8 @@ describe("money attacks (security review)", () => {
         "core.address_update(uuid,text,bytea)",
         // 0039: Super Admin appeals and report cases (each refuses anyone but the Super Admin; no money moves)
         "core.admin_appeal_resolve(uuid,text,text)",
+        // 0072: deployment facts for the Super Admin (FORBIDDEN for anyone else)
+        "core.admin_health()",
         // 0037: Super Admin moderation (each refuses anyone but the Super Admin; no money moves)
         "core.admin_listing_decide(uuid,uuid,text,text)",
         "core.admin_listing_hide(uuid,text)",
@@ -3133,6 +3143,8 @@ describe("money attacks (security review)", () => {
         "core.draft_create(text,text,text,text,integer,text,bigint,text,integer,boolean,boolean)",
         "core.draft_delete(uuid)",
         "core.draft_update(uuid,text,text,text,text,integer,text,bigint,text,integer,boolean,boolean)",
+        // 0071: sign-out ends the caller's own session
+        "core.end_session()",
         "core.is_published_version(uuid)",
         "core.my_addresses()",
         "core.my_appeals()",
@@ -3164,6 +3176,8 @@ describe("money attacks (security review)", () => {
         "core.passport_progress()",
         // sixth review (0050): the quiz is graded by the database; the concept is app_pay's
         "core.passport_submit_quiz(jsonb)",
+        // 0070: the owner's phone verification mode, read only
+        "core.phone_verification_mode()",
         "core.product_allocate_and_publish(uuid,integer)",
         "core.product_archive(uuid)",
         "core.product_restock(uuid,integer)",
@@ -3188,7 +3202,9 @@ describe("money attacks (security review)", () => {
         "core.unblock_store(uuid)",
         "core.unsave_product(uuid)",
         "core.update_profile(text,jsonb,boolean)",
-        "core.warehouse_set_zap_hub(uuid,boolean)",
+        "core.warehouse_set_zap_hub(uuid,boolean)", // eighth review (0060): the journal policy's question (a party to the journal, and its
+        // order, if any, is the actor's own as buyer); answers only for the actor
+        "ledger.journal_readable(uuid)",
       ]);
     });
 
@@ -3239,7 +3255,9 @@ describe("money attacks (security review)", () => {
         "core.set_card_frozen(uuid,boolean)",
         "core.set_card_pin(uuid,bytea,bytea)",
         "core.update_store(text,text)",
-        "core.verify_card_pin(uuid,bytea)",
+        "core.verify_card_pin(uuid,bytea)", // eighth review (0060): the journal policy's question (a party to the journal, and its
+        // order, if any, is the actor's own as buyer); answers only for the actor
+        "ledger.journal_readable(uuid)",
       ]);
       // sixth review (0047): only the jobs' own functions
       expect(by("app_jobs")).toEqual([

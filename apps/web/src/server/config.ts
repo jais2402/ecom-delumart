@@ -16,6 +16,11 @@ export const SERVER_CONFIG = {
     ownerMax: 2,
     idleTimeoutMs: 10_000,
     connectionTimeoutMs: 5_000,
+    /**
+     * On Vercel (VERCEL=1) every function instance has its own pools, and many instances may run at
+     * once against Supabase's transaction pooler: one or two connections each, released quickly.
+     */
+    serverless: { webMax: 2, payMax: 2, jobsMax: 1, idleTimeoutMs: 5_000 },
   },
   session: {
     /** Lifetime of a dev sign-in session (auth.sessions.not_after) and of the cookie. */
@@ -33,6 +38,10 @@ export const SERVER_CONFIG = {
   rateLimit: {
     /** Sign-in attempts per client address. */
     signInAddress: { scope: "auth.sign_in.address", by: "address", limit: 20, windowSeconds: 60 },
+    /** Sign-in emails requested per email address (keyed fingerprint), whoever asks. */
+    signInEmail: { scope: "auth.sign_in.email", by: "email", limit: 5, windowSeconds: 3_600 },
+    /** Typed email sign-in codes checked per email address. */
+    signInCodeEmail: { scope: "auth.sign_in.code.email", by: "email", limit: 10, windowSeconds: 3_600 },
     /** Phone codes requested: per account (LLD: 5 / day / account) and per address. */
     phoneCodeActor: { scope: "phone.code.actor", by: "actor", limit: 5, windowSeconds: 86_400 },
     phoneCodeAddress: { scope: "phone.code.address", by: "address", limit: 30, windowSeconds: 3_600 },
@@ -61,6 +70,13 @@ export const SERVER_CONFIG = {
     companyQuoteActor: { scope: "company.quote.actor", by: "actor", limit: 5, windowSeconds: 3_600 },
     /** Studio writes (drafts, submissions, prices, stock, shipping, Zap hub) per account. */
     studioActor: { scope: "studio.write.actor", by: "actor", limit: 30, windowSeconds: 60 },
+    /**
+     * Studio order and earnings reads per account (eighth review, minor 7): with minute-rounded
+     * times and orders shown only once their minute has ended, polling learns nothing finer, and
+     * this keeps a script from hammering the reads anyway. One budget for the list, the detail and
+     * earnings.
+     */
+    studioReadActor: { scope: "studio.read.actor", by: "actor", limit: 30, windowSeconds: 60 },
     /** Super Admin moderation calls per account. */
     adminActor: { scope: "admin.write.actor", by: "actor", limit: 60, windowSeconds: 60 },
     /** Reports per account (LLD §11.2: 5 / hour / account; the database also counts committed reports). */
@@ -82,6 +98,25 @@ export const SERVER_CONFIG = {
     eventsAddress: { scope: "analytics.events.address", by: "address", limit: 120, windowSeconds: 60 },
     /** Super Admin analytics reads per account (a dashboard makes several per view). */
     analyticsReadActor: { scope: "admin.analytics.actor", by: "actor", limit: 300, windowSeconds: 60 },
+  },
+  /** Supabase Auth (apps/web/src/server/auth/supabase.ts). */
+  auth: {
+    /** Lifetime of the sign-in flow cookie (state, PKCE verifier, return path): the email link's. */
+    flowTtlSeconds: 15 * 60,
+    /** Signing keys are re-read from the JWKS at least this often (a removed key stops working). */
+    jwksTtlMs: 10 * 60 * 1000,
+    /** An unknown key id triggers a re-read at most this often. */
+    jwksMinRefetchMs: 30 * 1000,
+    /** Every call to Supabase gives up after this long. */
+    httpTimeoutMs: 5_000,
+    /** Largest JWKS or Auth response body read. */
+    maxResponseBytes: 64 * 1024,
+    /** Largest access token accepted. */
+    maxTokenBytes: 8 * 1024,
+    /** Clock difference tolerated for exp, nbf and iat. */
+    clockSkewSeconds: 30,
+    /** Typed email sign-in codes: 6 to this many digits (Supabase's OTP length setting). */
+    emailCodeMaxDigits: 10,
   },
   phone: {
     /** The only code the dev provider accepts (there is no SMS in development). */
@@ -128,6 +163,8 @@ export const SERVER_CONFIG = {
     maxEventBytes: 1_024,
     /** Bytes of the HMAC kept as the visitor key (the database stores exactly 16). */
     visitorKeyBytes: 16,
+    /** Bytes of the HMAC kept as the place key (address prefix only; the database stores exactly 8). */
+    placeKeyBytes: 8,
     /** The longest user agent hashed into the visitor key. */
     maxUserAgentChars: 512,
     /** Rows of a top-N read when the request names no limit, and the most it may ask for. */

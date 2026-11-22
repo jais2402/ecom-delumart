@@ -21,12 +21,14 @@ export function isLocalHttpOrigin(appOrigin: string): boolean {
 export interface CookieNames {
   session: string;
   csrf: string;
+  /** The sign-in flow in progress (auth/flow.ts): sealed state, PKCE verifier and return path. */
+  flow: string;
 }
 
 export function cookieNames(appOrigin: string): CookieNames {
   return isLocalHttpOrigin(appOrigin)
-    ? { session: "dm_session", csrf: "dm_csrf" }
-    : { session: "__Host-dm_session", csrf: "__Host-dm_csrf" };
+    ? { session: "dm_session", csrf: "dm_csrf", flow: "dm_auth_flow" }
+    : { session: "__Host-dm_session", csrf: "__Host-dm_csrf", flow: "__Host-dm_auth_flow" };
 }
 
 /** HttpOnly; SameSite=Lax; Path=/; no Domain; Secure except on http://localhost. */
@@ -44,6 +46,16 @@ export function sessionCookie(sessionId: string, appOrigin: string, maxAgeSecond
 
 export function clearedSessionCookie(appOrigin: string): string {
   return serialize(cookieNames(appOrigin).session, "", appOrigin, 0);
+}
+
+/** The sealed sign-in flow (base64url); short-lived. */
+export function flowCookie(sealed: string, appOrigin: string, maxAgeSeconds: number): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(sealed)) throw new Error("flow cookie value must be base64url");
+  return serialize(cookieNames(appOrigin).flow, sealed, appOrigin, maxAgeSeconds);
+}
+
+export function clearedFlowCookie(appOrigin: string): string {
+  return serialize(cookieNames(appOrigin).flow, "", appOrigin, 0);
 }
 
 export function csrfCookie(token: string, appOrigin: string, maxAgeSeconds: number): string {

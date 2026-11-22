@@ -54,16 +54,12 @@ describe("sign-in providers", () => {
     expect(devUserId(Buffer.alloc(32, 8), "a@example.test")).not.toBe(id);
   });
 
-  it("the supabase provider is a stub: every method throws", async () => {
+  it("US-01: the supabase provider never signs anyone in by email alone (the dev-only methods are NOT_FOUND)", async () => {
     const { supabaseAuthProvider } = await import("../src/server/auth/supabase");
     const p = supabaseAuthProvider();
-    const sid = "0192f6a0-0000-7000-8000-000000000001";
-    await expect(p.beginSignIn("a@example.test")).rejects.toThrow(/not implemented/);
-    await expect(p.completeDevSignIn("a@example.test")).rejects.toThrow(/not implemented/);
-    await expect(p.signOut(sid)).rejects.toThrow(/not implemented/);
-    await expect(p.verifiedEmail(sid)).rejects.toThrow(/not implemented/);
-    await expect(p.sendPhoneCode(sid, "+919876543210")).rejects.toThrow(/not implemented/);
-    await expect(p.verifyPhoneCode(sid, "000000")).rejects.toThrow(/not implemented/);
+    expect(p.kind).toBe("supabase");
+    await expect(p.beginSignIn("a@example.test")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(p.completeDevSignIn("a@example.test")).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("server modules refuse to run in a browser", () => {

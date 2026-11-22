@@ -5,12 +5,14 @@ import {
   deviceClassOf,
   type Place,
   parsePlace,
+  SERVER_EVENT_NAMES,
   type Surface,
   UNKNOWN_COUNTRY,
 } from "@delulu/core";
-import { recordEvent } from "@delulu/db/runtime";
+import { recordEvent, todaySalt } from "@delulu/db/runtime";
+import { after } from "next/server";
 import type pg from "pg";
-import { clientAddress, rateAddressKey } from "./client-address";
+import { clientAddress, placeAddressPrefix, rateAddressKey } from "./client-address";
 import { SERVER_CONFIG } from "./config";
 import { webPool } from "./db";
 import { type Env, env } from "./env";
@@ -18,9 +20,16 @@ import { type Env, env } from "./env";
 /**
  * Privacy-safe analytics capture (PRD R7.1, R15.2, R16.5; migration 0052).
  *
- *  - The visitor key is HMAC-SHA-256(ANALYTICS_KEY, "UTC day | address (IPv6 by its /64) | user
- *    agent"), truncated to 16 bytes. It changes every UTC day, and neither the address nor the user
- *    agent is stored or logged anywhere.
+ *  - Keys are made under a day key, HMAC-SHA-256(ANALYTICS_KEY, the day's random salt), where the
+ *    salt comes from the database (analytics.today_salt, 0061): only today's is ever handed out and
+ *    the purge job deletes old ones, so an old day's keys can never be recomputed, even with
+ *    ANALYTICS_KEY. The salt is cached in this process until the UTC day changes.
+ *  - Browser events: the visitor key is HMAC(day key, "visitor | day | address (IPv6 by its /64) |
+ *    user agent"), 16 bytes; the place key is HMAC(day key, "place | day | address prefix (IPv4
+ *    /24, IPv6 /48)"), 8 bytes, which the database's place minimum counts (so one person with many
+ *    user agents is still one). Neither the address nor the user agent is stored or logged.
+ *  - Server events (purchase, sign_up, creator_unlock, shop_registered) carry neither key; the
+ *    database stores them in their hour with no identifying prop.
  *  - The place is the hosting edge's approximate country, region and city, read only where the
  *    edge sets those headers (GEO_SOURCE), validated and capped (@delulu/core parsePlace); in
  *    development DEV_GEO may fix it. Nothing from a request body ever sets a place.
@@ -28,6 +37,8 @@ import { type Env, env } from "./env";
  *  - Sec-GPC: 1 or DNT: 1 records nothing. The database records nothing for a signed-in account
  *    with the research opt-out or a test account.
  *  - Tracking never fails a request: any error is caught, counted and logged by code only.
+ *    Routes schedule it with trackAfter, which runs after the response (Next's after()), so a
+ *    response never waits for it.
  */
 
 export type EventProps = Readonly<Record<string, string | number>>;
@@ -40,6 +51,14 @@ export interface TrackOptions {
   now?: () => Date;
   /** The app_web pool; defaults to the server's. */
   pool?: pg.Pool;
+  /** Today's salt; defaults to the database's, cached per UTC day (injectable for tests). */
+  salt?: (now: Date) => Promise<DailySalt>;
+}
+
+export interface DailySalt {
+  /** The UTC day, YYYY-MM-DD, the salt belongs to. */
+  day: string;
+  salt: Buffer;
 }
 
 const VERCEL_COUNTRY = "x-vercel-ip-country";
@@ -58,14 +77,51 @@ export function utcDay(at: Date): string {
   return at.toISOString().slice(0, 10);
 }
 
-/** The daily-rotating visitor key (16 bytes). */
-export function visitorKey(key: Buffer, day: string, address: string, userAgent: string): Buffer {
+/** The day's key: both ANALYTICS_KEY and the day's random salt are needed to make any key. */
+function dayKey(key: Buffer, salt: DailySalt): Buffer {
+  return createHmac("sha256", key).update(salt.salt).update(`|${salt.day}`).digest();
+}
+
+/** The visitor key of a browser event (16 bytes), under the day's salt. */
+export function visitorKey(key: Buffer, salt: DailySalt, address: string, userAgent: string): Buffer {
   const ua = userAgent.slice(0, SERVER_CONFIG.analytics.maxUserAgentChars);
-  return createHmac("sha256", key)
-    .update(`${day}|${rateAddressKey(address)}|${ua}`)
+  return createHmac("sha256", dayKey(key, salt))
+    .update(`visitor|${salt.day}|${rateAddressKey(address)}|${ua}`)
     .digest()
     .subarray(0, SERVER_CONFIG.analytics.visitorKeyBytes);
 }
+
+/** The place key of a browser event (8 bytes): the address prefix only, under the day's salt. */
+export function placeKey(key: Buffer, salt: DailySalt, address: string): Buffer {
+  return createHmac("sha256", dayKey(key, salt))
+    .update(`place|${salt.day}|${placeAddressPrefix(address)}`)
+    .digest()
+    .subarray(0, SERVER_CONFIG.analytics.placeKeyBytes);
+}
+
+let saltCache: DailySalt | null = null;
+
+/**
+ * Today's salt from the database, kept in this process until the UTC day of `now` changes (the
+ * database hands out only its own today's salt).
+ */
+export async function dailySalt(
+  now: Date,
+  fetch: () => Promise<DailySalt> = () => todaySalt(webPool()),
+): Promise<DailySalt> {
+  const day = utcDay(now);
+  if (saltCache !== null && saltCache.day === day) return saltCache;
+  const fetched = await fetch();
+  if (fetched.day === day) saltCache = fetched;
+  return fetched;
+}
+
+/** Forgets the cached salt (tests). */
+export function forgetDailySalt(): void {
+  saltCache = null;
+}
+
+const SERVER_EVENTS: ReadonlySet<string> = new Set(SERVER_EVENT_NAMES);
 
 /** The approximate place of a request, from where the configuration says it may come. */
 export function placeOf(headers: Headers, config: Pick<Env, "geoSource" | "devGeo">): Place {
@@ -93,7 +149,7 @@ const logFailure = (error: unknown) => {
 /**
  * Records one event for this request. Returns whether it was stored; never throws. Server events
  * (purchase, sign_up, creator_unlock, shop_registered) are called by the server after the command
- * succeeded; listing_published is recorded by the database itself.
+ * succeeded, with no visitor or place key; listing_published is recorded by the database itself.
  */
 export async function track(
   request: Request,
@@ -106,16 +162,21 @@ export async function track(
     if (config.analyticsKey === null || declinesTracking(request.headers)) return false;
     const now = (options.now ?? (() => new Date()))();
     const place = placeOf(request.headers, config);
-    return await recordEvent(options.pool ?? webPool(), {
+    const pool = options.pool ?? webPool();
+    let keys: { visitorKey: Buffer | null; placeKey: Buffer | null } = { visitorKey: null, placeKey: null };
+    if (!SERVER_EVENTS.has(name)) {
+      const salt = await (options.salt ?? ((at: Date) => dailySalt(at, () => todaySalt(pool))))(now);
+      const address = clientAddress(request, config.trustedProxyHops);
+      keys = {
+        visitorKey: visitorKey(config.analyticsKey, salt, address, request.headers.get("user-agent") ?? ""),
+        placeKey: placeKey(config.analyticsKey, salt, address),
+      };
+    }
+    return await recordEvent(pool, {
       authSessionId: options.authSessionId,
       name,
       surface: options.surface,
-      visitorKey: visitorKey(
-        config.analyticsKey,
-        utcDay(now),
-        clientAddress(request, config.trustedProxyHops),
-        request.headers.get("user-agent") ?? "",
-      ),
+      ...keys,
       country: place.country,
       region: place.region,
       city: place.city,
@@ -126,4 +187,35 @@ export async function track(
     logFailure(error);
     return false;
   }
+}
+
+const pending = new Set<Promise<boolean>>();
+
+/**
+ * Schedules `track` to run after the response has been sent (Next's after(); outside a request
+ * scope, such as a test calling a handler directly, a background promise). The response never
+ * waits for analytics, and tracking still never throws.
+ */
+export function trackAfter(
+  request: Request,
+  name: AnalyticsEventName,
+  props: EventProps,
+  options: TrackOptions,
+): void {
+  const run = () => {
+    const p = track(request, name, props, options);
+    pending.add(p);
+    void p.finally(() => pending.delete(p));
+    return p;
+  };
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
+}
+
+/** Resolves when every scheduled tracking call so far has finished (tests). */
+export async function settleTracking(): Promise<void> {
+  while (pending.size > 0) await Promise.allSettled([...pending]);
 }

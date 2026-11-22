@@ -394,7 +394,13 @@ try {
   );
 
   await step("S's Orders lists the order from an Anonymous player; the equation adds up", async () => {
-    const list = await call(seller, "GET", "/api/v1/studio/orders?limit=10");
+    // a seller sees an order once the minute it was placed in has ended (eighth review, minor 7):
+    // wait for that minute boundary (at most about a minute), then assert as before
+    let list = await call(seller, "GET", "/api/v1/studio/orders?limit=10");
+    for (let i = 0; i < 15 && list.status === 200 && list.body.items.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 5_000));
+      list = await call(seller, "GET", "/api/v1/studio/orders?limit=10");
+    }
     assert.equal(list.status, 200);
     assert.equal(list.body.items.length, 1);
     order = list.body.items[0];

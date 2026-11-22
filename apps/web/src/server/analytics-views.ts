@@ -120,6 +120,7 @@ export function funnelView(f: AnalyticsFunnel) {
     steps: f.steps.map((s) => ({
       step: s.step,
       visitors: s.visitors,
+      unit: s.unit,
       conversionFromPrevious: s.conversionFromPrevious,
     })),
     overallConversion: f.overallConversion,
@@ -137,6 +138,7 @@ export function placesView(p: AnalyticsPlaces) {
     to: p.to,
     days: p.days,
     minVisitors: p.minVisitors,
+    minCellCount: p.minCellCount,
     items: p.items.map((i) => ({
       country: i.country,
       region: i.region,

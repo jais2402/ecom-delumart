@@ -13,6 +13,7 @@
 | [decisions.md](decisions.md) | Choices made on the owner's behalf, and those only the owner can make | You want to check or reverse a default |
 | [build-status.md](build-status.md) | What is built and verified, what is not, known limits | You want the honest state of the code |
 | [execution-plan.md](execution-plan.md) | Phases, milestones, exit gates, weekly rhythm, cut list, first ten days | You are deciding what to build next |
+| [deploy-runbook.md](deploy-runbook.md) | Step-by-step production deployment on Vercel + Supabase: settings, environment variables, migrations, first Super Admin, jobs, what to verify on first deploy, errors, key rotation, rollback | You are deploying or operating production |
 | [architecture.md](architecture.md) | Decision record: why each choice was made, alternatives, security threat model, research on other platforms | You want the reasoning or need to revisit a decision |
 
 Order of authority when documents disagree: PRD revision → system design → decision record.

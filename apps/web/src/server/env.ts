@@ -1,4 +1,5 @@
 import "./server-only";
+import { type DatabaseTls, decodeCaCertificate, isLoopbackHost } from "@delulu/db/runtime";
 import { z } from "zod";
 
 /**
@@ -49,6 +50,25 @@ export interface Env {
    * or "CC/REGION/City" (URL-encoded parts), so the console's place views can be tried locally.
    */
   devGeo: { country: string; region: string | null; city: string | null } | null;
+  /**
+   * Supabase Auth (AUTH_PROVIDER=supabase): the project URL, the publishable key (public auth
+   * endpoints) and the SECRET key (admin endpoints; server-only, never logged or sent to a
+   * browser). Null for the dev provider.
+   */
+  supabase: { url: string; publishableKey: string; secretKey: string } | null;
+  /**
+   * TLS to the database: "verify-full" (default whenever a database host is not loopback; refused
+   * off in production then) or "disable" (local only).
+   */
+  databaseTls: DatabaseTls;
+  /** PEM of the database's CA certificate (DATABASE_CA_CERT, PEM or base64 of it); null: system roots. */
+  databaseCa: string | null;
+  /** The bearer Vercel Cron sends (Authorization: Bearer <CRON_SECRET>); null: the cron route is off. */
+  cronSecret: string | null;
+  /** True on Vercel (VERCEL=1): serverless pool sizes. */
+  serverless: boolean;
+  /** The first 12 characters of the deployed git commit (VERCEL_GIT_COMMIT_SHA), for /api/health. */
+  commit: string | null;
 }
 
 /**
@@ -92,6 +112,18 @@ const origin = z.string({ error: "is required" }).refine(
   { error: "must be an origin such as https://delulumart.example (no path)" },
 );
 
+const supabaseOrigin = z.string().refine(
+  (v) => {
+    try {
+      const u = new URL(v);
+      return (u.protocol === "https:" || u.protocol === "http:") && u.origin === v.replace(/\/$/, "");
+    } catch {
+      return false;
+    }
+  },
+  { error: "must be the project URL such as https://<project-ref>.supabase.co (no path)" },
+);
+
 const schema = z.object({
   NODE_ENV: z.string().optional(),
   DATABASE_URL_WEB: postgresUrl,
@@ -121,7 +153,39 @@ const schema = z.object({
     .string()
     .regex(/^[1-9]\d{0,3}$/, { error: "must be a whole number from 1 to 9999" })
     .optional(),
+  SUPABASE_URL: supabaseOrigin.optional(),
+  SUPABASE_PUBLISHABLE_KEY: z
+    .string()
+    .regex(/^sb_publishable_[A-Za-z0-9_-]{10,200}$/, {
+      error: "must be the project's publishable key (sb_publishable_...)",
+    })
+    .optional(),
+  SUPABASE_SECRET_KEY: z
+    .string()
+    .regex(/^sb_secret_[A-Za-z0-9_-]{10,200}$/, {
+      error: "must be a secret key of the project (sb_secret_...)",
+    })
+    .optional(),
+  DATABASE_TLS: z
+    .enum(["verify-full", "disable"], { error: "must be 'verify-full' or 'disable'" })
+    .optional(),
+  DATABASE_CA_CERT: z.string().optional(),
+  CRON_SECRET: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{32,256}$/, {
+      error: "must be 32 or more letters, digits, '-' or '_' (openssl rand -hex 32)",
+    })
+    .optional(),
+  VERCEL_GIT_COMMIT_SHA: z.string().optional(),
 });
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
 
 function loginOf(url: string): string {
   try {
@@ -162,6 +226,43 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
         problems.push("DATABASE_URL_PAY must not log in as the owner");
       if (v.DATABASE_URL_JOBS && loginOf(v.DATABASE_URL_JOBS) === owner)
         problems.push("DATABASE_URL_JOBS must not log in as the owner");
+    }
+    const supabaseNames = ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY"] as const;
+    if (v.AUTH_PROVIDER === "supabase") {
+      for (const name of supabaseNames) {
+        if (v[name] === undefined) problems.push(`${name} is required when AUTH_PROVIDER is 'supabase'`);
+      }
+    }
+    const dbUrls = [v.DATABASE_URL_WEB, v.DATABASE_URL_PAY, v.DATABASE_URL_JOBS].filter(
+      (u): u is string => u !== undefined,
+    );
+    const allLoopback = dbUrls.every((u) => isLoopbackHost(hostOf(u)));
+    const databaseTls: DatabaseTls = v.DATABASE_TLS ?? (allLoopback ? "disable" : "verify-full");
+    if (production && databaseTls === "disable" && !allLoopback) {
+      problems.push(
+        "DATABASE_TLS 'disable' is refused in production for a database that is not on this machine",
+      );
+    }
+    let databaseCa: string | null = null;
+    try {
+      databaseCa = decodeCaCertificate(v.DATABASE_CA_CERT);
+    } catch {
+      problems.push("DATABASE_CA_CERT must be the CA certificate as PEM text or base64 of it");
+    }
+    if (production) {
+      const origin = new URL(v.APP_ORIGIN);
+      if (origin.protocol !== "https:" && !isLoopbackHost(origin.hostname)) {
+        problems.push("APP_ORIGIN must be https when NODE_ENV is production");
+      }
+      if (v.SUPABASE_URL !== undefined) {
+        const sb = new URL(v.SUPABASE_URL);
+        if (sb.protocol !== "https:" && !isLoopbackHost(sb.hostname)) {
+          problems.push("SUPABASE_URL must be https when NODE_ENV is production");
+        }
+      }
+      if (v.CRON_SECRET !== undefined && new Set(v.CRON_SECRET).size < 8) {
+        problems.push("CRON_SECRET is a placeholder (too few different characters); generate a random one");
+      }
     }
     if (production && v.AUTH_PROVIDER === "dev") {
       problems.push("AUTH_PROVIDER 'dev' is refused when NODE_ENV is production");
@@ -211,6 +312,24 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
         analyticsKey: v.ANALYTICS_KEY ? Buffer.from(v.ANALYTICS_KEY, "hex") : null,
         geoSource: v.GEO_SOURCE ?? (v.VERCEL === "1" ? "vercel" : "none"),
         devGeo: v.DEV_GEO === undefined ? null : devGeoOf(v.DEV_GEO),
+        supabase:
+          v.AUTH_PROVIDER === "supabase" &&
+          v.SUPABASE_URL &&
+          v.SUPABASE_PUBLISHABLE_KEY &&
+          v.SUPABASE_SECRET_KEY
+            ? {
+                url: v.SUPABASE_URL.replace(/\/$/, ""),
+                publishableKey: v.SUPABASE_PUBLISHABLE_KEY,
+                secretKey: v.SUPABASE_SECRET_KEY,
+              }
+            : null,
+        databaseTls,
+        databaseCa,
+        cronSecret: v.CRON_SECRET ?? null,
+        serverless: v.VERCEL === "1",
+        commit: /^[0-9a-f]{12,40}$/i.test(v.VERCEL_GIT_COMMIT_SHA ?? "")
+          ? (v.VERCEL_GIT_COMMIT_SHA ?? "").slice(0, 12).toLowerCase()
+          : null,
       };
     }
   }

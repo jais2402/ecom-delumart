@@ -146,6 +146,13 @@ async function loadMigrations(directory: string): Promise<MigrationFile[]> {
   return files;
 }
 
+/** The migration files of the directory, in order (version and file name), validated as migrate() does. */
+export async function listMigrations(
+  directory: string = MIGRATIONS_DIR,
+): Promise<{ version: string; name: string }[]> {
+  return (await loadMigrations(directory)).map(({ version, name }) => ({ version, name }));
+}
+
 /**
  * Applies pending forward-only migrations in file-name order, each in its own
  * transaction, recording them in public.schema_migrations. Idempotent: applied

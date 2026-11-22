@@ -1,4 +1,5 @@
 import "./server-only";
+import { connectionConfig } from "@delulu/db/runtime";
 import pg from "pg";
 import { SERVER_CONFIG } from "./config";
 import { env } from "./env";
@@ -12,11 +13,22 @@ let web: pg.Pool | undefined;
 let pay: pg.Pool | undefined;
 let jobs: pg.Pool | undefined;
 
-function createPool(connectionString: string, max: number, name: string): pg.Pool {
+type PoolName = "web" | "pay" | "jobs";
+
+/**
+ * Compatible with Supabase's TRANSACTION pooler (port 6543): every query runs inside a transaction
+ * that sets its role, timeouts and app.session_id with SET LOCAL / set_config(..., true), nothing
+ * is set for the session, and node-postgres sends parameterised queries as UNNAMED statements
+ * (no named prepared statement outlives a transaction). TLS verifies the server (db config below).
+ */
+function createPool(connectionString: string, name: PoolName): pg.Pool {
+  const { serverless, databaseTls, databaseCa } = env();
+  const sizes = serverless ? SERVER_CONFIG.pools.serverless : SERVER_CONFIG.pools;
+  const max = { web: sizes.webMax, pay: sizes.payMax, jobs: sizes.jobsMax }[name];
   const pool = new pg.Pool({
-    connectionString,
+    ...connectionConfig({ url: connectionString, tls: databaseTls, caPem: databaseCa }),
     max,
-    idleTimeoutMillis: SERVER_CONFIG.pools.idleTimeoutMs,
+    idleTimeoutMillis: sizes.idleTimeoutMs,
     connectionTimeoutMillis: SERVER_CONFIG.pools.connectionTimeoutMs,
     application_name: `delulu-web-${name}`,
   });
@@ -29,12 +41,12 @@ function createPool(connectionString: string, max: number, name: string): pg.Poo
 }
 
 export function webPool(): pg.Pool {
-  web ??= createPool(env().databaseUrlWeb, SERVER_CONFIG.pools.webMax, "web");
+  web ??= createPool(env().databaseUrlWeb, "web");
   return web;
 }
 
 export function payPool(): pg.Pool {
-  pay ??= createPool(env().databaseUrlPay, SERVER_CONFIG.pools.payMax, "pay");
+  pay ??= createPool(env().databaseUrlPay, "pay");
   return pay;
 }
 
@@ -45,7 +57,7 @@ export function payPool(): pg.Pool {
 export function jobsPool(): pg.Pool | null {
   const url = env().databaseUrlJobs;
   if (url === null) return null;
-  jobs ??= createPool(url, SERVER_CONFIG.pools.jobsMax, "jobs");
+  jobs ??= createPool(url, "jobs");
   return jobs;
 }
 

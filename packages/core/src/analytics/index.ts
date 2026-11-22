@@ -105,7 +105,16 @@ export interface Place {
 
 /** Letters and marks of any script, digits, space and . , ' ( ) - only: no separators or markup. */
 const LABEL = /^[\p{L}\p{M}\p{N} .,'()-]+$/u;
-const REGION_CODE = /^[A-Za-z0-9]{1,3}$/;
+/** ISO 3166-2 subdivision code part, as the edge sends it (x-vercel-ip-country-region). */
+const REGION_CODE = /^[A-Z0-9]{1,3}$/;
+/**
+ * A city (eighth review, minor 5): letters and marks of any script, space, apostrophe, hyphen and
+ * dot only; no digit, symbol or punctuation. The database's analytics.city_ok is the same rule.
+ */
+const CITY = /^[\p{L}\p{M} .'-]+$/u;
+/** Letter-like symbols and blocks the database refuses as well (Latin-1 signs, symbols, emoji). */
+const CITY_EXCLUDED =
+  /[\u0080-\u00BF\u00D7\u00F7\u2010-\u2BFF\u3000-\u303F\uFF00-\uFF20\uFF3B-\uFF40\uFF5B-\uFF65\uFFE0-\uFFFF\u{1D400}-\u{1D7FF}\u{1F000}-\u{1FFFF}]/u;
 
 function decodeLabel(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined) return null;
@@ -121,9 +130,21 @@ function decodeLabel(raw: string | null | undefined): string | null {
   return label;
 }
 
+/** A region code (upper case), or null for anything else. */
+function regionOf(raw: string | null | undefined): string | null {
+  const code = (raw ?? "").trim().toUpperCase();
+  return REGION_CODE.test(code) ? code : null;
+}
+
+function cityOf(raw: string | null | undefined): string | null {
+  const label = decodeLabel(raw);
+  return label !== null && CITY.test(label) && !CITY_EXCLUDED.test(label) ? label : null;
+}
+
 /**
- * Validates the hosting edge's approximate place of a request (R7.1). Anything that is not a
- * plausible label is dropped; an unknown country drops the region and city too.
+ * Validates the hosting edge's approximate place of a request (R7.1). The region is a subdivision
+ * code only and the city a name of letters only; anything else is dropped. An unknown country drops
+ * the region and city too.
  */
 export function parsePlace(raw: {
   country: string | null | undefined;
@@ -134,10 +155,7 @@ export function parsePlace(raw: {
   if (!/^[A-Z]{2}$/.test(country) || country === UNKNOWN_COUNTRY) {
     return { country: UNKNOWN_COUNTRY, region: null, city: null };
   }
-  const regionLabel = decodeLabel(raw.region);
-  const region =
-    regionLabel !== null && REGION_CODE.test(regionLabel) ? regionLabel.toUpperCase() : regionLabel;
-  return { country, region, city: decodeLabel(raw.city) };
+  return { country, region: regionOf(raw.region), city: cityOf(raw.city) };
 }
 
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;

@@ -144,7 +144,9 @@ describe("roles, grants and row-level security", () => {
         },
         { sessionId: await sessionFor(pool, userId) },
       );
-    expect(await sellerOrdersSeen(owner)).toBe(1);
+    // eighth review (0060): the owner reads its seller orders only through the definer reads
+    // (opaque reference, minute-rounded times), never the rows themselves
+    expect(await sellerOrdersSeen(owner)).toBe(0);
     expect(await sellerOrdersSeen(a.userId, company)).toBe(0);
   });
 
@@ -264,11 +266,19 @@ describe("roles, grants and row-level security", () => {
       [
         ...["app_web", "app_pay"].flatMap((r) => [
           `${r} SELECT ledger.journal`,
-          `${r} SELECT ledger.posting`,
           `${r} SELECT ledger.grant_record`,
           `${r} SELECT ledger.wallet`,
         ]),
       ].sort(),
+    );
+    // eighth review (0060): postings are read by column, without their journal or seller order
+    const cols = await pool.query<{ r: string; c: string }>(
+      `SELECT r, c FROM unnest(ARRAY['app_web','app_pay','app_jobs','research_ro']) r,
+              unnest(ARRAY['id','journal_id','account_id','amount','seller_order_id','memo']) c
+        WHERE has_column_privilege(r, 'ledger.posting', c, 'SELECT') ORDER BY 1, 2`,
+    );
+    expect(cols.rows.map((x) => `${x.r} ${x.c}`)).toEqual(
+      ["app_pay", "app_web"].flatMap((r) => ["account_id", "amount", "id", "memo"].map((c) => `${r} ${c}`)),
     );
   });
 });

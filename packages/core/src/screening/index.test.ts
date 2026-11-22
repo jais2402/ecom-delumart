@@ -2,17 +2,21 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { HANDLE_AGREEMENT_CASES } from "./handle-cases";
 import {
+  ADJACENT_HANDLE_WORDS,
   foldHandle,
   GENERIC_HANDLE_WORDS,
   isLookalikeHandle,
+  LONG_PROTECTED_HANDLE_WORDS,
   normaliseForScreening,
   PROTECTED_HANDLE_WORDS,
   RESERVED_HANDLES,
   type ScreenCode,
   type ScreenVerdict,
+  SHORT_PROTECTED_HANDLE_WORDS,
   screenText,
   validateHandle,
   validateStoreName,
+  withinOneEdit,
 } from "./index";
 
 type Row = [input: string, verdict: ScreenVerdict, code?: ScreenCode];
@@ -268,7 +272,9 @@ describe("look-alike store handles (sixth security review, minor 6)", () => {
     s: ["5", "ss"],
     t: ["7"],
     b: ["8"],
-    m: ["rn"],
+    m: ["rn", "nn"],
+    d: ["cl"],
+    w: ["vv"],
   };
   const spell = (words: readonly string[]) =>
     fc
@@ -279,16 +285,27 @@ describe("look-alike store handles (sixth security review, minor 6)", () => {
           .map((chars) => chars.join("")),
       );
 
-  it("property: a protected word in any confusable spelling is refused anywhere in a handle, digits and hyphens included", () => {
+  /**
+   * Whether two pieces would form a letter pair (rn, cl, nn, vv) across their joint (hyphens are
+   * dropped before the pairs are read). The pairs are read all-or-none per handle, so such a joint
+   * can hide a word in a contrived spelling ("admin" + "nnod"); the properties leave those out.
+   */
+  const pairAt = (left: string, right: string) =>
+    ["rn", "cl", "nn", "vv"].includes(
+      left.replaceAll("-", "").slice(-1) + right.replaceAll("-", "").slice(0, 1),
+    );
+
+  it("property: a long protected word in any confusable spelling is refused anywhere in a handle, digits and hyphens included", () => {
     const filler = fc.stringMatching(/^[a-z0-9]{0,5}$/);
     fc.assert(
       fc.property(
-        spell(PROTECTED_HANDLE_WORDS),
+        spell(LONG_PROTECTED_HANDLE_WORDS),
         filler,
         filler,
         fc.boolean(),
         fc.boolean(),
         (bad, pre, post, h1, h2) => {
+          fc.pre(!pairAt(pre, bad) && !pairAt(bad, post));
           const handle = `${pre}${pre && h1 ? "-" : ""}${bad}${post && h2 ? "-" : ""}${post}`;
           expect(isLookalikeHandle(handle), handle).toBe(true);
           if (handle.length <= 24)
@@ -296,6 +313,73 @@ describe("look-alike store handles (sixth security review, minor 6)", () => {
         },
       ),
     );
+  });
+
+  it("eighth review, minor 4 (property): a short protected word in any spelling is refused as a part, next to digits, or joined to a protected, generic or adjacent word", () => {
+    const word = fc.constantFrom(
+      ...PROTECTED_HANDLE_WORDS,
+      ...GENERIC_HANDLE_WORDS,
+      ...ADJACENT_HANDLE_WORDS,
+    );
+    const other = fc.stringMatching(/^[bcdfghjkqvwxz]{1,6}$/);
+    const digits = fc.stringMatching(/^[0-9]{1,3}$/);
+    fc.assert(
+      fc.property(
+        spell(SHORT_PROTECTED_HANDLE_WORDS),
+        fc.oneof(
+          other.map((o) => ["part", o] as const),
+          digits.map((d) => ["digits", d] as const),
+          word.map((w) => ["joined", w] as const),
+        ),
+        fc.boolean(),
+        (bad, [kind, extra], before) => {
+          if (kind === "joined") fc.pre(!(before ? pairAt(extra, bad) : pairAt(bad, extra)));
+          const handle =
+            kind === "part"
+              ? before
+                ? `${extra}-${bad}`
+                : `${bad}-${extra}`
+              : before
+                ? `${extra}${bad}`
+                : `${bad}${extra}`;
+          expect(isLookalikeHandle(handle), handle).toBe(true);
+        },
+      ),
+    );
+  });
+
+  it("eighth review, minor 4 (property): a short protected word inside an ordinary word is accepted", () => {
+    // (no `w`: runs collapse, so `w` reads as the generic word `www` joined to the short word)
+    const letters = fc.stringMatching(/^[bcdfghjkqxz]{1,4}$/);
+    fc.assert(
+      fc.property(fc.constantFrom(...SHORT_PROTECTED_HANDLE_WORDS), letters, letters, (w, pre, post) => {
+        const handle = `${pre}${w}${post}`;
+        if (handle.length <= 24) expect(validateHandle(handle), handle).toEqual({ ok: true, value: handle });
+      }),
+    );
+  });
+
+  it("eighth review, minor 4: one edit from a long protected word (or missing its last letters) is refused; the folds read cl, nn and vv", () => {
+    expect(withinOneEdit("verifed", "verified")).toBe(true);
+    expect(withinOneEdit("modrator", "moderator")).toBe(true);
+    expect(withinOneEdit("dclulu", "delulu")).toBe(true);
+    expect(withinOneEdit("sport", "support")).toBe(false);
+    for (const h of [
+      "dclulu",
+      "aclmin",
+      "adnnin",
+      "verifed",
+      "modrator",
+      "superadm",
+      "securlty-desk",
+      "0fficia1",
+    ])
+      expect(isLookalikeHandle(h), h).toBe(true);
+    for (const h of ["sport-shoes", "secure-locks", "model-trains", "modest-mouse", "systematic"])
+      expect(isLookalikeHandle(h), h).toBe(false);
+    expect(foldHandle("aclmin")).toBe(foldHandle("admin"));
+    expect(foldHandle("adnnin")).toBe(foldHandle("admin"));
+    expect(foldHandle("vvww")).toBe("w");
   });
 
   it("property: a generic word in any confusable spelling is refused as the whole handle, with or without leading and trailing digits", () => {

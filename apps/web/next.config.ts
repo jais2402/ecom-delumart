@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
 const securityHeaders = [
@@ -10,6 +11,10 @@ const securityHeaders = [
 
 const config: NextConfig = {
   transpilePackages: ["@delulu/ui", "@delulu/core", "@delulu/db"],
+  // pnpm monorepo: trace server files from the repository root, so the workspace packages
+  // (@delulu/core, @delulu/db, @delulu/ui) and their dependencies are part of every function on
+  // Vercel (Root Directory apps/web).
+  outputFileTracingRoot: fileURLToPath(new URL("../..", import.meta.url)),
   poweredByHeader: false,
   // next dev would otherwise write apps/web/AGENTS.md on every start
   agentRules: false,

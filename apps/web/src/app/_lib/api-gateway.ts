@@ -35,10 +35,19 @@ export function createApiGateway(): OnboardingGateway {
       await refreshSession();
     },
     async submitPhone(e164) {
-      const result = await api<{ sent: boolean; devCode?: string }>("/api/v1/onboarding/phone", {
-        method: "POST",
-        body: { phone: e164 },
-      });
+      const result = await api<{ sent?: boolean; devCode?: string; recorded?: boolean }>(
+        "/api/v1/onboarding/phone",
+        {
+          method: "POST",
+          body: { phone: e164 },
+        },
+      );
+      if (result.recorded) {
+        // 'unverified' mode: the number is recorded without a code
+        codeSent = false;
+        await refreshSession();
+        return;
+      }
       codeSent = true;
       if (result.devCode) {
         devCodeShown = result.devCode;

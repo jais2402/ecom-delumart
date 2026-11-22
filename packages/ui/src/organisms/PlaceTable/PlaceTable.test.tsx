@@ -25,6 +25,17 @@ describe("PlaceTable", () => {
     await userEvent.click(screen.getByRole("button", { name: "Show places in India" }));
     expect(onDrill).toHaveBeenCalledWith(rows[0]);
   });
+  it("R7.1 (eighth review, minor 3b): a shown row's small sign-up or purchase cell reads 'Fewer than N' (the cell minimum)", () => {
+    const small = [{ key: "IN", label: "India", visitors: 750, signUps: null, purchases: 9 }];
+    render(
+      <PlaceTable caption="Usage" placeHeader="Country" rows={small} minVisitors={10} minCellCount={5} />,
+    );
+    const india = screen.getByRole("row", { name: /India/ });
+    const cells = within(india).getAllByRole("cell");
+    expect(cells[1]).toHaveTextContent("Fewer than 5");
+    expect(cells[2]).toHaveTextContent("9");
+    expect(india).toHaveTextContent("750");
+  });
   it("R7.1: a suppressed row shows 'Fewer than N' and no counts, and is left out of the shares", () => {
     const withSuppressed = [
       { key: "IN", label: "India", visitors: 750, signUps: 40, purchases: 9 },

@@ -193,7 +193,7 @@ export function OverviewScreen() {
       </Panel>
       <Panel
         title="Funnel"
-        hint="Daily visitors (summed) who reached each step."
+        hint="Daily visitors (summed) who reached each step; the last step counts purchases, so a visitor who buys twice counts twice."
         state={funnel}
         retry={retryFunnel}
         isEmpty={(data) => data.steps.every((s) => s.visitors === 0)}

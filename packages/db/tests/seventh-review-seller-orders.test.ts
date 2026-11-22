@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createCoupon, mySellerOrder, mySellerOrders } from "../src/merchant";
-import { CLEAN, checkout, codeOf, payFor, reconcile, user } from "./checkout-fixtures";
+import { aMinuteLater, CLEAN, checkout, codeOf, payFor, reconcile, user } from "./checkout-fixtures";
 import { asActor, createTestDatabase, type TestDatabase, type TestUser } from "./helpers";
 import { asFixture, type Creator, creator, ensureCategories, publishListing } from "./listing-fixtures";
 import { published } from "./selling-fixtures";
@@ -48,6 +48,7 @@ describe("seventh security review: the seller's order reference", () => {
     const q = asFixture(await publishListing(pool, other));
     await payFor(pool, b1, await checkout(pool, b1, [q], { [other.companyId]: "STANDARD" }));
     expect(await reconcile(pool)).toEqual(CLEAN);
+    await aMinuteLater(pool); // 0060: a seller sees an order once its minute has ended
   }, 240_000);
   afterAll(async () => {
     await db.drop();

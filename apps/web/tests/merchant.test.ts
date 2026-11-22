@@ -21,7 +21,15 @@ import { PUBLIC_CACHE } from "../src/server/http";
 import { startTestApp, type TestApp } from "./helpers/app";
 import { arr, Browser, type CallResult, str } from "./helpers/browser";
 import { player, R } from "./helpers/flows";
-import { ageAccount, makeAdmin, publishedListing, type Seller, seller, userIdOf } from "./helpers/studio";
+import {
+  ageAccount,
+  aMinuteLater,
+  makeAdmin,
+  publishedListing,
+  type Seller,
+  seller,
+  userIdOf,
+} from "./helpers/studio";
 
 /** Reports, appeals, blocks, merchant coupons and the merchant read models through the routes. */
 let app: TestApp;
@@ -349,6 +357,7 @@ describe("coupons and merchant reads", () => {
     const productId = await publishedListing(a.b, { quantity: 2 });
     const buyer = await player({ pin: false });
     expect((await buy(buyer.b, productId, a.companyId)).paid?.status).toBe(200);
+    await aMinuteLater(app); // 0060: a seller sees an order once its minute has ended
     const aOrders = await orders(a.b);
     expect(arr(aOrders.json.items)).toHaveLength(1);
     const orderId = str(arr(aOrders.json.items)[0]?.id);
@@ -397,6 +406,7 @@ describe("journey: sell, coupon, buy, earnings, reports, appeal", () => {
     expect(before - after).toBe(1_000_000n);
 
     // S's orders and earnings show it, with no buyer identity: net = 90% less the 5% fee
+    await aMinuteLater(app); // 0060: a seller sees an order once its minute has ended
     const listed = await orders(s.b);
     expectPrivate(listed);
     const o = arr(listed.json.items)[0];

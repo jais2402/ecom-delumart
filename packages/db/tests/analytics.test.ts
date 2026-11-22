@@ -40,6 +40,10 @@ const dayAt = (offset: number): string => {
 
 /** A stable 16-byte visitor key for a test label (stands for the web server's keyed hash). */
 const vk = (label: string): Buffer => createHash("sha256").update(label).digest().subarray(0, 16);
+/** A stable 8-byte address-prefix key (0061): here each test visitor has a prefix of their own. */
+const pk = (label: string): Buffer => createHash("sha256").update(`prefix:${label}`).digest().subarray(0, 8);
+/** Server-side events (0061): stored with no visitor or place key, in their hour. */
+const SERVER_EVENTS = ["purchase", "sign_up", "creator_unlock", "shop_registered", "listing_published"];
 
 interface PlantedEvent {
   day: string;
@@ -53,25 +57,30 @@ interface PlantedEvent {
   device?: string;
 }
 
-/** Writes past-dated events as the owner (the capture path only ever writes the present minute). */
+/**
+ * Writes past-dated events as the owner (the capture path only ever writes the present minute).
+ * Server-side events carry no visitor or place key and sit on the hour (0061).
+ */
 async function plantEvents(events: readonly PlantedEvent[]): Promise<void> {
   for (const [i, e] of events.entries()) {
+    const server = SERVER_EVENTS.includes(e.name);
     await pool.query(
-      `INSERT INTO analytics.event (occurred_at, day, name, surface, visitor_key, signed_in, country, region, city,
-                                    device_class, props)
-       VALUES (($1::date)::timestamp AT TIME ZONE 'UTC' + make_interval(mins => $2), $1::date, $3, $4, $5, false,
+      `INSERT INTO analytics.event (occurred_at, day, name, surface, visitor_key, place_key, signed_in, country, region,
+                                    city, device_class, props)
+       VALUES (($1::date)::timestamp AT TIME ZONE 'UTC' + make_interval(mins => $2), $1::date, $3, $4, $5, $11, false,
                $6, $7, $8, $9, $10::jsonb)`,
       [
         e.day,
-        i % 1400,
+        server ? 60 * (i % 24) : i % 1400,
         e.name,
         e.surface ?? "shop",
-        vk(e.visitor),
+        server ? null : vk(e.visitor),
         e.country ?? "IN",
         e.region === undefined ? "MH" : e.region,
         e.city === undefined ? "Mumbai" : e.city,
         e.device ?? "mobile",
         JSON.stringify(e.props ?? {}),
+        server ? null : pk(e.visitor),
       ],
     );
   }
@@ -83,6 +92,7 @@ function event(overrides: Partial<RecordEventInput> = {}): RecordEventInput {
     name: "page_view",
     surface: "shop",
     visitorKey: randomBytes(16),
+    placeKey: randomBytes(8),
     country: "IN",
     region: "KA",
     city: "Bengaluru",
@@ -142,6 +152,7 @@ describe("0052: the event table holds nothing personal", () => {
       "city",
       "device_class",
       "props",
+      "place_key", // 0061: a keyed hash of the address prefix (browser events), forgotten after two days
     ]);
     for (const c of columns) {
       expect(c).not.toMatch(
@@ -209,7 +220,8 @@ describe("0052: the event table holds nothing personal", () => {
       "analytics.admin_places(text,text,text,date,date)": ["app_web"],
       "analytics.admin_timeseries(text,date,date)": ["app_web"],
       "analytics.admin_top(text,date,date,integer)": ["app_web"],
-      "analytics.record_event(text,text,bytea,text,text,text,text,jsonb)": ["app_web"],
+      "analytics.record_event(text,text,bytea,bytea,text,text,text,text,jsonb)": ["app_web"],
+      "analytics.today_salt()": ["app_web"],
       "core.analytics_purge_job()": ["app_jobs"],
       "core.analytics_rollup_job()": ["app_jobs"],
     });
@@ -322,9 +334,8 @@ describe("0052: analytics.record_event (app_web)", () => {
 
   it("server events need a signed-in actor; listing_published is never accepted from app_web; a shop must be the actor's", async () => {
     for (const name of ["purchase", "sign_up", "creator_unlock", "shop_registered"]) {
-      expect(await codeOf(recordEvent(pool, event({ name, surface: "checkout" }))), name).toBe(
-        "VALIDATION_FAILED",
-      );
+      const anonymous = event({ name, surface: "checkout", visitorKey: null, placeKey: null });
+      expect(await codeOf(recordEvent(pool, anonymous)), name).toBe("VALIDATION_FAILED");
     }
     expect(
       await codeOf(
@@ -338,7 +349,9 @@ describe("0052: analytics.record_event (app_web)", () => {
           name: "purchase",
           surface: "checkout",
           authSessionId: buyer.authSessionId,
-          props: { item_count: 2, amount_bucket: "10k_1l" },
+          visitorKey: null,
+          placeKey: null,
+          props: { amount_bucket: "10k_1l" },
         }),
       ),
     ).toBe(true);
@@ -357,6 +370,8 @@ describe("0052: analytics.record_event (app_web)", () => {
             name: "shop_registered",
             surface: "studio",
             authSessionId: buyer.authSessionId,
+            visitorKey: null,
+            placeKey: null,
             props: { company_id: companyId ?? "" },
           }),
         ),
@@ -375,7 +390,13 @@ describe("0052: analytics.record_event (app_web)", () => {
       expect(
         await recordEvent(
           pool,
-          event({ authSessionId: u.authSessionId, name: "sign_up", surface: "account" }),
+          event({
+            authSessionId: u.authSessionId,
+            name: "sign_up",
+            surface: "account",
+            visitorKey: null,
+            placeKey: null,
+          }),
         ),
       ).toBe(false);
     }
@@ -384,6 +405,10 @@ describe("0052: analytics.record_event (app_web)", () => {
 
   it("product_view and cart_add: the category and company come from the catalog; an unpublished or unknown product records nothing", async () => {
     const [p] = await published(pool, 1);
+    // 0061: a category reaches an event only when it is a catalog category
+    await pool.query(
+      "INSERT INTO core.category (slug, name) VALUES ('gadgets', 'Gadgets') ON CONFLICT DO NOTHING",
+    );
     const key = randomBytes(16);
     expect(
       await recordEvent(
@@ -420,7 +445,7 @@ describe("0052: analytics.record_event (app_web)", () => {
       expect(
         await stateOf(
           pool,
-          "SELECT analytics.record_event(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)",
+          "SELECT analytics.record_event(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)",
           [],
           {
             role,
@@ -509,8 +534,9 @@ describe("0052: analytics.rollup_day", () => {
       { value: "IN|Other|Other", count: 2, visitors: 2 },
       { value: "Other|Other|Other", count: 1, visitors: 1 },
     ]);
+    // a sign-up carries no visitor (0061): counted, folded with its place
     expect(await rollupRows(day, "city", "sign_ups")).toEqual([
-      { value: "IN|Other|Other", count: 1, visitors: 1 },
+      { value: "IN|Other|Other", count: 1, visitors: 0 },
     ]);
     const named = await pool.query(
       `SELECT 1 FROM analytics.daily_rollup WHERE day = $1
@@ -520,18 +546,17 @@ describe("0052: analytics.rollup_day", () => {
     expect(named.rows).toEqual([]);
   });
 
-  it("R7.1: the minimum comes from the configuration", async () => {
+  it("R7.1: the minimum comes from the configuration (0061: which may raise it, never lower it below 10)", async () => {
     const day = dayAt(-6);
     await pool.query(
       `INSERT INTO core.config_version (values, effective_from, note)
-       SELECT values || '{"analytics": {"place_min_visitors": 3}}', now() - interval '1 second', 'test: min 3'
+       SELECT values || '{"analytics": {"place_min_visitors": 13}}', now() - interval '1 second', 'test: min 13'
          FROM core.config_version WHERE id = 1`,
     );
     try {
       await rollup(day);
       expect((await rollupRows(day, "city")).map((r) => r.value)).toEqual([
-        "IN|MH|Lonavala",
-        "IN|MH|Mumbai",
+        "IN|MH|Other",
         "IN|Other|Other",
         "Other|Other|Other",
       ]);
@@ -542,7 +567,7 @@ describe("0052: analytics.rollup_day", () => {
       );
       await rollup(day);
     }
-    expect((await rollupRows(day, "city")).map((r) => r.value)).not.toContain("IN|MH|Lonavala");
+    expect((await rollupRows(day, "city")).map((r) => r.value)).toContain("IN|MH|Mumbai");
   });
 
   it("raw events are purged after the retention (90 days by default); rollups are kept; a purged day is never re-rolled", async () => {
@@ -638,7 +663,9 @@ describe("0052: the Super Admin's reads", () => {
         name: "purchase",
         surface: "checkout",
         authSessionId: shopper.authSessionId,
-        props: { item_count: 9 },
+        visitorKey: null,
+        placeKey: null,
+        props: { amount_bucket: "1cr_plus" },
       }),
     );
     const o = await analyticsOverview(pool, range(today));
@@ -698,12 +725,13 @@ describe("0052: the Super Admin's reads", () => {
     await plantEvents(events);
     await rollup(day);
     const f = await analyticsFunnel(pool, range(day));
+    // 0061: the purchases step counts purchase events (a purchase carries no visitor)
     expect(f.steps).toEqual([
-      { step: "visitors", visitors: 10, conversionFromPrevious: null },
-      { step: "product_views", visitors: 5, conversionFromPrevious: 0.5 },
-      { step: "cart_adds", visitors: 2, conversionFromPrevious: 0.4 },
-      { step: "checkout_starts", visitors: 1, conversionFromPrevious: 0.5 },
-      { step: "purchases", visitors: 1, conversionFromPrevious: 1 },
+      { step: "visitors", visitors: 10, unit: "visitors", conversionFromPrevious: null },
+      { step: "product_views", visitors: 5, unit: "visitors", conversionFromPrevious: 0.5 },
+      { step: "cart_adds", visitors: 2, unit: "visitors", conversionFromPrevious: 0.4 },
+      { step: "checkout_starts", visitors: 1, unit: "visitors", conversionFromPrevious: 0.5 },
+      { step: "purchases", visitors: 1, unit: "events", conversionFromPrevious: 1 },
     ]);
     expect(f.overallConversion).toBe(0.1);
     expect(f.trafficDays).toBe(1);
@@ -718,9 +746,18 @@ describe("0052: the Super Admin's reads", () => {
       region: null,
     });
     expect(countries.minVisitors).toBe(10);
-    // the folded "Other" row is itself below the minimum: no counts, only the flag (0059)
+    // the folded "Other" row is itself below the minimum: no counts, only the flag (0059); a single
+    // sign-up is below the cell minimum (5) and is not shown either (0061)
     expect(countries.items).toEqual([
-      { country: "IN", region: null, city: null, visitors: 17, signUps: 1, purchases: 0, suppressed: false },
+      {
+        country: "IN",
+        region: null,
+        city: null,
+        visitors: 17,
+        signUps: null,
+        purchases: 0,
+        suppressed: false,
+      },
       {
         country: "Other",
         region: null,
@@ -784,13 +821,19 @@ describe("0052: the Super Admin's reads", () => {
     const other = dayAt(-8);
     const events: PlantedEvent[] = [];
     for (let i = 0; i < 11; i++)
-      events.push({ day: other, name: "page_view", visitor: `town${i}`, region: "KA", city: `Town ${i}` });
+      events.push({
+        day: other,
+        name: "page_view",
+        visitor: `town${i}`,
+        region: "KA",
+        city: `Town ${"ABCDEFGHIJK"[i]}`,
+      }); // 0061: no digits in a city
     events.push({
       day: other,
       name: "sign_up",
       visitor: "town0",
       region: "KA",
-      city: "Town 0",
+      city: "Town A",
       surface: "account",
     });
     await plantEvents(events);
@@ -802,7 +845,7 @@ describe("0052: the Super Admin's reads", () => {
         region: "KA",
         city: "Other",
         visitors: 11,
-        signUps: 1,
+        signUps: null, // 0061: one sign-up is below the cell minimum
         purchases: 0,
         suppressed: false,
       },
@@ -872,7 +915,8 @@ describe("0052: the Super Admin's reads", () => {
     );
     expect(rows.length).toBeGreaterThanOrEqual(1);
     expect(rows[0]?.visitor_key).toBeNull();
-    expect(Object.keys(rows[0]?.props ?? {}).sort()).toEqual(["category", "company_id", "product_id"]);
+    // 0061: no company or product names the account that published it
+    expect(Object.keys(rows[0]?.props ?? {}).sort()).toEqual(["category"]);
   });
 
   it("a creator unlock by the passport is recorded by the database (an unlock by spending is the web server's)", async () => {
@@ -892,13 +936,13 @@ describe("0052: the Super Admin's reads", () => {
       ).rows[0]?.n,
     );
     expect(after).toBe(before + 1);
-    // a forged visitor-less event of any other name is refused by the table
+    // a forged visitor-less browser event is refused by the table
     expect(
       await stateOf(
         pool,
         `INSERT INTO analytics.event (occurred_at, day, name, surface, signed_in, country, device_class)
-         VALUES (date_trunc('minute', now()), (date_trunc('minute', now()) AT TIME ZONE 'UTC')::date, 'purchase',
-                 'checkout', true, 'IN', 'mobile')`,
+         VALUES (date_trunc('minute', now()), (date_trunc('minute', now()) AT TIME ZONE 'UTC')::date, 'page_view',
+                 'shop', true, 'IN', 'mobile')`,
       ),
     ).toBe("23514");
   });

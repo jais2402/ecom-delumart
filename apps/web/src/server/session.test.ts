@@ -33,10 +33,15 @@ describe("session cookie (LLD §11.1)", () => {
     expect(cookie).not.toContain("Secure");
     expect(cookie).toContain("HttpOnly");
     expect(cookie).toContain("SameSite=Lax");
-    expect(cookieNames("http://localhost:3000")).toEqual({ session: "dm_session", csrf: "dm_csrf" });
+    expect(cookieNames("http://localhost:3000")).toEqual({
+      session: "dm_session",
+      csrf: "dm_csrf",
+      flow: "dm_auth_flow",
+    });
     expect(cookieNames("https://delulumart.example")).toEqual({
       session: "__Host-dm_session",
       csrf: "__Host-dm_csrf",
+      flow: "__Host-dm_auth_flow",
     });
   });
 

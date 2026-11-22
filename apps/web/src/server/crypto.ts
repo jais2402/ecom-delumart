@@ -29,12 +29,19 @@ export const phoneFingerprint = (phone: string): Buffer => phoneFingerprintWith(
 // ------------------------------------------------------------------ derived keys
 
 /** A purpose-bound key derived from IDENTITY_KEY (HMAC-SHA-256 with a fixed label). */
-export function derivedKeyWith(identityKey: Uint8Array, purpose: "rate-limit" | "csrf"): Buffer {
+export function derivedKeyWith(
+  identityKey: Uint8Array,
+  purpose: "rate-limit" | "csrf" | "auth-flow" | "auth-flow-email",
+): Buffer {
   return createHmac("sha256", identityKey).update(`delulumart/${purpose}/v1`, "utf8").digest();
 }
 
 /** The 32-byte subject of a database rate counter: no raw address or user id is stored. */
-export function rateSubjectWith(identityKey: Uint8Array, kind: "address" | "actor", value: string): Buffer {
+export function rateSubjectWith(
+  identityKey: Uint8Array,
+  kind: "address" | "actor" | "email",
+  value: string,
+): Buffer {
   return createHmac("sha256", derivedKeyWith(identityKey, "rate-limit"))
     .update(`${kind}\0${value}`, "utf8")
     .digest();
@@ -47,7 +54,7 @@ export function sessionCsrfTokenWith(identityKey: Uint8Array, sessionId: string)
     .digest("base64url");
 }
 
-export const rateSubject = (kind: "address" | "actor", value: string): Buffer =>
+export const rateSubject = (kind: "address" | "actor" | "email", value: string): Buffer =>
   rateSubjectWith(env().identityKey, kind, value);
 export const sessionCsrfToken = (sessionId: string): string =>
   sessionCsrfTokenWith(env().identityKey, sessionId);

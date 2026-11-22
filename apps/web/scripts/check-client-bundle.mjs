@@ -12,11 +12,18 @@ const NAMES = [
   "DATABASE_URL_WEB",
   "DATABASE_URL_PAY",
   "DATABASE_URL_OWNER",
+  "DATABASE_URL_JOBS",
   "IDENTITY_KEY",
   "CARD_KEY",
   "PIN_PEPPER",
   "FIELD_KEY",
+  "JOBS_SIGNING_KEY",
+  "ANALYTICS_KEY",
+  "CRON_SECRET",
+  "SUPABASE_SECRET_KEY",
 ];
+// Any Supabase secret key at all (sb_secret_...), whatever variable it came from.
+const PATTERNS = [/sb_secret_[A-Za-z0-9_-]{10,}/];
 
 function envFile(path) {
   if (!existsSync(path)) return {};
@@ -54,6 +61,9 @@ for (const file of files(staticDir)) {
   for (const needle of needles) {
     if (text.includes(needle))
       leaks.push(`${file.slice(root.length)}: ${NAMES.includes(needle) ? needle : "a secret value"}`);
+  }
+  for (const pattern of PATTERNS) {
+    if (pattern.test(text)) leaks.push(`${file.slice(root.length)}: a Supabase secret key`);
   }
 }
 if (leaks.length > 0) {

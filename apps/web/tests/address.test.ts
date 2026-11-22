@@ -11,7 +11,7 @@ import * as studioOrders from "../src/app/api/v1/studio/orders/route";
 import { startTestApp, type TestApp } from "./helpers/app";
 import { arr, Browser, str } from "./helpers/browser";
 import { player, R } from "./helpers/flows";
-import { publishedListing, seller } from "./helpers/studio";
+import { aMinuteLater, publishedListing, seller } from "./helpers/studio";
 
 /** PRD R5.2 delivery addresses through the routes (migration 0058). */
 let app: TestApp;
@@ -386,6 +386,7 @@ describe("checkout and orders with an address (PRD R5.2, decisions.md #4)", () =
     });
     expect(q.status).toBe(201);
     await payFor(b, str(q.json.id));
+    await aMinuteLater(app); // 0060: a seller sees an order once its minute has ended
     const orders = await s.b.call(studioOrders.GET, "GET", "/api/v1/studio/orders");
     expect(orders.status).toBe(200);
     const ref = str(

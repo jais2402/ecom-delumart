@@ -18,6 +18,9 @@ function valid(overrides: Record<string, string | undefined> = {}): Record<strin
     FIELD_KEY: key(),
     AUTH_PROVIDER: "dev",
     APP_ORIGIN: "http://localhost:3000",
+    SUPABASE_URL: "https://abcdefghijklmnopqrst.supabase.co",
+    SUPABASE_PUBLISHABLE_KEY: "sb_publishable_Abc123def456ghi789",
+    SUPABASE_SECRET_KEY: "sb_secret_Zyx987wvu654tsr321qpo",
     ...overrides,
   };
 }
@@ -252,5 +255,104 @@ describe("analytics configuration (0052)", () => {
         }),
       ),
     ).toThrow(/DEV_GEO must not be set/);
+  });
+});
+
+describe("deployment configuration (Vercel + Supabase)", () => {
+  const prod = (overrides: Record<string, string | undefined> = {}) =>
+    valid({
+      NODE_ENV: "production",
+      AUTH_PROVIDER: "supabase",
+      DATABASE_URL_OWNER: undefined,
+      APP_ORIGIN: "https://delulu.example",
+      DATABASE_URL_WEB:
+        "postgres://app_web.abcdefghijklmnopqrst:pw@aws-0-ap-south-1.pooler.supabase.com:6543/postgres",
+      DATABASE_URL_PAY:
+        "postgres://app_pay.abcdefghijklmnopqrst:pw@aws-0-ap-south-1.pooler.supabase.com:6543/postgres",
+      ...overrides,
+    });
+  const messageOf = (source: Record<string, string | undefined>): string => {
+    try {
+      parseEnv(source);
+      return "";
+    } catch (error) {
+      return (error as Error).message;
+    }
+  };
+
+  it("US-01: AUTH_PROVIDER=supabase needs SUPABASE_URL and both keys; the secret key is never echoed", () => {
+    const parsed = parseEnv(prod());
+    expect(parsed.supabase).toEqual({
+      url: "https://abcdefghijklmnopqrst.supabase.co",
+      publishableKey: "sb_publishable_Abc123def456ghi789",
+      secretKey: "sb_secret_Zyx987wvu654tsr321qpo",
+    });
+    for (const name of ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY"]) {
+      expect(messageOf(prod({ [name]: undefined })), name).toContain(name);
+    }
+    // the keys swapped, or a legacy JWT key: refused by shape, without repeating it
+    const m = messageOf(prod({ SUPABASE_SECRET_KEY: "sb_publishable_Abc123def456ghi789" }));
+    expect(m).toContain("SUPABASE_SECRET_KEY");
+    expect(m).not.toContain("Abc123def456ghi789");
+    expect(messageOf(prod({ SUPABASE_PUBLISHABLE_KEY: "eyJhbGciOiJIUzI1NiJ9.e30.x" }))).toContain(
+      "SUPABASE_PUBLISHABLE_KEY",
+    );
+    // the dev provider does not need them
+    expect(
+      parseEnv(
+        valid({
+          SUPABASE_URL: undefined,
+          SUPABASE_PUBLISHABLE_KEY: undefined,
+          SUPABASE_SECRET_KEY: undefined,
+        }),
+      ).supabase,
+    ).toBeNull();
+  });
+
+  it("production needs an https APP_ORIGIN and an https SUPABASE_URL (http only for a loopback smoke test)", () => {
+    expect(messageOf(prod({ APP_ORIGIN: "http://delulu.example" }))).toContain("APP_ORIGIN must be https");
+    expect(messageOf(prod({ SUPABASE_URL: "http://abcdefghijklmnopqrst.supabase.co" }))).toContain(
+      "SUPABASE_URL must be https",
+    );
+    expect(messageOf(prod({ SUPABASE_URL: "https://x.supabase.co/auth/v1" }))).toContain("SUPABASE_URL");
+    expect(
+      parseEnv(
+        prod({
+          APP_ORIGIN: "http://localhost:3400",
+          SUPABASE_URL: "http://127.0.0.1:3401",
+          DATABASE_URL_WEB: "postgres://app_web:pw@127.0.0.1:5432/x",
+          DATABASE_URL_PAY: "postgres://app_pay:pw@127.0.0.1:5432/x",
+        }),
+      ).appOrigin,
+    ).toBe("http://localhost:3400");
+  });
+
+  it("database TLS: verified by default for a remote host, refused off in production unless every host is loopback", () => {
+    expect(parseEnv(prod()).databaseTls).toBe("verify-full");
+    expect(parseEnv(valid()).databaseTls).toBe("disable");
+    expect(messageOf(prod({ DATABASE_TLS: "disable" }))).toContain("DATABASE_TLS");
+    expect(() => parseEnv(valid({ DATABASE_TLS: "require" }))).toThrow(/DATABASE_TLS/);
+    const pem = "-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----";
+    expect(parseEnv(prod({ DATABASE_CA_CERT: pem })).databaseCa).toContain("BEGIN CERTIFICATE");
+    expect(parseEnv(prod({ DATABASE_CA_CERT: Buffer.from(pem).toString("base64") })).databaseCa).toContain(
+      "BEGIN CERTIFICATE",
+    );
+    expect(messageOf(prod({ DATABASE_CA_CERT: "nonsense" }))).toContain("DATABASE_CA_CERT");
+  });
+
+  it("CRON_SECRET is optional, long and random; serverless sizing follows VERCEL=1; the commit is read for /api/health", () => {
+    expect(parseEnv(prod()).cronSecret).toBeNull();
+    const secret = randomBytes(32).toString("hex");
+    expect(parseEnv(prod({ CRON_SECRET: secret })).cronSecret).toBe(secret);
+    const m = messageOf(prod({ CRON_SECRET: "short" }));
+    expect(m).toContain("CRON_SECRET");
+    expect(m).not.toContain("short");
+    expect(messageOf(prod({ CRON_SECRET: "a".repeat(64) }))).toContain("CRON_SECRET is a placeholder");
+    expect(parseEnv(prod({ VERCEL: "1" })).serverless).toBe(true);
+    expect(parseEnv(prod()).serverless).toBe(false);
+    expect(parseEnv(prod({ VERCEL_GIT_COMMIT_SHA: "0123456789abcdef0123456789abcdef01234567" })).commit).toBe(
+      "0123456789ab",
+    );
+    expect(parseEnv(prod({ VERCEL_GIT_COMMIT_SHA: "not a sha" })).commit).toBeNull();
   });
 });

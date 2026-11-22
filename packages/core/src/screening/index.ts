@@ -15,17 +15,27 @@
  * ("u p i", "u.p.i", "g-pay").
  */
 import {
+  ADJACENT_HANDLE_WORDS,
   BLOCKED_TERMS,
   BRAND_TERMS,
   GENERIC_HANDLE_WORDS,
+  LONG_PROTECTED_HANDLE_WORDS,
   OFFICIAL_TERMS,
   PAYMENT_TERMS,
   PROTECTED_HANDLE_WORDS,
+  SHORT_PROTECTED_HANDLE_WORDS,
   type Term,
   WATCH_TERMS,
 } from "./terms";
 
-export { GENERIC_HANDLE_WORDS, PROTECTED_HANDLE_WORDS, RESERVED_HANDLES } from "./terms";
+export {
+  ADJACENT_HANDLE_WORDS,
+  GENERIC_HANDLE_WORDS,
+  LONG_PROTECTED_HANDLE_WORDS,
+  PROTECTED_HANDLE_WORDS,
+  RESERVED_HANDLES,
+  SHORT_PROTECTED_HANDLE_WORDS,
+} from "./terms";
 
 export type ScreenVerdict = "OK" | "NEEDS_REVIEW" | "REJECT";
 export type ScreenCode =
@@ -324,54 +334,131 @@ const HANDLE_FOLD: Readonly<Record<string, string>> = {
   "8": "b",
 };
 
-function foldWith(handle: string, rnAsM: boolean): string {
+/** Letter pairs read as one letter (`rn`→m, `cl`→d, `nn`→m, `vv`→w), applied in this order. */
+const LIGATURES: readonly (readonly [string, string])[] = [
+  ["rn", "m"],
+  ["cl", "d"],
+  ["nn", "m"],
+  ["vv", "w"],
+];
+
+const collapse = (s: string): string => s.replace(/(.)\1+/gu, "$1");
+
+/**
+ * The fold of a handle (or part) under one reading: lower case, hyphens removed, the ligatures
+ * when `ligatures` holds, then the character folds; runs of one letter collapsed when `runs`.
+ * Mirrored by core.handle_fold3 (migration 0063).
+ */
+function foldWith(handle: string, ligatures: boolean, runs = true): string {
   let s = handle.toLowerCase().replaceAll("-", "");
-  if (rnAsM) s = s.replaceAll("rn", "m");
+  if (ligatures) for (const [from, to] of LIGATURES) s = s.replaceAll(from, to);
   let out = "";
   for (const ch of s) out += HANDLE_FOLD[ch] ?? ch;
-  return out.replace(/(.)\1+/gu, "$1");
+  return runs ? collapse(out) : out;
 }
 
 /**
- * The confusable-folded form of a handle: lower case, hyphens removed, `rn` read as `m`, then
- * 0→o, 1/i/l→l, 3→e, 4→a, 5→s, 7→t, 8→b, and runs of one letter collapsed to one (`dellulu` →
- * `delulu`). Mirrored by core.handle_fold in the database (0056).
+ * The confusable-folded form of a handle: lower case, hyphens removed, `rn`→m, `cl`→d, `nn`→m,
+ * `vv`→w, then 0→o, 1/i/l→l, 3→e, 4→a, 5→s, 7→t, 8→b, and runs of one letter collapsed to one
+ * (`dellulu` → `delulu`). Mirrored by core.handle_fold3 in the database (0063).
  */
 export function foldHandle(handle: string): string {
   return foldWith(handle, true);
 }
 
-const folded = (words: readonly string[], rnAsM: boolean) => words.map((w) => foldWith(w, rnAsM));
-const FOLDS = [true, false].map((rnAsM) => ({
-  rnAsM,
-  protectedWords: folded(PROTECTED_HANDLE_WORDS, rnAsM),
-  genericWords: new Set(folded(GENERIC_HANDLE_WORDS, rnAsM)),
-}));
+/** Whether `a` and `b` are at most one insertion, deletion or substitution apart. */
+export function withinOneEdit(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  const [s, t] = a.length <= b.length ? [a, b] : [b, a];
+  let i = 0;
+  while (i < s.length && s[i] === t[i]) i++;
+  if (s.length === t.length) return s.slice(i + 1) === t.slice(i + 1);
+  return s.slice(i) === t.slice(i + 1);
+}
 
-/** Whether a protected (brand or authority) word appears anywhere in the handle, in any spelling. */
-export function hasProtectedHandleWord(handle: string): boolean {
-  return FOLDS.some((f) => {
-    const h = foldWith(handle, f.rnAsM);
-    return f.protectedWords.some((w) => h.includes(w));
+const READINGS = [true, false].map((ligatures) => {
+  const fold = (w: string) => foldWith(w, ligatures, false);
+  const adjacent = ["", ...PROTECTED_HANDLE_WORDS, ...GENERIC_HANDLE_WORDS, ...ADJACENT_HANDLE_WORDS].map(
+    fold,
+  );
+  const shortForms = new Set<string>();
+  for (const w of SHORT_PROTECTED_HANDLE_WORDS.map(fold))
+    for (const a of adjacent) for (const b of [...adjacent, "s"]) shortForms.add(collapse(a + w + b));
+  return {
+    ligatures,
+    long: LONG_PROTECTED_HANDLE_WORDS.map((w) => ({ runs: collapse(fold(w)), plain: fold(w) })),
+    shortForms,
+    generic: new Set(GENERIC_HANDLE_WORDS.map((w) => foldWith(w, ligatures))),
+  };
+});
+
+/**
+ * The folded forms (runs collapsed) a handle part takes when it is a SHORT protected word, alone,
+ * plural or joined to another word, under one reading of the letter pairs. The database keeps the
+ * same set in core.handle_short_form (0063).
+ */
+export function shortHandleForms(ligatures: boolean): ReadonlySet<string> {
+  return (READINGS.find((r) => r.ligatures === ligatures) ?? READINGS[0])?.shortForms ?? new Set();
+}
+
+/**
+ * The parts a short or long word is matched against: every hyphen-separated part and the whole
+ * handle without hyphens, each also without any number of its leading and trailing digits (a
+ * digit may itself spell a letter: `roo7` is `root`).
+ */
+function handleParts(handle: string): string[] {
+  const out = new Set<string>();
+  for (const part of [...handle.split("-"), handle.replaceAll("-", "")]) {
+    const lead = /^[0-9]*/.exec(part)?.[0].length ?? 0;
+    const trail = /[0-9]*$/.exec(part)?.[0].length ?? 0;
+    for (let i = 0; i <= lead; i++)
+      for (let j = 0; j <= trail && i + j <= part.length; j++) {
+        const core = part.slice(i, part.length - j);
+        if (core !== "") out.add(core);
+      }
+  }
+  return [...out];
+}
+
+/**
+ * Whether a protected (brand or authority) word is in the handle, in any spelling (eighth review,
+ * minor 4): a LONG word anywhere, or within one edit of (or missing at most two final letters of)
+ * a part or the whole handle; a SHORT word as a part or the whole handle, with digits around it or
+ * joined to another protected, generic or adjacent word. Mirrored by core.handle_protected_lookalike.
+ */
+export function hasProtectedHandleWord(value: string): boolean {
+  const handle = value.toLowerCase();
+  const parts = handleParts(handle);
+  return READINGS.some((r) => {
+    const whole = foldWith(handle, r.ligatures);
+    if (r.long.some((w) => whole.includes(w.runs))) return true;
+    return parts.some((p) => {
+      const plain = foldWith(p, r.ligatures, false);
+      if (r.shortForms.has(collapse(plain))) return true;
+      return r.long.some(
+        (w) =>
+          withinOneEdit(plain, w.plain) ||
+          (plain.length >= 6 && plain.length >= w.plain.length - 2 && w.plain.startsWith(plain)),
+      );
+    });
   });
 }
 
 /**
- * Whether a handle imitates a reserved one (seventh security review, minor 4): a protected word
- * appears anywhere in its folded form (`deluluofficial`, `adrnin`, `admin1`), or its folded form,
- * without any number of its leading and trailing digits, is a generic word (`5h0p`, `shop1`). `rn` is read
- * both as `m` and as itself, so neither reading can hide a word. Mirrored by core.handle_lookalike.
+ * Whether a handle imitates a reserved one: it holds a protected word (hasProtectedHandleWord), or
+ * its folded form, without any number of its leading and trailing digits, is a generic word
+ * (`5h0p`, `shop1`). Both readings of the letter pairs are tried, so neither can hide a word.
+ * Mirrored by core.handle_lookalike.
  */
 export function isLookalikeHandle(handle: string): boolean {
   if (hasProtectedHandleWord(handle)) return true;
-  // the handle without any number of its leading and of its trailing digits (a digit may itself
-  // spell a letter: `roo7` is `root`, so `roo70` is tried as `roo7` too)
   const lead = /^[0-9-]*/.exec(handle)?.[0].length ?? 0;
   const trail = /[0-9-]*$/.exec(handle)?.[0].length ?? 0;
   for (let i = 0; i <= lead; i++) {
     for (let j = 0; j <= trail && i + j <= handle.length; j++) {
       const core = handle.slice(i, handle.length - j);
-      if (FOLDS.some((f) => f.genericWords.has(foldWith(core, f.rnAsM)))) return true;
+      if (READINGS.some((r) => r.generic.has(foldWith(core, r.ligatures)))) return true;
     }
   }
   return false;

@@ -3,7 +3,17 @@ import fc from "fast-check";
 import type pg from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setTestEnv } from "../../tests/helpers/app";
-import { analyticsFailures, declinesTracking, placeOf, track, utcDay, visitorKey } from "./analytics";
+import {
+  analyticsFailures,
+  dailySalt,
+  declinesTracking,
+  forgetDailySalt,
+  placeKey,
+  placeOf,
+  track,
+  utcDay,
+  visitorKey,
+} from "./analytics";
 import { PEER_HEADER, peerStampValue } from "./client-address";
 
 const vercel = { geoSource: "vercel", devGeo: null } as const;
@@ -70,28 +80,63 @@ describe("placeOf (R7.1: the edge's approximate place)", () => {
   });
 });
 
-describe("visitorKey (R16.5: daily-rotating, keyed, never the address or user agent)", () => {
+describe("visitorKey and placeKey (R16.5; eighth review minors 3c and 6: keyed by the day's random salt)", () => {
   const key = randomBytes(32);
+  const salt = (day: string) => ({ day, salt: randomBytes(32) });
   const ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)";
 
-  it("is 16 bytes, stable within a UTC day and different the next day (property)", () => {
+  it("the visitor key is 16 bytes, stable under one salt and different under another (property)", () => {
+    const today = salt("2026-11-20");
     fc.assert(
       fc.property(fc.ipV4(), fc.string({ maxLength: 200 }), (address, agent) => {
-        const a = visitorKey(key, "2026-11-20", address, agent);
+        const a = visitorKey(key, today, address, agent);
         expect(a.length).toBe(16);
-        expect(visitorKey(key, "2026-11-20", address, agent)).toEqual(a);
-        expect(visitorKey(key, "2026-11-21", address, agent)).not.toEqual(a);
+        expect(visitorKey(key, today, address, agent)).toEqual(a);
+        expect(visitorKey(key, salt("2026-11-20"), address, agent)).not.toEqual(a);
+        expect(visitorKey(key, { ...today, day: "2026-11-21" }, address, agent)).not.toEqual(a);
+        expect(visitorKey(randomBytes(32), today, address, agent)).not.toEqual(a);
       }),
     );
   });
 
-  it("groups an IPv6 client by its /64 and separates /64s, browsers and keys", () => {
-    const a = visitorKey(key, "2026-11-20", "2001:db8:1:2::1", ua);
-    expect(visitorKey(key, "2026-11-20", "2001:db8:1:2:ffff::9", ua)).toEqual(a);
-    expect(visitorKey(key, "2026-11-20", "2001:db8:1:3::1", ua)).not.toEqual(a);
-    expect(visitorKey(key, "2026-11-20", "2001:db8:1:2::1", `${ua} Firefox`)).not.toEqual(a);
-    expect(visitorKey(randomBytes(32), "2026-11-20", "2001:db8:1:2::1", ua)).not.toEqual(a);
+  it("groups an IPv6 client by its /64 and separates /64s and browsers", () => {
+    const s = salt("2026-11-20");
+    const a = visitorKey(key, s, "2001:db8:1:2::1", ua);
+    expect(visitorKey(key, s, "2001:db8:1:2:ffff::9", ua)).toEqual(a);
+    expect(visitorKey(key, s, "2001:db8:1:3::1", ua)).not.toEqual(a);
+    expect(visitorKey(key, s, "2001:db8:1:2::1", `${ua} Firefox`)).not.toEqual(a);
     expect(a.toString("hex")).not.toContain(Buffer.from("2001:db8").toString("hex"));
+  });
+
+  it("the place key is 8 bytes of the address prefix only: one person with many user agents or addresses of one /24 (IPv6 /48) is one prefix", () => {
+    const s = salt("2026-11-20");
+    const home = placeKey(key, s, "203.0.113.9");
+    expect(home.length).toBe(8);
+    expect(placeKey(key, s, "203.0.113.200")).toEqual(home);
+    expect(placeKey(key, s, "203.0.114.9")).not.toEqual(home);
+    expect(placeKey(key, salt("2026-11-20"), "203.0.113.9")).not.toEqual(home);
+    const v6 = placeKey(key, s, "2001:db8:1:2::1");
+    expect(placeKey(key, s, "2001:db8:1:ffff::7")).toEqual(v6);
+    expect(placeKey(key, s, "2001:db8:2:2::1")).not.toEqual(v6);
+    // many user agents behind one address: many visitor keys, one place key
+    const visitors = new Set(
+      Array.from({ length: 12 }, (_, i) => visitorKey(key, s, "203.0.113.9", `${ua} ${i}`).toString("hex")),
+    );
+    expect(visitors.size).toBe(12);
+  });
+
+  it("the salt is fetched once per UTC day and cached in the process until the day changes", async () => {
+    forgetDailySalt();
+    const fetch = vi.fn(async () => salt("2026-11-20"));
+    const a = await dailySalt(new Date("2026-11-20T01:00:00Z"), fetch);
+    const b = await dailySalt(new Date("2026-11-20T23:59:59Z"), fetch);
+    expect(b).toBe(a);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const next = vi.fn(async () => salt("2026-11-21"));
+    const c = await dailySalt(new Date("2026-11-21T00:00:01Z"), next);
+    expect(c.day).toBe("2026-11-21");
+    expect(next).toHaveBeenCalledTimes(1);
+    forgetDailySalt();
   });
 
   it("the day comes from the injected clock, in UTC", () => {

@@ -85,6 +85,20 @@ export function rateAddressKey(address: string): string {
   return `${hextets.slice(0, 4).join(":")}::/64`;
 }
 
+/**
+ * The address prefix that analytics' place minimum counts (eighth review, minor 3c): an IPv4
+ * address by its /24 and an IPv6 address by its /48, so one person with many user agents or many
+ * addresses of one network still counts once. Anything else is returned as given.
+ */
+export function placeAddressPrefix(address: string): string {
+  const a = rateAddressKey(address);
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/.exec(a);
+  if (v4) return `${v4[1]}.${v4[2]}.${v4[3]}.0/24`;
+  const v6 = /^([0-9a-f]{4}):([0-9a-f]{4}):([0-9a-f]{4}):[0-9a-f]{4}::\/64$/.exec(a);
+  if (v6) return `${v6[1]}:${v6[2]}:${v6[3]}::/48`;
+  return a;
+}
+
 function expandIpv6(a: string): string[] | null {
   const halves = a.split("::");
   if (halves.length > 2) return null;

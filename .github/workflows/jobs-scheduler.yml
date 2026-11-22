@@ -1,0 +1,53 @@
+# Calls the signed job endpoint of the deployed app every 10 minutes (screening of submitted
+# listings, the moderation safety net, the stuck-session watchdog, purges, analytics rollups).
+# Vercel Hobby runs its own cron only once a day (vercel.json); this fills the gap for free.
+#
+# It does nothing until the repository has BOTH secrets (Settings -> Secrets and variables ->
+# Actions -> New repository secret):
+#   DELULU_APP_ORIGIN        https://your-domain (no trailing slash)
+#   DELULU_JOBS_SIGNING_KEY  the same value as JOBS_SIGNING_KEY in Vercel (64 hex characters)
+# The key never appears in the log: it is only used by openssl to sign. Every job is idempotent and
+# each signature is accepted once, so a late, skipped or doubled run is harmless.
+name: jobs-scheduler
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: jobs-scheduler
+  cancel-in-progress: false
+
+jobs:
+  run-jobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Call the signed jobs endpoint
+        env:
+          APP_ORIGIN: ${{ secrets.DELULU_APP_ORIGIN }}
+          JOBS_SIGNING_KEY: ${{ secrets.DELULU_JOBS_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APP_ORIGIN}" ] || [ -z "${JOBS_SIGNING_KEY}" ]; then
+            echo "Not configured (add DELULU_APP_ORIGIN and DELULU_JOBS_SIGNING_KEY to enable). Skipping."
+            exit 0
+          fi
+          case "${APP_ORIGIN}" in https://*) ;; *) echo "DELULU_APP_ORIGIN must start with https://"; exit 1 ;; esac
+          body='{}'
+          ts="$(date +%s)"
+          sig="$(printf '%s.%s' "${ts}" "${body}" | openssl dgst -sha256 -mac HMAC -macopt "hexkey:${JOBS_SIGNING_KEY}" -r | cut -d' ' -f1)"
+          status="$(curl --silent --show-error --output /tmp/jobs.json --write-out '%{http_code}' \
+            --max-time 90 --proto '=https' \
+            -X POST "${APP_ORIGIN}/api/internal/jobs/run" \
+            -H 'content-type: application/json' \
+            -H "x-delulu-timestamp: ${ts}" \
+            -H "x-delulu-signature: ${sig}" \
+            --data "${body}")"
+          echo "HTTP ${status}"
+          # the report holds counts only (no ids, no personal data)
+          cat /tmp/jobs.json; echo
+          if [ "${status}" != "200" ]; then exit 1; fi

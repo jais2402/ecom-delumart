@@ -26,7 +26,11 @@ export interface Wallet {
 
 export interface StatementRow {
   postingId: bigint;
-  journalId: string;
+  /**
+   * Null, like orderGroupId, on a posting of an order the reader did not buy (a sale credited to
+   * a seller, 0060); such a posting's time is rounded to the minute.
+   */
+  journalId: string | null;
   eventType: string;
   createdAt: Date;
   /** Signed: negative for money leaving the account. */
@@ -148,7 +152,7 @@ export async function myStatement(
   return asWeb(pool, input.authSessionId, async (c) => {
     const { rows } = await c.query<{
       posting_id: string;
-      journal_id: string;
+      journal_id: string | null;
       event_type: string;
       created_at: Date;
       amount_paise: string;

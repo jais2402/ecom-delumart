@@ -9,6 +9,12 @@ export const metadata: Metadata = { title: "Sign in" };
  */
 export const dynamic = "force-dynamic";
 
-export default function Page() {
-  return <SignInScreen devProvider={process.env.AUTH_PROVIDER === "dev"} />;
+export default async function Page({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const error = typeof params.error === "string" ? params.error : null;
+  return <SignInScreen devProvider={process.env.AUTH_PROVIDER === "dev"} callbackError={error} />;
 }

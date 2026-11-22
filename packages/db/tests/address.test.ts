@@ -13,6 +13,7 @@ import {
 import { createCheckoutSession, createPaymentAttempt, pay } from "../src/checkout";
 import { myBrandProgress, myEarnings, myInventory, mySellerOrder, mySellerOrders } from "../src/merchant";
 import {
+  aMinuteLater,
   CLEAN,
   checkout,
   codeOf,
@@ -579,6 +580,7 @@ describe("delivery addresses (PRD R5.2, migration 0058)", () => {
         destination: { deliverTo: "ADDRESS", addressId: home.id },
       });
       await payFor(pool, u, co);
+      await aMinuteLater(pool); // 0060: a seller sees an order once its minute has ended
       const page = await mySellerOrders(pool, { authSessionId: s.u.authSessionId });
       orderRef = page.items[0]?.orderRef ?? "";
       expect(orderRef).not.toBe("");

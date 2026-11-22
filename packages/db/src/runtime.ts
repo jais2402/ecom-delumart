@@ -57,6 +57,7 @@ export {
   type TopItem,
   type TopKind,
   type TopShop,
+  todaySalt,
 } from "./analytics";
 export {
   type CardStatus,
@@ -120,6 +121,20 @@ export {
   storeByHandle,
   updateStore,
 } from "./company";
+export {
+  type ConnectionConfigInput,
+  connectionConfig,
+  type DatabaseTls,
+  decodeCaCertificate,
+  isLoopbackHost,
+} from "./connection";
+export {
+  type AdminHealth,
+  adminHealth,
+  endSession,
+  type PhoneVerificationMode,
+  phoneVerificationMode,
+} from "./deployment";
 export {
   type AnalyticsRollupDay,
   acceptJobsRequest,

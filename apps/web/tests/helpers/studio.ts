@@ -150,3 +150,26 @@ export async function ageAccount(app: TestApp, b: Browser, hours: number): Promi
     [await userIdOf(app, b), hours],
   );
 }
+
+/**
+ * Test-only stand-in for waiting until the current minute has ended (migration 0060: a seller sees
+ * an order only once the minute in which it was placed is over). Moves the orders placed in the
+ * current minute back by one minute, as the owner with triggers off, instead of sleeping.
+ */
+export async function aMinuteLater(app: TestApp): Promise<void> {
+  const c = await app.db.pool.connect();
+  try {
+    await c.query("BEGIN");
+    await c.query("SET LOCAL session_replication_role = replica");
+    await c.query(
+      `UPDATE core.order_group SET created_at = created_at - interval '1 minute'
+        WHERE created_at >= date_trunc('minute', clock_timestamp())`,
+    );
+    await c.query("COMMIT");
+  } catch (error) {
+    await c.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    c.release();
+  }
+}

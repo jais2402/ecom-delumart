@@ -9,7 +9,7 @@ import * as studioOrders from "../src/app/api/v1/studio/orders/route";
 import { startTestApp, type TestApp } from "./helpers/app";
 import { arr, type Browser, str } from "./helpers/browser";
 import { player, R } from "./helpers/flows";
-import { makeAdmin, publishedListing, type Seller, seller } from "./helpers/studio";
+import { aMinuteLater, makeAdmin, publishedListing, type Seller, seller } from "./helpers/studio";
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/g;
@@ -59,6 +59,7 @@ describe("major 3: the seller's order reference", () => {
     s = await seller(app);
     const productId = await publishedListing(s.b, { quantity: 3 });
     for (let i = 0; i < 2; i++) await buy((await player({ pin: false })).b, productId, s.companyId);
+    await aMinuteLater(app); // 0060: a seller sees an order once its minute has ended
   }, 120_000);
 
   /** Every id of a buyer-side record of the store's orders. */

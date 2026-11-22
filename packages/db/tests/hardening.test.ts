@@ -344,7 +344,7 @@ describe("security hardening (review findings)", () => {
       });
     });
 
-    it("seller side: the company's owner sees its seller orders, lines and shipments but not the buyer's group", async () => {
+    it("seller side (eighth review, 0060): the company's owner reads none of its seller orders, lines, shipments or the buyer's group directly — only through the definer reads", async () => {
       const sellerSide = async (c: pg.PoolClient) => ({
         sellerOrders: await countRows(c, "SELECT count(*) AS n FROM core.seller_order"),
         lines: await countRows(c, "SELECT count(*) AS n FROM core.order_line"),
@@ -352,9 +352,9 @@ describe("security hardening (review findings)", () => {
         groups: await countRows(c, "SELECT count(*) AS n FROM core.order_group"),
       });
       expect(await asActor(pool, { role: "app_web", userId: f.seller }, sellerSide)).toEqual({
-        sellerOrders: 1,
-        lines: 1,
-        shipments: 1,
+        sellerOrders: 0,
+        lines: 0,
+        shipments: 0,
         groups: 0,
       });
       // user A naming the company in app.company_id (a setting A controls) sees none of it
@@ -363,9 +363,16 @@ describe("security hardening (review findings)", () => {
         return sellerSide(c);
       });
       expect(claimed).toEqual({ sellerOrders: 0, lines: 0, shipments: 0, groups: 0 });
+      // the buyer still reads their own order's rows (the policies are not simply closed)
+      expect(await asActor(pool, { role: "app_web", userId: f.b.userId }, sellerSide)).toEqual({
+        sellerOrders: 1,
+        lines: 1,
+        shipments: 1,
+        groups: 1,
+      });
     });
 
-    it("purchases are anonymous to sellers: the owner reads its seller orders but never their buyer", async () => {
+    it("purchases are anonymous to sellers: the owner never reads their buyer, nor (0060) the seller order's row directly", async () => {
       const owner = { role: "app_web", userId: f.seller };
       expect(
         await stateOf(
@@ -383,7 +390,7 @@ describe("security hardening (review findings)", () => {
         );
         return rows;
       });
-      expect(visible).toEqual([{ id: f.sellerOrderB, net_paise: "9500" }]);
+      expect(visible).toEqual([]);
     });
 
     it("app_web cannot read tombstones, audit or raw analytics, but can append audit_log; analytics events only through analytics.record_event (0052)", async () => {
@@ -415,7 +422,8 @@ describe("security hardening (review findings)", () => {
       expect(
         await stateOf(
           pool,
-          "SELECT analytics.record_event('page_view', 'shop', '\\x00112233445566778899aabbccddeeff', 'IN', NULL, NULL, 'mobile', '{}')",
+          // 0061: a browser event also carries its 8-byte place key
+          "SELECT analytics.record_event('page_view', 'shop', '\\x00112233445566778899aabbccddeeff', '\\x0011223344556677', 'IN', NULL, NULL, 'mobile', '{}')",
           [],
           web(),
         ),

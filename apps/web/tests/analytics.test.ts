@@ -8,6 +8,7 @@ import * as top from "../src/app/api/v1/admin/analytics/top/route";
 import * as adminReports from "../src/app/api/v1/admin/reports/route";
 import * as events from "../src/app/api/v1/events/route";
 import * as profile from "../src/app/api/v1/profile/route";
+import { settleTracking } from "../src/server/analytics";
 import { jobsPool } from "../src/server/db";
 import { runJobs } from "../src/server/jobs";
 import { startTestApp, type TestApp } from "./helpers/app";
@@ -123,6 +124,7 @@ describe("POST /api/v1/events", () => {
 
   it("server events (purchase, sign_up, creator_unlock, shop_registered, listing_published) are never accepted from a browser", async () => {
     const { b } = await player({ pin: false });
+    await settleTracking(); // its sign_up is recorded after the response
     const before = await eventCount();
     for (const name of ["purchase", "sign_up", "creator_unlock", "shop_registered", "listing_published"]) {
       expect204(await send(b, { name, surface: "checkout", props: {} }));
@@ -171,6 +173,7 @@ describe("POST /api/v1/events", () => {
 
   it("R15.2: a signed-in player who switched on the research opt-out records nothing; signed-in players are marked", async () => {
     const { b } = await player({ pin: false });
+    await settleTracking();
     expect204(await send(b, { name: "page_view", surface: "account" }));
     expect((await lastEvent())?.signed_in).toBe(true);
     const opt = await b.call(profile.POST, "POST", "/api/v1/profile", { body: { researchOptOut: true } });
@@ -191,6 +194,7 @@ describe("POST /api/v1/events", () => {
 describe("server events", () => {
   it("R16.5/invariant 5: a real purchase writes sign_up and purchase server-side (amount bucketed); a replay writes nothing more", async () => {
     const { b } = await player({ pin: false });
+    await settleTracking(); // server events are recorded after the response (0061, minor 8c)
     const signUps = await app.db.pool.query(
       "SELECT count(*)::int AS n FROM analytics.event WHERE name = 'sign_up'",
     );
@@ -221,6 +225,7 @@ describe("server events", () => {
       });
     const paid = await pay();
     expect(paid.status, paid.text).toBe(200);
+    await settleTracking();
     expect(await purchases()).toBe(before + 1);
     const { rows } = await app.db.pool.query<EventRow>(
       "SELECT name, surface, country, region, city, device_class, signed_in, props FROM analytics.event WHERE name = 'purchase' ORDER BY id DESC LIMIT 1",
@@ -229,6 +234,7 @@ describe("server events", () => {
     expect(Object.keys(rows[0]?.props ?? {})).toEqual(["amount_bucket"]);
     expect(JSON.stringify(rows[0])).not.toContain(str(paid.json.totalPaise));
     expect((await pay()).status).toBe(200);
+    await settleTracking();
     expect(await purchases()).toBe(before + 1);
   });
 

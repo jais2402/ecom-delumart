@@ -165,6 +165,8 @@ export interface MeResponse {
   };
   profile: { handle: string } | null;
   account: WalletResponse | null;
+  /** How the phone step works right now (an owner setting): a text-message code, or none. */
+  phoneVerification?: "sms" | "unverified";
 }
 
 export interface WalletResponse {
@@ -312,7 +314,8 @@ export interface AddressesResponse {
 
 export interface StatementItem {
   postingId: string;
-  journalId: string;
+  /** Null on a sale credited to a seller (0060): the journal is the buyer's order. */
+  journalId: string | null;
   eventType: string;
   createdAt: string;
   amountPaise: string;
