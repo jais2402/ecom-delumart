@@ -385,7 +385,7 @@ try {
       const list = await call(seller, "GET", "/api/v1/studio/orders?limit=10");
       assert.equal(list.status, 200);
       assert.equal(list.body.items.length, 1);
-      const ref = list.body.items[0].orderRef;
+      const ref = list.body.items[0].id;
       const one = await call(seller, "GET", `/api/v1/studio/orders/${ref}`);
       const text = JSON.stringify([list.body, one.body]);
       for (const s of [...SECRETS, HOME_EDITED_LINE2, homeId, "address", "Karnataka"]) {
@@ -434,7 +434,7 @@ try {
       await shot(buyer, "address-07-delete-dialog");
       await dialog.getByRole("button", { name: "Delete address" }).click();
       await buyer.getByText(/Address deleted/).waitFor();
-      assert.equal(await buyer.getByRole("article", { name: "Home" }).count(), 0);
+      await buyer.getByRole("article", { name: "Home" }).waitFor({ state: "detached" });
       await buyer.goto(`/orders/${orderId}`);
       const section = buyer.getByRole("region", { name: "Delivery address" });
       await section.getByText("Address removed").waitFor();
