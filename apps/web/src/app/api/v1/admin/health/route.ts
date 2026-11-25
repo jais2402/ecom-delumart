@@ -40,6 +40,7 @@ export const GET = route(
         jobsLastRunAt: db.jobsLastRunAt,
         jobsRuns: db.jobsRuns,
         captcha: e.captcha === null ? "off" : "on",
+        googleSignIn: e.googleSignIn,
         warnings,
       },
     };

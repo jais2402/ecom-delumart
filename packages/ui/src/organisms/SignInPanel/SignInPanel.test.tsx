@@ -13,6 +13,13 @@ describe("SignInPanel", () => {
     expect(screen.getByRole("textbox", { name: /Email address/ })).toHaveAttribute("autocomplete", "email");
   });
 
+  it("showGoogle={false} leaves out the Google button and keeps the email form", () => {
+    render(<SignInPanel onGoogle={noop} onEmailSubmit={noop} showGoogle={false} />);
+    expect(screen.queryByRole("button", { name: "Continue with Google" })).toBeNull();
+    expect(screen.queryByText("or use an email link")).toBeNull();
+    expect(screen.getByLabelText(/Email address/)).toBeInTheDocument();
+  });
+
   it("rejects an invalid email, ties the error to the field and does not submit", async () => {
     const onEmailSubmit = vi.fn(noop);
     render(<SignInPanel onGoogle={noop} onEmailSubmit={onEmailSubmit} />);

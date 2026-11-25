@@ -78,6 +78,12 @@ export interface Env {
   captcha: { siteKey: string; secretKey: string; verifyUrl: string } | null;
   /** CAPTCHA=off was set explicitly: /api/v1/admin/health reports `captcha: "off"` as a warning. */
   captchaOff: boolean;
+  /**
+   * "Continue with Google" is offered and its start route answers. With Supabase it is OFF unless
+   * GOOGLE_SIGN_IN=on, because the button only works once the Google provider is set up in the
+   * Supabase dashboard. The local development provider always offers it.
+   */
+  googleSignIn: boolean;
 }
 
 /** Cloudflare's documented server-side validation endpoint. */
@@ -216,6 +222,7 @@ const schema = z.object({
     )
     .optional(),
   CAPTCHA: z.enum(["on", "off"], { error: "must be 'on' or 'off'" }).optional(),
+  GOOGLE_SIGN_IN: z.enum(["on", "off"], { error: "must be 'on' or 'off'" }).optional(),
 });
 
 /** Cloudflare's documented test secret keys (always pass / always fail / already spent). */
@@ -396,6 +403,7 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
               }
             : null,
         captchaOff: v.CAPTCHA === "off",
+        googleSignIn: v.AUTH_PROVIDER === "dev" ? v.GOOGLE_SIGN_IN !== "off" : v.GOOGLE_SIGN_IN === "on",
       };
     }
   }

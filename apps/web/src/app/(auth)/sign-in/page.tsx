@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { challengeSiteKey } from "@/server/captcha";
+import { env } from "@/server/env";
 import { SignInScreen } from "./SignInScreen";
 
 export const metadata: Metadata = { title: "Sign in" };
@@ -22,6 +23,7 @@ export default async function Page({
       devProvider={process.env.AUTH_PROVIDER === "dev"}
       callbackError={error}
       challengeSiteKey={challengeSiteKey()}
+      googleEnabled={env().googleSignIn}
     />
   );
 }

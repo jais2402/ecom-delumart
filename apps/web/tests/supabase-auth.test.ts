@@ -96,7 +96,7 @@ function signedInTo(result: CallResult): boolean {
 const requestsTo = (path: string) => fake.requests.filter((r) => r.path === path).length;
 
 beforeAll(async () => {
-  app = await startTestApp({ env: { AUTH_PROVIDER: "supabase" }, supabaseAuth: true });
+  app = await startTestApp({ env: { AUTH_PROVIDER: "supabase", GOOGLE_SIGN_IN: "on" }, supabaseAuth: true });
   fake = await new FakeSupabase().start(app.db.url);
   process.env.SUPABASE_URL = fake.url;
   process.env.SUPABASE_PUBLISHABLE_KEY = fake.publishableKey;

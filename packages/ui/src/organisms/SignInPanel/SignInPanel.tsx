@@ -32,6 +32,8 @@ export type SignInPanelProps = Omit<ComponentPropsWithRef<"div">, "children" | "
   headingRef?: Ref<HTMLHeadingElement>;
   /** True when sign-in is the local development provider: no email is sent, so the copy says so. */
   devMode?: boolean;
+  /** False leaves out "Continue with Google": email is then the only way in. */
+  showGoogle?: boolean;
 };
 
 export function SignInPanel({
@@ -44,6 +46,7 @@ export function SignInPanel({
   afterSent,
   headingRef,
   devMode = false,
+  showGoogle = true,
   className,
   ...props
 }: SignInPanelProps) {
@@ -93,17 +96,21 @@ export function SignInPanel({
       </Heading>
       <Text muted>One account per person. You start with fictional money.</Text>
       {error ? <Alert tone="danger">{error}</Alert> : null}
-      <Button
-        variant="secondary"
-        size="lg"
-        disabled={pending}
-        onClick={() => void onGoogle().catch(() => undefined)}
-      >
-        Continue with Google
-      </Button>
-      <p className="text-center font-body text-sm text-fg-muted">
-        {devMode ? "or sign in with any email address" : "or use an email link"}
-      </p>
+      {showGoogle ? (
+        <>
+          <Button
+            variant="secondary"
+            size="lg"
+            disabled={pending}
+            onClick={() => void onGoogle().catch(() => undefined)}
+          >
+            Continue with Google
+          </Button>
+          <p className="text-center font-body text-sm text-fg-muted">
+            {devMode ? "or sign in with any email address" : "or use an email link"}
+          </p>
+        </>
+      ) : null}
       <form noValidate onSubmit={submit} className="flex flex-col gap-4">
         <FormField
           label="Email address"

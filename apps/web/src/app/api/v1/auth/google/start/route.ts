@@ -1,3 +1,4 @@
+import { DomainError } from "@delulu/core";
 import { z } from "zod";
 import { requireSupabase, startFlow } from "@/server/auth/sign-in-session";
 import { callbackUrl, supabaseSignIn } from "@/server/auth/supabase";
@@ -20,7 +21,8 @@ export const POST = route(
   },
   async ({ body }) => {
     requireSupabase();
-    const { appOrigin } = env();
+    const { appOrigin, googleSignIn } = env();
+    if (!googleSignIn) throw new DomainError("NOT_FOUND", "Not found.");
     const { flow, challenge, sealed } = startFlow("google", body.next, null);
     const url = supabaseSignIn.googleUrl({
       codeChallenge: challenge,

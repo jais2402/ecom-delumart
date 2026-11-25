@@ -414,3 +414,28 @@ describe("ninth review, major 2a: Cloudflare Turnstile configuration", () => {
     );
   });
 });
+
+describe("GOOGLE_SIGN_IN", () => {
+  const supabase = (overrides: Record<string, string | undefined> = {}) =>
+    parseEnv(
+      valid({
+        AUTH_PROVIDER: "supabase",
+        SUPABASE_URL: "https://abcdefghijklmnopqrst.supabase.co",
+        SUPABASE_PUBLISHABLE_KEY: "sb_publishable_abcdefghijklmnop",
+        SUPABASE_SECRET_KEY: "sb_secret_abcdefghijklmnopqrstuv",
+        ...overrides,
+      }),
+    );
+
+  it("with Supabase, Google sign-in is off unless GOOGLE_SIGN_IN=on", () => {
+    expect(supabase().googleSignIn).toBe(false);
+    expect(supabase({ GOOGLE_SIGN_IN: "off" }).googleSignIn).toBe(false);
+    expect(supabase({ GOOGLE_SIGN_IN: "on" }).googleSignIn).toBe(true);
+  });
+
+  it("the local development provider offers it unless it is switched off", () => {
+    expect(parseEnv(valid()).googleSignIn).toBe(true);
+    expect(parseEnv(valid({ GOOGLE_SIGN_IN: "off" })).googleSignIn).toBe(false);
+    expect(() => parseEnv(valid({ GOOGLE_SIGN_IN: "yes" }))).toThrow(/GOOGLE_SIGN_IN/);
+  });
+});

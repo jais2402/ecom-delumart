@@ -30,12 +30,15 @@ export function SignInScreen({
   devProvider = false,
   callbackError = null,
   challengeSiteKey = null,
+  googleEnabled = true,
 }: {
   devProvider?: boolean;
   /** The ?error= the sign-in callback sent the browser back with. */
   callbackError?: string | null;
   /** Cloudflare Turnstile's public site key, or null when this deployment asks for no check. */
   challengeSiteKey?: string | null;
+  /** False hides "Continue with Google" (the provider is not set up for this deployment). */
+  googleEnabled?: boolean;
 }) {
   const devSeen = useDevProvider();
   const gateway = useGateway();
@@ -162,6 +165,7 @@ export function SignInScreen({
           }
         }}
         onEmailSubmit={emailSignIn}
+        showGoogle={googleEnabled}
       />
       <Challenge
         siteKey={siteKey}

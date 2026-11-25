@@ -116,6 +116,7 @@ Authentication → **Sign In / Providers**:
 - **Google**: in Google Cloud Console create an OAuth client ("Web application") whose
   *Authorized redirect URI* is `https://<project-ref>.supabase.co/auth/v1/callback`; paste its client
   id and secret here and enable Google.
+  The button stays hidden until `GOOGLE_SIGN_IN=on` is added in Vercel (Production) and redeployed.
 - **Phone**: only if you choose SMS verification (section 2.6). Otherwise leave it off.
 
 **Custom SMTP comes first.** The dashboard does not let you edit email templates until custom SMTP
