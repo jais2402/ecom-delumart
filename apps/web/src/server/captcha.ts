@@ -81,7 +81,9 @@ export async function requireChallenge(
 
   let answer: Record<string, unknown>;
   try {
-    const body = new URLSearchParams({ secret: config.secretKey, response: token, idempotency_key: digest });
+    // No idempotency_key: Cloudflare accepts only a UUID there and answers bad-request for anything
+    // else. One call per token is already guaranteed by the spend check above.
+    const body = new URLSearchParams({ secret: config.secretKey, response: token });
     const response = await (deps.fetch ?? fetch)(config.verifyUrl, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
