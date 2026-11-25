@@ -235,6 +235,12 @@ the `extensions` schema, applies each migration in its own transaction, clears t
 sets the three login passwords (sent as salted verifiers; never printed), and runs the doctor.
 Expect **0 FAIL**. Re-running later applies only new migrations. **Safe to share**: the whole output.
 
+Then add the platform's own products (60 products in 6 categories; safe to run again):
+
+```bash
+pnpm db:seed:prod --confirm <project-ref>
+```
+
 Then close the terminal (if you read any of them into the environment:
 `unset DATABASE_URL_OWNER APP_WEB_PASSWORD APP_PAY_PASSWORD APP_JOBS_PASSWORD`).
 

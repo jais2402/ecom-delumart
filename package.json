@@ -16,6 +16,7 @@
     "db:doctor": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/db-doctor.ts",
     "db:migrate:prod": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/db-migrate-prod.ts",
     "admin:grant": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/admin-grant.ts",
+    "db:seed:prod": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/db-seed-prod.ts",
     "vercel:env": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/vercel-env.ts"
   },
   "devDependencies": {
