@@ -20,4 +20,11 @@ describe("PriceBlock", () => {
     expect(screen.queryByText("Was")).toBeNull();
     expect(screen.queryByText("Sale")).toBeNull();
   });
+  it("lets a page enlarge the main price without changing its spoken label", () => {
+    const { container } = render(
+      <PriceBlock amountPaise={199_900n} display="exact" priceClassName="text-4xl" />,
+    );
+    expect(container.querySelector(".text-4xl")).not.toBeNull();
+    expect(screen.getByText(/fictional rupees/)).toBeInTheDocument();
+  });
 });

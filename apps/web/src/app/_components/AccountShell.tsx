@@ -1,12 +1,13 @@
 "use client";
 
-import { AccountLayout, SidebarNav, SiteFooter } from "@delulu/ui";
+import { AccountLayout, SidebarNav } from "@delulu/ui";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { refreshSession } from "../_lib/session-store";
 import { useRequireAccount } from "../_lib/use-require-account";
 import { ErrorBlock, LoadingBlock } from "./LoadState";
 import { SessionHeader } from "./SessionHeader";
+import { ShopFooter } from "./ShopFooter";
 
 const ITEMS = [
   { label: "Overview", href: "/account" },
@@ -28,7 +29,7 @@ export function AccountShell({ children }: { children: ReactNode }) {
   return (
     <AccountLayout
       header={<SessionHeader />}
-      footer={<SiteFooter />}
+      footer={<ShopFooter />}
       sidebar={<SidebarNav label="Account" items={ITEMS} currentHref={pathname} />}
     >
       {ok ? (

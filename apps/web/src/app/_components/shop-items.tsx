@@ -9,16 +9,15 @@ export function toShopGridItem(product: ProductResponse): ProductGridItem {
   return {
     ...toGridItem(product),
     actions: (
-      <div className="flex items-start gap-2">
+      <>
         <AddToCartButton
           productId={product.id}
           name={product.name}
           available={product.available}
-          size="md"
-          className="min-w-0 flex-1"
+          appearance="icon"
         />
         <SaveToggle productId={product.id} name={product.name} />
-      </div>
+      </>
     ),
   };
 }

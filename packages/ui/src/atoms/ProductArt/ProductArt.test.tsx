@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ProductArt } from "./ProductArt";
+import { ART_MOTIFS, motifFromSeed, ProductArt } from "./ProductArt";
 
 describe("ProductArt", () => {
   it("is an image with the given accessible name", () => {
@@ -22,5 +22,19 @@ describe("ProductArt", () => {
   it("keeps a square aspect ratio", () => {
     const { container } = render(<ProductArt hue={90} seed="s" alt="x" />);
     expect(container.querySelector("svg")).toHaveClass("aspect-square");
+  });
+  it("draws a different object for each motif and picks one from the seed when none is given", () => {
+    const html = ART_MOTIFS.map(
+      (motif) => render(<ProductArt hue={40} seed="s" alt="x" motif={motif} />).container.innerHTML,
+    );
+    expect(new Set(html).size).toBe(ART_MOTIFS.length);
+    expect(ART_MOTIFS).toContain(motifFromSeed("anything"));
+    expect(motifFromSeed("anything")).toBe(motifFromSeed("anything"));
+  });
+  it("is a plain backdrop with one object: no external image, gradient or sparkle", () => {
+    const { container } = render(<ProductArt hue={300} seed="s" alt="x" motif="cosmic" />);
+    expect(container.querySelector("image, img, linearGradient, radialGradient")).toBeNull();
+    expect(container.querySelector("svg")).toHaveClass("bg-surface-raised");
+    expect(container.querySelector("svg")?.getAttribute("style")).toBeNull();
   });
 });

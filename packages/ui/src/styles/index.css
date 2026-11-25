@@ -15,6 +15,25 @@
   --color-action-hover: var(--dd-action-hover);
   --color-action-soft: var(--dd-action-soft);
   --color-highlight: var(--dd-highlight);
+  --color-band: var(--dd-band);
+  --color-band-hover: var(--dd-band-hover);
+  --color-fg-on-band: var(--dd-fg-on-band);
+  --color-fg-on-band-muted: var(--dd-fg-on-band-muted);
+  --color-border-on-band: var(--dd-border-on-band);
+  --color-cta: var(--dd-cta);
+  --color-cta-hover: var(--dd-cta-hover);
+  --color-fg-on-cta: var(--dd-fg-on-cta);
+  --color-cta-strong: var(--dd-cta-strong);
+  --color-cta-strong-hover: var(--dd-cta-strong-hover);
+  --color-fg-on-cta-strong: var(--dd-fg-on-cta-strong);
+  --color-accent: var(--dd-accent);
+  --color-accent-soft: var(--dd-accent-soft);
+  --color-fg-on-accent: var(--dd-fg-on-accent);
+  --color-ink: var(--dd-ink);
+  --color-fg-on-ink: var(--dd-fg-on-ink);
+  --color-fg-on-ink-muted: var(--dd-fg-on-ink-muted);
+  --color-sun: var(--dd-sun);
+  --color-fg-on-sun: var(--dd-fg-on-sun);
   --color-success: var(--dd-success);
   --color-success-soft: var(--dd-success-soft);
   --color-warning: var(--dd-warning);
@@ -26,16 +45,17 @@
   --color-source-player: var(--dd-source-player);
   --color-source-npc: var(--dd-source-npc);
   --color-focus: var(--dd-focus);
-  --font-display: var(--font-space-grotesk), "Segoe UI", system-ui, sans-serif;
+  --font-display: var(--font-inter), "Segoe UI", system-ui, sans-serif;
   --font-body: var(--font-inter), "Segoe UI", system-ui, sans-serif;
   --font-mono: var(--font-jetbrains-mono), ui-monospace, Menlo, monospace;
   --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
   --radius-pill: 999px;
   --shadow-raised: var(--dd-shadow-raised);
   --shadow-overlay: var(--dd-shadow-overlay);
-  --container-content: 1120px;
+  --container-content: 1240px;
   --spacing-touch: 44px;
 }
 
@@ -44,6 +64,12 @@
     background: var(--dd-bg);
     color: var(--dd-fg);
     font-family: var(--font-body);
+  }
+  /* Room for the fixed mobile tab bar, wherever one is on the page. */
+  @media (max-width: 767.98px) {
+    body:has([data-tab-bar]) {
+      padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+    }
   }
   :focus-visible {
     outline: 2px solid var(--dd-focus);

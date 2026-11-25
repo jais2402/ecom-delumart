@@ -1,13 +1,4 @@
-import {
-  Breadcrumbs,
-  Button,
-  EmptyState,
-  FictionLabel,
-  Heading,
-  PriceBlock,
-  ProductArt,
-  Text,
-} from "@delulu/ui";
+import { Breadcrumbs, Button, EmptyState, Heading, ProductPicture, Text } from "@delulu/ui";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BuyPanel } from "../../_components/BuyPanel";
@@ -16,7 +7,8 @@ import { ProductSafetyActions } from "../../_components/safety/ProductSafetyActi
 import { TrackEvent } from "../../_components/TrackEvent";
 import { categoryName, storeNameOf } from "../../_lib/catalog";
 import { loadProduct, loadProductPage } from "../../_lib/catalog-server";
-import { parsePaise } from "../../_lib/money";
+import { motifOfCategory } from "../../_lib/category-style";
+import { photoSrcOf } from "../../_lib/product-photos";
 
 /** Public. Ownership and balance are added in the browser by BuyPanel. */
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -62,43 +54,56 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           { label: product.name },
         ]}
       />
-      <div className="mt-4 grid items-start gap-6 md:grid-cols-2">
-        <ProductArt
-          hue={product.templateId}
-          seed={product.name}
-          alt={product.altText}
-          className="rounded-lg"
-        />
-        <div className="flex flex-col gap-4">
-          <Heading level={1} size="lg">
-            {product.name}
-          </Heading>
-          {product.hook ? <Text size="lg">{product.hook}</Text> : null}
-          <Text muted>{product.description}</Text>
-          <Text as="span" size="sm" muted>
-            Sold by{" "}
-            {product.storeHandle ? (
-              <a
-                className="inline-flex min-h-touch items-center text-action underline"
-                href={`/store/${product.storeHandle}`}
-              >
-                {storeNameOf(product)}
-              </a>
-            ) : (
-              storeNameOf(product)
-            )}
-          </Text>
-          <div className="flex flex-col gap-1">
-            <PriceBlock
-              amountPaise={parsePaise(product.pricePaise)}
-              {...(product.referencePricePaise
-                ? { referenceAmountPaise: parsePaise(product.referencePricePaise), saleLabel: "On sale" }
-                : {})}
-              display="exact"
-            />
-            <FictionLabel>Fictional money</FictionLabel>
+      <div className="mt-6 grid items-start gap-4 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] md:gap-6">
+        <div className="flex flex-col gap-8 rounded-lg bg-surface p-5 md:p-6">
+          <ProductPicture
+            imageSrc={photoSrcOf(product)}
+            hue={product.templateId}
+            seed={product.name}
+            motif={motifOfCategory(product.category)}
+            alt={product.altText}
+            eager
+          />
+          <section
+            aria-labelledby="description"
+            className="hidden flex-col gap-3 border-t border-border pt-8 md:flex"
+          >
+            <Heading level={2} size="md" id="description" className="text-2xl">
+              Description
+            </Heading>
+            <Text muted>{product.description}</Text>
+          </section>
+        </div>
+        <div className="flex flex-col gap-6 rounded-lg bg-surface p-5 md:p-6">
+          <div className="flex flex-col gap-2">
+            <Text as="span" size="sm" muted>
+              Sold by{" "}
+              {product.storeHandle ? (
+                <a
+                  className="inline-flex min-h-touch items-center text-action underline"
+                  href={`/store/${product.storeHandle}`}
+                >
+                  {storeNameOf(product)}
+                </a>
+              ) : (
+                storeNameOf(product)
+              )}
+            </Text>
+            <Heading level={1} size="lg" className="text-2xl font-semibold md:text-3xl">
+              {product.name}
+            </Heading>
+            {product.hook ? <Text muted>{product.hook}</Text> : null}
           </div>
           <BuyPanel product={product} />
+          <section
+            aria-labelledby="description-mobile"
+            className="flex flex-col gap-3 border-t border-border pt-6 md:hidden"
+          >
+            <Heading level={2} size="md" id="description-mobile" className="text-2xl">
+              Description
+            </Heading>
+            <Text muted>{product.description}</Text>
+          </section>
           <ProductSafetyActions
             productId={product.id}
             productName={product.name}

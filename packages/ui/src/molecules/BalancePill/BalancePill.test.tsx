@@ -16,4 +16,9 @@ describe("BalancePill", () => {
     render(<BalancePill balancePaise={12_345_00n} display="exact" />);
     expect(screen.getAllByText(/12,345/).length).toBeGreaterThan(0);
   });
+  it("has a band tone for the header and still carries the fictional-money label", () => {
+    const { container } = render(<BalancePill balancePaise={100n} tone="band" />);
+    expect(container.firstElementChild).toHaveClass("border-border-on-band");
+    expect(screen.getByText("fictional money")).toBeInTheDocument();
+  });
 });

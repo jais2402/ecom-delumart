@@ -1,7 +1,10 @@
 import type { ProductGridItem, StockState } from "@delulu/ui";
 import { CATEGORIES } from "../../data/seed-catalog";
 import type { ProductResponse } from "./api";
+import { motifOfCategory } from "./category-style";
 import { parsePaise } from "./money";
+import { photoSrcOf } from "./product-photos";
+import { CARD_DELIVERY } from "./speeds";
 
 /**
  * Platform seed products are always labelled as DeluluMart Originals.
@@ -49,6 +52,10 @@ export function toGridItem(product: ProductResponse): ProductGridItem {
     name: product.name,
     hook: product.hook ?? "",
     hue: product.templateId,
+    motif: motifOfCategory(product.category),
+    imageSrc: photoSrcOf(product),
+    deliveryNote: CARD_DELIVERY.standard,
+    zapNote: CARD_DELIVERY.zap,
     imageAlt: product.altText,
     pricePaise: parsePaise(product.pricePaise),
     ...(product.referencePricePaise ? { referencePricePaise: parsePaise(product.referencePricePaise) } : {}),

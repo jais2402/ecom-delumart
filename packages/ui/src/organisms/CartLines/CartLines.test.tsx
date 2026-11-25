@@ -65,4 +65,27 @@ describe("CartLines", () => {
     rerender(<CartLines groups={[]} onRemove={() => {}} emptyAction={<a href="/">Shop</a>} />);
     expect(screen.getByRole("link", { name: "Shop" })).toBeInTheDocument();
   });
+  it("shows a product's photo when the line has one, and generated art otherwise", () => {
+    const withPhoto = [
+      {
+        sellerId: "s1",
+        sellerName: "Store",
+        lines: [
+          {
+            id: "a",
+            name: "Has photo",
+            hue: 20,
+            quantity: 1,
+            unitPricePaise: 100_00n,
+            imageSrc: "/products/a.webp",
+            imageAlt: "A photo",
+          },
+          { id: "b", name: "No photo", hue: 40, quantity: 1, unitPricePaise: 100_00n, imageAlt: "Some art" },
+        ],
+      },
+    ];
+    render(<CartLines groups={withPhoto} onRemove={() => {}} />);
+    expect(screen.getByRole("img", { name: "A photo" })).toHaveAttribute("src", "/products/a.webp");
+    expect(screen.getByRole("img", { name: "Some art" }).tagName.toLowerCase()).toBe("svg");
+  });
 });

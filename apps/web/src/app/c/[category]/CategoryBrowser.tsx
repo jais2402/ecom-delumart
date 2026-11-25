@@ -52,7 +52,7 @@ export function CategoryBrowser({
           setZapOnly(false);
         }}
       />
-      <div className="min-w-0">
+      <div className="min-w-0 rounded-lg bg-surface p-5 md:p-6">
         <p role="status" className="mb-3 text-sm text-fg-muted">
           Showing {visible.length} of {items.length} products
         </p>

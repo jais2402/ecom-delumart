@@ -1,5 +1,8 @@
 import type { ComponentPropsWithRef } from "react";
 import { cn } from "../../lib/cn";
+import { ART_MOTIFS, drawMotif, type ProductArtMotif } from "./art-motifs";
+
+export { ART_MOTIFS, type ProductArtMotif } from "./art-motifs";
 
 export type ProductArtProps = Omit<ComponentPropsWithRef<"svg">, "children" | "role" | "aria-label"> & {
   /** Base hue, 0 to 359. */
@@ -8,12 +11,9 @@ export type ProductArtProps = Omit<ComponentPropsWithRef<"svg">, "children" | "r
   seed: string;
   /** Describes the picture. Pass an empty string when the art is purely decorative. */
   alt: string;
+  /** The object drawn in the middle, normally from the product's category. Chosen from the seed when omitted. */
+  motif?: ProductArtMotif;
 };
-
-type Shape =
-  | { id: string; kind: "circle"; cx: number; cy: number; r: number; fill: string }
-  | { id: string; kind: "rect"; x: number; y: number; w: number; h: number; rot: number; fill: string }
-  | { id: string; kind: "tri"; points: string; fill: string };
 
 /** FNV-1a hash of the seed, then a small mulberry32 generator. Deterministic across server and client. */
 function makeRandom(seed: string): () => number {
@@ -32,94 +32,47 @@ function makeRandom(seed: string): () => number {
   };
 }
 
-const n = (value: number): string => value.toFixed(1);
 const wrapHue = (value: number): number => ((Math.round(value) % 360) + 360) % 360;
 
-export function buildShapes(hue: number, seed: string): Shape[] {
-  const rand = makeRandom(`${seed}:${hue}`);
-  const palette = [
-    `hsl(${wrapHue(hue)} 62% 42%)`,
-    `hsl(${wrapHue(hue + 28)} 70% 58%)`,
-    `hsl(${wrapHue(hue - 30)} 55% 30%)`,
-    `hsl(${wrapHue(hue + 150)} 65% 64%)`,
-  ];
-  const count = 4 + Math.floor(rand() * 3);
-  const shapes: Shape[] = [];
-  for (let i = 0; i < count; i++) {
-    const fill = palette[Math.floor(rand() * palette.length)] ?? palette[0] ?? "";
-    const kind = Math.floor(rand() * 3);
-    const id = `s${i}`;
-    if (kind === 0) {
-      shapes.push({
-        id,
-        kind: "circle",
-        cx: 15 + rand() * 70,
-        cy: 15 + rand() * 70,
-        r: 8 + rand() * 20,
-        fill,
-      });
-    } else if (kind === 1) {
-      shapes.push({
-        id,
-        kind: "rect",
-        x: 8 + rand() * 50,
-        y: 8 + rand() * 50,
-        w: 16 + rand() * 30,
-        h: 16 + rand() * 30,
-        rot: Math.floor(rand() * 90) - 45,
-        fill,
-      });
-    } else {
-      const x = 10 + rand() * 50;
-      const y = 10 + rand() * 50;
-      const s = 20 + rand() * 30;
-      shapes.push({
-        id,
-        kind: "tri",
-        points: `${n(x)},${n(y + s)} ${n(x + s / 2)},${n(y)} ${n(x + s)},${n(y + s)}`,
-        fill,
-      });
-    }
-  }
-  return shapes;
+/** The motif a seed gets when the caller names none. */
+export function motifFromSeed(seed: string): ProductArtMotif {
+  const index = Math.floor(makeRandom(`${seed}:motif`)() * ART_MOTIFS.length);
+  return ART_MOTIFS[index] ?? "magic";
 }
 
-/** Generated decorative illustration: a few geometric shapes on a tinted ground. Always square. */
-export function ProductArt({ hue, seed, alt, className, ...props }: ProductArtProps) {
-  const shapes = buildShapes(hue, seed);
+/**
+ * Generated product picture: one clean object for the category on a plain light backdrop with a
+ * soft ground shadow, like a product photograph. Always square, and always the same for the same
+ * hue and seed; the seed nudges the object's tilt, size, position and second colour.
+ */
+export function ProductArt({ hue, seed, alt, motif, className, ...props }: ProductArtProps) {
+  const rand = makeRandom(`${seed}:${hue}:layout`);
+  const h = wrapHue(hue);
+  const tilt = Math.round((rand() - 0.5) * 10);
+  const scale = 1.35 + rand() * 0.2;
+  const dx = Math.round((rand() - 0.5) * 6);
+  const accentHue = wrapHue(h + Math.round((rand() - 0.5) * 50));
+  const chosen = motif ?? motifFromSeed(seed);
+  const colours = {
+    body: `hsl(${h} 16% 84%)`,
+    accent: `hsl(${accentHue} 52% 52%)`,
+    ink: `hsl(${h} 18% 24%)`,
+  };
   const a11y = alt ? { role: "img" as const, "aria-label": alt } : { "aria-hidden": true as const };
   return (
     // biome-ignore lint/a11y/noSvgWithoutTitle: the name comes from aria-label, or the art is aria-hidden when decorative
     <svg
       viewBox="0 0 100 100"
       preserveAspectRatio="xMidYMid slice"
-      className={cn("block aspect-square w-full overflow-hidden rounded-md", className)}
+      className={cn("block aspect-square w-full overflow-hidden rounded-md bg-surface-raised", className)}
       {...a11y}
       {...props}
     >
-      <rect width="100" height="100" fill={`hsl(${wrapHue(hue)} 45% 80%)`} />
-      <circle cx="82" cy="18" r="9" fill={`hsl(${wrapHue(hue + 60)} 85% 72%)`} />
-      {shapes.map((shape) => {
-        if (shape.kind === "circle") {
-          return <circle key={shape.id} cx={n(shape.cx)} cy={n(shape.cy)} r={n(shape.r)} fill={shape.fill} />;
-        }
-        if (shape.kind === "rect") {
-          return (
-            <rect
-              key={shape.id}
-              x={n(shape.x)}
-              y={n(shape.y)}
-              width={n(shape.w)}
-              height={n(shape.h)}
-              rx="3"
-              fill={shape.fill}
-              transform={`rotate(${shape.rot} ${n(shape.x + shape.w / 2)} ${n(shape.y + shape.h / 2)})`}
-            />
-          );
-        }
-        return <polygon key={shape.id} points={shape.points} fill={shape.fill} />;
-      })}
-      <rect y="86" width="100" height="14" fill={`hsl(${wrapHue(hue)} 50% 26%)`} opacity="0.35" />
+      <ellipse cx={50 + dx} cy="84" rx="25" ry="3.6" fill="black" opacity="0.1" />
+      <ellipse cx={50 + dx} cy="84" rx="15" ry="2.2" fill="black" opacity="0.12" />
+      <g transform={`translate(${50 + dx} 52) rotate(${tilt}) scale(${scale.toFixed(2)})`}>
+        {drawMotif(chosen, colours)}
+      </g>
     </svg>
   );
 }

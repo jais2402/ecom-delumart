@@ -32,7 +32,7 @@ export function StockBadge(props: StockBadgeProps) {
       );
     case "edition":
       return (
-        <Badge tone="highlight" className={className}>
+        <Badge tone="accent" className={className}>
           #{props.number} of {props.of}
         </Badge>
       );

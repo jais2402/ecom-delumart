@@ -4,7 +4,7 @@ import { Heading } from "../../atoms/Heading";
 import { Icon } from "../../atoms/Icon";
 import { IconButton } from "../../atoms/IconButton";
 import { Price } from "../../atoms/Price";
-import { ProductArt } from "../../atoms/ProductArt";
+import { ProductPicture } from "../../atoms/ProductPicture";
 import { cn } from "../../lib/cn";
 import { EmptyState } from "../../molecules/EmptyState";
 
@@ -17,6 +17,8 @@ export type CartLine = {
   href?: string;
   /** Description of the imagined product photo; the art is decorative when omitted. */
   imageAlt?: string;
+  /** A photo from our own origin; generated art is drawn when absent. */
+  imageSrc?: string | undefined;
   /**
    * Plain-language reason this line cannot be bought. The line is marked, its price is struck
    * through and it is left out of the totals by the caller.
@@ -70,7 +72,8 @@ export function CartLines({ groups, onRemove, emptyAction, className, ...props }
                     line.issue && "border-l-4 border-l-danger bg-danger-soft",
                   )}
                 >
-                  <ProductArt
+                  <ProductPicture
+                    imageSrc={line.imageSrc}
                     hue={line.hue}
                     seed={line.name}
                     alt={line.imageAlt ?? ""}

@@ -24,4 +24,10 @@ describe("ProductGrid", () => {
     expect(screen.getByRole("heading", { name: "No matches" })).toBeInTheDocument();
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
+  it("shows placeholder cards and a polite loading message while loading", () => {
+    render(<ProductGrid items={[]} loading loadingCount={3} label="Results" />);
+    expect(screen.getByRole("list", { name: "Results" })).toHaveAttribute("aria-busy", "true");
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading products");
+  });
 });

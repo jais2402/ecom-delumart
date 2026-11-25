@@ -13,6 +13,7 @@ export const badgeVariants = cva(
         danger: "bg-danger-soft text-danger",
         info: "bg-info-soft text-info",
         highlight: "bg-highlight text-fg-on-highlight",
+        accent: "bg-accent-soft text-accent",
       },
     },
     defaultVariants: { tone: "neutral" },

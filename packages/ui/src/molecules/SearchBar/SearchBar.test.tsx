@@ -21,4 +21,11 @@ describe("SearchBar", () => {
     await userEvent.click(screen.getByRole("button", { name: "Search" }));
     expect(onSearch).toHaveBeenCalledWith("lamp");
   });
+  it("keeps its names and behaviour in the pill variant", async () => {
+    const onSearch = vi.fn();
+    render(<SearchBar variant="pill" onSearch={onSearch} />);
+    expect(screen.getByRole("searchbox", { name: "Search" })).toHaveClass("rounded-pill");
+    await userEvent.type(screen.getByRole("searchbox"), "moon{Enter}");
+    expect(onSearch).toHaveBeenCalledWith("moon");
+  });
 });

@@ -37,6 +37,7 @@ import { markCartChanged, useCart } from "../_lib/cart-store";
 import { storeNameOf } from "../_lib/catalog";
 import { saveCheckoutContext } from "../_lib/checkout-context";
 import { parsePaise } from "../_lib/money";
+import { photoSrcOf } from "../_lib/product-photos";
 import { nextOnboardingPath, useSession } from "../_lib/session-store";
 import { isSpeed, SPEED_COPY } from "../_lib/speeds";
 import { useProducts } from "../_lib/use-products";
@@ -112,6 +113,7 @@ function LocalCart({
             unitPricePaise: parsePaise(product.pricePaise),
             href: `/p/${id}`,
             imageAlt: product.altText,
+            imageSrc: photoSrcOf(product),
             ...(product.available ? {} : { issue: "Sold out. Remove it to check out." }),
           }
         : {
@@ -280,6 +282,11 @@ function AccountCart() {
         unitPricePaise: parsePaise(l.pricePaise),
         href: `/p/${l.productId}`,
         imageAlt: l.altText,
+        imageSrc: photoSrcOf({
+          name: l.name,
+          sellerKey: g.sellerKey,
+          sellerName: g.sellerKey === "SEED" ? null : g.sellerName,
+        }),
         ...(l.issue ? { issue: issueText(l.issue) } : {}),
       })),
       ...(priced && offered.length > 0

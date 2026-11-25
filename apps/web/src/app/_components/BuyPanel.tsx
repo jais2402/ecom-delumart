@@ -1,16 +1,33 @@
 "use client";
 
-import { Alert, Badge, Button, FictionLabel, Heading, Price, StockBadge, Text } from "@delulu/ui";
+import { formatInrCompact, STARTING_GRANT_PAISE } from "@delulu/core";
+import {
+  Alert,
+  Badge,
+  Button,
+  DeliveryBox,
+  FictionLabel,
+  Heading,
+  PackageIcon,
+  Price,
+  PriceBlock,
+  StockBadge,
+  Text,
+  TruckIcon,
+  ZapIcon,
+} from "@delulu/ui";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { trackClient } from "../_lib/analytics";
 import { ApiError, api, describeError, newIdempotencyKey, type ProductResponse } from "../_lib/api";
+import { shareOfStartingBalance } from "../_lib/balance-share";
 import { useBlockedSellerKeys } from "../_lib/blocks-store";
 import { checkoutSellerId, isLow, leftCount, stockStateOf, storeNameOf } from "../_lib/catalog";
 import { saveCheckoutContext } from "../_lib/checkout-context";
-import { parsePaiseOrNull } from "../_lib/money";
+import { parsePaise, parsePaiseOrNull } from "../_lib/money";
 import type { CompanyView } from "../_lib/selling";
 import { nextOnboardingPath, useSession } from "../_lib/session-store";
+import { arrivalPhrase } from "../_lib/speeds";
 import { requestQuote } from "../_lib/start-checkout";
 import { AddToCartButton } from "./AddToCartButton";
 import { SaveToggle } from "./SaveToggle";
@@ -122,16 +139,43 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
     }
   }
 
+  const price = parsePaise(product.pricePaise);
+  const share = shareOfStartingBalance(price);
+  const sale = product.referencePricePaise ? parsePaise(product.referencePricePaise) : null;
+  const stock = stockStateOf(product);
+  const availability =
+    stock.state === "in-stock"
+      ? { status: "In stock", statusTone: "success" as const }
+      : stock.state === "sold-out"
+        ? { status: "Sold out" }
+        : stock.state === "edition"
+          ? { status: `Exclusive edition: #${stock.number} of ${stock.of}` }
+          : { status: "Only a few left" };
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <StockBadge {...stockStateOf(product)} />
-        {product.edition && !unavailable && product.edition.supply - product.edition.issued <= 5 ? (
-          <StockBadge state="low" count={leftCount(product) ?? 0} />
-        ) : isLow(product) ? (
-          <Badge tone="warning">Only a few left</Badge>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <PriceBlock
+            amountPaise={price}
+            {...(sale !== null ? { referenceAmountPaise: sale, saleLabel: "On sale" } : {})}
+            display="exact"
+            priceClassName="text-3xl font-bold text-fg"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <StockBadge {...stock} />
+            {product.edition && !unavailable && product.edition.supply - product.edition.issued <= 5 ? (
+              <StockBadge state="low" count={leftCount(product) ?? 0} />
+            ) : isLow(product) ? (
+              <Badge tone="warning">Only a few left</Badge>
+            ) : null}
+            {owned ? <Badge tone="success">You own this</Badge> : null}
+          </div>
+        </div>
+        {share ? (
+          <p className="text-sm text-fg-muted">
+            Equal to {share} of the {formatInrCompact(STARTING_GRANT_PAISE)} welcome balance.
+          </p>
         ) : null}
-        {owned ? <Badge tone="success">You own this</Badge> : null}
       </div>
 
       {product.edition ? (
@@ -147,13 +191,6 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
           <FictionLabel>fictional money</FictionLabel>
         </Text>
       ) : null}
-
-      <Heading level={2} size="sm">
-        Delivery
-      </Heading>
-      <Text size="sm" muted>
-        Standard delivery is always available. You choose the speed at checkout.
-      </Text>
 
       {error ? <Alert tone="danger">{error}</Alert> : null}
       {shopBlocked ? (
@@ -172,44 +209,81 @@ export function BuyPanel({ product }: { product: ProductResponse }) {
             <a href={`/studio/${product.id}`}>Manage it in the studio</a>
           </Button>
         </div>
-      ) : (
+      ) : owned ? (
         <div className="flex flex-col gap-3">
-          {owned ? (
-            <>
-              <Button size="lg" disabled aria-describedby="owned-hint">
-                Already in your collection
-              </Button>
-              <Text as="span" size="sm" muted id="owned-hint">
-                Each product can be owned once.{" "}
-                <a className="text-action underline" href="/account/collection">
-                  See your collection
-                </a>
-              </Text>
-            </>
-          ) : (
-            <Button
-              size="lg"
-              loading={pending || session.status === "loading"}
-              disabled={unavailable || sellerId === null}
-              onClick={() => void buyNow()}
-            >
-              Buy now
-            </Button>
-          )}
+          <Button size="lg" disabled aria-describedby="owned-hint">
+            Already in your collection
+          </Button>
+          <Text as="span" size="sm" muted id="owned-hint">
+            Each product can be owned once.{" "}
+            <a className="text-action underline" href="/account/collection">
+              See your collection
+            </a>
+          </Text>
+          <div className="flex gap-3">
+            <AddToCartButton
+              productId={product.id}
+              name={product.name}
+              available={!unavailable}
+              owned={owned}
+              className="min-w-0 flex-1"
+            />
+            <SaveToggle productId={product.id} name={product.name} />
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-start gap-3">
           <AddToCartButton
             productId={product.id}
             name={product.name}
             available={!unavailable}
             owned={owned}
+            appearance="filled"
+            className="min-w-0 basis-full sm:basis-0 sm:flex-[2]"
           />
-          <div className="flex items-center gap-2">
-            <SaveToggle productId={product.id} name={product.name} />
-            <Text as="span" size="sm" muted>
-              Save it to find it later.
-            </Text>
-          </div>
+          <Button
+            variant="ctaStrong"
+            size="lg"
+            aria-label="Buy now"
+            loading={pending || session.status === "loading"}
+            disabled={unavailable || sellerId === null}
+            onClick={() => void buyNow()}
+            className="shrink-0 whitespace-nowrap"
+          >
+            Buy now
+            <span aria-hidden="true" className="font-normal opacity-80">
+              · {formatInrCompact(price)}
+            </span>
+          </Button>
+          <SaveToggle productId={product.id} name={product.name} />
         </div>
       )}
+
+      <section aria-labelledby={`${product.id}-delivery`} className="flex flex-col gap-3">
+        <Heading level={2} size="sm" id={`${product.id}-delivery`}>
+          Delivery
+        </Heading>
+        <DeliveryBox
+          aria-label="Delivery and availability"
+          rows={[
+            {
+              icon: TruckIcon,
+              text: `Standard delivery. Arrives in ${arrivalPhrase("STANDARD")}.`,
+              status: "Always available",
+              statusTone: "success",
+            },
+            product.zap
+              ? {
+                  icon: ZapIcon,
+                  text: `Zap delivery. Arrives in ${arrivalPhrase("ZAP")}.`,
+                  status: "Available for this product",
+                  statusTone: "success",
+                }
+              : { icon: ZapIcon, text: "You choose the delivery speed at checkout." },
+            { icon: PackageIcon, text: "Availability", ...availability },
+          ]}
+        />
+      </section>
     </div>
   );
 }

@@ -13,6 +13,8 @@ export const buttonVariants = cva(
         secondary: "border border-border-strong bg-surface text-fg hover:bg-action-soft",
         ghost: "bg-transparent text-fg hover:bg-action-soft",
         danger: "bg-danger text-fg-on-action hover:opacity-90",
+        cta: "bg-cta text-fg-on-cta hover:bg-cta-hover",
+        ctaStrong: "bg-cta-strong text-fg-on-cta-strong hover:bg-cta-strong-hover",
       },
       size: {
         sm: "px-3 text-sm",
