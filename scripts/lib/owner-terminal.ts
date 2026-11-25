@@ -69,6 +69,13 @@ export async function ownerTarget(options: {
   } catch {
     fail("The owner connection string is not a valid postgres:// connection string.");
   }
+  if (!/^[A-Za-z0-9_.-]{1,63}$/.test(target.user) || !/^[A-Za-z0-9_-]{1,63}$/.test(target.database)) {
+    fail(
+      `The connection string's user (${target.user.length} characters) or database name (${target.database.length} characters) has unexpected characters.\n` +
+        "Expected the form postgresql://postgres.<project-ref>@<host>:5432/postgres with nothing after 'postgres'.\n" +
+        "Copy it again from Supabase (Connect -> Session pooler), remove ':[YOUR-PASSWORD]', and paste only that.",
+    );
+  }
   if (options.requireConfirm) {
     const problem = confirmTarget(target, argValue("--confirm"));
     if (problem) fail(problem);
@@ -108,7 +115,7 @@ export function ownerPool(url: string, target: OwnerTarget): PgPool {
 export function describeTarget(target: OwnerTarget): string {
   return target.loopback
     ? `local database ${target.database} on ${target.host}`
-    : `Supabase project ${target.projectRef ?? "?"} (${target.kind}, ${target.host})`;
+    : `Supabase project ${target.projectRef ?? "?"} (${target.kind}, ${target.host}, user ${target.user}, database ${target.database})`;
 }
 
 /** Asks a question on the terminal; `hidden` does not echo what is typed. */
@@ -129,7 +136,28 @@ export async function ask(question: string, hidden = false): Promise<string> {
   const answer = await new Promise<string>((resolve) => rl.question(question, resolve));
   rl.close();
   if (hidden) process.stderr.write("\n");
-  return answer.trim();
+  return cleanAnswer(answer);
+}
+
+/**
+ * What was typed or pasted, without what a terminal adds around a paste: the bracketed-paste
+ * markers (ESC[200~ ... ESC[201~), any other control character, and surrounding spaces or quotes
+ * left from copying. Without this a pasted connection string can end in invisible characters,
+ * which the pooler refuses as "Invalid format for user or db_name".
+ */
+export function cleanAnswer(answer: string): string {
+  const ESC = String.fromCharCode(27);
+  const printable = Array.from(answer.split(`${ESC}[200~`).join("").split(`${ESC}[201~`).join(""))
+    .filter((ch) => {
+      const code = ch.codePointAt(0) ?? 0;
+      return code >= 32 && code !== 127;
+    })
+    .join("");
+  return printable
+    .replace(/\[20[01]~/g, "")
+    .trim()
+    .replace(/^(["'`])(.*)\1$/, "$2")
+    .trim();
 }
 
 /** Explains a connection error without echoing anything secret. */
@@ -138,6 +166,10 @@ export function explain(error: unknown): string {
   const code = e.code ?? "";
   if (code === "28P01")
     return "password authentication failed (check the password part of DATABASE_URL_OWNER)";
+  if (/Invalid format for user or db_name/.test(e.message ?? ""))
+    return "the pooler refused the user or database name: the user must be postgres.<project-ref> and the string must end in /postgres";
+  if (/Tenant or user not found/.test(e.message ?? ""))
+    return "the pooler does not know this project on this host: copy the Session pooler string again from Supabase (the host differs between projects)";
   if (code === "ENOTFOUND") return "host not found (check the host in DATABASE_URL_OWNER)";
   if (code === "ETIMEDOUT" || code === "ECONNREFUSED")
     return "could not reach the database (network, or the direct host needs IPv6: use the Session pooler)";
