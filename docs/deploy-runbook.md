@@ -271,6 +271,10 @@ Project → Settings:
 | `TURNSTILE_SITE_KEY` | Cloudflare → Turnstile (2.7) | public: sent to browsers |
 | `TURNSTILE_SECRET_KEY` | Cloudflare → Turnstile (2.7) | **server-only**; required in production with Supabase |
 
+**Shortcut:** `pnpm vercel:env` asks for each value at a hidden prompt, checks its shape, builds the
+three connection strings and writes all 19 variables to `~/delulumart-prod.env` for Vercel's
+*Import .env*. Choose *Production only* before importing, then delete the file.
+
 Never set in Vercel: `DATABASE_URL_OWNER` (owner only, on your computer), `AUTH_PROVIDER=dev`,
 `RATE_LIMIT_MULTIPLIER`, `DEV_GEO`, `DATABASE_TLS=disable`, `TURNSTILE_VERIFY_URL` (local tests
 only). `CAPTCHA=off` only in an emergency (Cloudflare down for hours): it removes the bot protection
