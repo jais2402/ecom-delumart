@@ -118,6 +118,13 @@ Authentication → **Sign In / Providers**:
   id and secret here and enable Google.
 - **Phone**: only if you choose SMS verification (section 2.6). Otherwise leave it off.
 
+**Custom SMTP comes first.** The dashboard does not let you edit email templates until custom SMTP
+is set up (Authentication → Emails → *Set up SMTP*), and the default templates do not work with this
+app: their link goes to Supabase's own verify endpoint, which the app no longer accepts for email
+sign-in, and they carry no typed code. Without a domain, a dedicated Gmail account works for testing
+(host `smtp.gmail.com`, port `465`, username the Gmail address, password a Google *app password*,
+which needs 2-Step Verification; about 500 emails a day). With a domain, use Resend or Brevo.
+
 Authentication → **Emails**: edit **both** templates, *Magic Link* (existing users) and *Confirm
 signup* (a first sign-in creates the user and Supabase sends this one instead). Each must contain the
 app's link (NOT `{{ .ConfirmationURL }}`) and the code:
