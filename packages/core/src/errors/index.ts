@@ -76,6 +76,12 @@ export const ERROR_CODES = [
   // bot protection (ninth review, major 2a): the Cloudflare Turnstile token was missing, already
   // used, for another action or host, or could not be checked (fail closed)
   "CAPTCHA_FAILED",
+  // ratings and reviews (decisions.md #14): the actor may not review this product (does not own
+  // it, or sells it); no such review (or not the actor's); a rating, title or body that breaks the
+  // rules or the text screening (details.reasons: [{field, code}], never the text)
+  "REVIEW_NOT_ALLOWED",
+  "REVIEW_NOT_FOUND",
+  "REVIEW_INVALID",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
