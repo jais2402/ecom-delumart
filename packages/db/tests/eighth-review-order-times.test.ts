@@ -24,6 +24,7 @@ import {
   become,
   createTestDatabase,
   inRolledBackTx,
+  plant,
   stateOf,
   type TestDatabase,
   type TestUser,
@@ -340,7 +341,7 @@ describe("eighth security review: no application role reads an order's time-orde
     expect(ticks.sort()).toEqual([]);
   }, 240_000);
 
-  it("minor 5 (reviews, 0078): a product's public review answers do not change at a sale, nor when its buyer reviews within the sale's minute; they do once the minute has ended", async () => {
+  it("minor 5 (reviews, 0078/0079): a product's public review answers do not change at a sale, nor when its buyer reviews, nor when the minute ends; only from the next reporting day", async () => {
     const p = asFixture(await publishListing(pool, s, { quantity: 3 }));
     await aMinuteLater(pool);
     const publicView = async () =>
@@ -370,7 +371,15 @@ describe("eighth security review: no application role reads an order's time-orde
       expect(atSale).toBe(before);
       expect(atReview).toBe(before);
       settled = true;
+      // 0079: not when the minute ends either: only from the next reporting day
       await aMinuteLater(pool);
+      expect(await publicView()).toBe(before);
+      await plant(pool, (c) =>
+        c.query(
+          `UPDATE core.product_review SET created_at = created_at - interval '1 day'
+            WHERE created_at >= core.review_public_before()`,
+        ),
+      );
       expect(await publicView()).not.toBe(before);
       // a time finer than a day never appears
       expect(await publicView()).not.toMatch(/T\d{2}:|\d{2}:\d{2}/);

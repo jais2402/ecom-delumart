@@ -1,5 +1,7 @@
+import { REVIEW_RULES } from "@delulu/core";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { BYPASS_ATTACKS, NOT_A_CARD_NUMBER } from "../../core/src/screening/attack-cases";
 import { recordEvent } from "../src/analytics";
 import {
   adminReviews,
@@ -85,7 +87,21 @@ describe("ratings and reviews (migration 0078)", () => {
       body,
     });
 
+  /**
+   * Test-only stand-in for "tomorrow" (minor 4: a review is public from the reporting day after
+   * the one it was written in): moves today's reviews back one day, as the owner.
+   */
+  const aDayLater = () =>
+    plant(pool, (c) =>
+      c.query(
+        `UPDATE core.product_review SET created_at = created_at - interval '1 day'
+          WHERE created_at >= core.review_public_before()`,
+      ),
+    );
+
+  /** The public answer as it will read tomorrow (today's reviews aged past the boundary first). */
   const publicList = async (p: ProductFixture, page = 1) => {
+    await aDayLater();
     const r = await productReviews(pool, { productId: p.id, page });
     if (r === null) throw new Error("expected a published product");
     return r;
@@ -113,7 +129,8 @@ describe("ratings and reviews (migration 0078)", () => {
         edited: false,
         version: 1,
       });
-      expect(saved.public).toBe(true);
+      // the author sees it at once; others only from the next reporting day
+      expect(saved.public).toBe(false);
       const list = await publicList(p);
       expect(list).toMatchObject({
         count: 1,
@@ -285,7 +302,19 @@ describe("ratings and reviews (migration 0078)", () => {
         [3, null, "bell\u0007"],
         [3, null, "see https://example.test"],
         [3, "www.example.test", null],
-        [3, null, "card 4111 1111 1111 1111"],
+        [3, null, `card ${NOT_A_CARD_NUMBER}`],
+        // review round 1, M1: every reported bypass, and hidden format characters (minor 1)
+        ...BYPASS_ATTACKS.map(([t]) => [3, null, t] as [number, string | null, string | null]),
+        ...BYPASS_ATTACKS.map(
+          ([t]) => [3, t.replace(/\n/g, " "), null] as [number, string | null, string | null],
+        ),
+        [3, "fine\u2028title", null],
+        [3, null, "a\u2029b"],
+        [3, null, "nice\u202Elamp"],
+        [3, null, "\uFEFFlamp"],
+        [3, null, "ring ০১২৩৪৫৬৭৮৯"],
+        [3, null, "call ０１２３４５６７８９"],
+        [3, null, "see moon.example"],
         [3, null, "mail moon@example.test"],
       ];
       for (const [rating, title, body] of bad) {
@@ -301,6 +330,10 @@ describe("ratings and reviews (migration 0078)", () => {
       expect(ok.title).toHaveLength(80);
       const blank = await save(u, p, 3, "   ", "");
       expect(blank).toMatchObject({ title: null, body: null });
+      // prose with full stops and spaces, short numbers and Indic joiners are fine
+      expect(await save(u, p, 3, "Fine. Great", "It works. Really well. Room ४५.\nक्\u200Dष")).toMatchObject({
+        title: "Fine. Great",
+      });
     });
   });
 
@@ -382,6 +415,7 @@ describe("ratings and reviews (migration 0078)", () => {
       });
       const after = await publicList(p);
       expect(after).toMatchObject({ count: 11, ratingSum: sum - 5, distribution: [1, 1, 2, 4, 3] });
+      await aDayLater();
       const [summary] = await reviewSummaries(pool, [p.id]);
       expect(summary).toEqual({
         productId: p.id,
@@ -396,6 +430,7 @@ describe("ratings and reviews (migration 0078)", () => {
       const b = await seedProduct();
       const u = await owner(a);
       await save(u, a, 3);
+      await aDayLater();
       const out = await reviewSummaries(pool, [a.id, b.id, uuidv7()]);
       expect(out).toHaveLength(2);
       expect(out.find((s) => s.productId === a.id)).toEqual({
@@ -518,33 +553,35 @@ describe("ratings and reviews (migration 0078)", () => {
   });
 
   describe("REV-5: privacy", () => {
-    it("REV-5: a review written in the minute of its purchase is public only once that minute has ended", async () => {
+    it("REV-5 (minor 4): a review is public only from the reporting day after it was written; the author sees it at once", async () => {
       const p = await seedProduct();
-      let settled = false;
-      for (let attempt = 0; attempt < 3 && !settled; attempt++) {
-        const minute = async () =>
-          (await pool.query<{ m: string }>("SELECT date_trunc('minute', clock_timestamp())::text AS m"))
-            .rows[0]?.m;
-        const start = await minute();
-        const u = await owner(p, false);
-        const saved = await save(u, p, 5, "Same minute");
-        const before = await publicList(p);
-        const summary = await reviewSummaries(pool, [p.id]);
-        if ((await minute()) !== start) {
-          await aMinuteLater(pool);
-          continue;
-        }
-        expect(saved.public).toBe(false);
-        expect(before.items.some((i) => i.title === "Same minute")).toBe(false);
-        expect(summary[0]?.count).toBe(before.count);
-        settled = true;
-        await aMinuteLater(pool);
-        expect((await publicList(p)).items.some((i) => i.title === "Same minute")).toBe(true);
-        expect(
-          (await myReview(pool, { authSessionId: u.authSessionId, productId: p.id })).review?.public,
-        ).toBe(true);
+      const u = await owner(p);
+      const saved = await save(u, p, 5, "Tomorrow");
+      expect(saved.public).toBe(false);
+      const now = await productReviews(pool, { productId: p.id });
+      expect(now?.items.some((i) => i.title === "Tomorrow")).toBe(false);
+      expect(now?.count).toBe(0);
+      expect((await reviewSummaries(pool, [p.id]))[0]?.count).toBe(0);
+      const mine = await myReview(pool, { authSessionId: u.authSessionId, productId: p.id });
+      expect(mine.review).toMatchObject({ title: "Tomorrow", public: false });
+      // the boundary is the start of the reporting day (Asia/Kolkata)
+      const { rows } = await pool.query<{ ok: boolean }>(
+        `SELECT core.review_public_before() = (date_trunc('day', clock_timestamp() AT TIME ZONE 'Asia/Kolkata')
+                                                AT TIME ZONE 'Asia/Kolkata') AS ok`,
+      );
+      expect(rows[0]?.ok).toBe(true);
+      // tomorrow
+      expect((await publicList(p)).items.some((i) => i.title === "Tomorrow")).toBe(true);
+      expect((await reviewSummaries(pool, [p.id]))[0]?.count).toBe(1);
+      expect((await myReview(pool, { authSessionId: u.authSessionId, productId: p.id })).review?.public).toBe(
+        true,
+      );
+    });
+
+    it("REV-5 (minor 4): the boundary cannot be moved by an application role", async () => {
+      for (const role of ["app_web", "app_pay", "app_jobs"]) {
+        expect(await stateOf(pool, "SELECT core.review_public_before()", [], { role }), role).toBe("42501");
       }
-      expect(settled).toBe(true);
     });
 
     it("REV-5: no public or author answer carries a user id, an order-side id, a review id or a time finer than a day", async () => {
@@ -677,6 +714,57 @@ describe("ratings and reviews (migration 0078)", () => {
         }
       });
       expect(none).toBe("FORBIDDEN");
+    });
+
+    it("minor 3: the database's review limits default to REVIEW_RULES in core (one source)", async () => {
+      const { rows } = await pool.query<{ k: string; v: number }>(
+        `SELECT k, core.review_limit(k) AS v FROM unnest(ARRAY['review_title_max_chars', 'review_body_max_chars',
+           'review_page_size', 'review_admin_page_size', 'review_summary_max']) k`,
+      );
+      expect(Object.fromEntries(rows.map((r) => [r.k, r.v]))).toEqual({
+        review_title_max_chars: REVIEW_RULES.titleMaxChars,
+        review_body_max_chars: REVIEW_RULES.bodyMaxChars,
+        review_page_size: REVIEW_RULES.pageSize,
+        review_admin_page_size: REVIEW_RULES.adminPageSize,
+        review_summary_max: REVIEW_RULES.summaryMax,
+      });
+      // and the refusal message names the configured number, not a literal
+      const p = await seedProduct();
+      const u = await owner(p);
+      const message = await save(u, p, 3, "t".repeat(REVIEW_RULES.titleMaxChars + 1)).then(
+        () => "",
+        (e: Error) => e.message,
+      );
+      expect(message).toContain(String(REVIEW_RULES.titleMaxChars));
+    });
+
+    it("minor 3: every review setting is clamped: a page size of 0 or a huge title limit cannot break anything", async () => {
+      const p = await seedProduct();
+      const result = await inRolledBackTx(pool, async (c) => {
+        await c.query(
+          `INSERT INTO core.config_version (values, effective_from)
+           SELECT cv.values || '{"review_page_size": 0, "review_admin_page_size": 0, "review_title_max_chars": 99999,
+                                 "review_body_max_chars": 0, "review_summary_max": 100000}'::jsonb, now() - interval '1 second'
+             FROM core.config_version cv ORDER BY cv.id DESC LIMIT 1`,
+        );
+        const { rows } = await c.query<{ r: { pageSize: number; totalPages: number } }>(
+          "SELECT core.product_reviews($1, 1) AS r",
+          [p.id],
+        );
+        const limits = await c.query<{ k: string; v: number }>(
+          `SELECT k, core.review_limit(k) AS v FROM unnest(ARRAY['review_title_max_chars', 'review_body_max_chars',
+             'review_page_size', 'review_admin_page_size', 'review_summary_max']) k`,
+        );
+        return { page: rows[0]?.r, limits: Object.fromEntries(limits.rows.map((r) => [r.k, r.v])) };
+      });
+      expect(result.page).toMatchObject({ pageSize: 1, totalPages: 0 });
+      expect(result.limits).toEqual({
+        review_title_max_chars: 200,
+        review_body_max_chars: 1,
+        review_page_size: 1,
+        review_admin_page_size: 1,
+        review_summary_max: 100,
+      });
     });
 
     it("REV-5: review analytics events are server events with no props, no visitor key and no user id", async () => {

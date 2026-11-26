@@ -11,7 +11,7 @@
  * Ratings are small whole numbers, so counts and sums travel as JSON numbers; an average is the
  * integer `averageTenths` (4.3 is 43), never a float.
  */
-import { DomainError } from "@delulu/core";
+import { DomainError, REVIEW_RULES } from "@delulu/core";
 import type { Pool } from "pg";
 import { asWeb, isUuid, one, requireUuid } from "./command";
 
@@ -104,7 +104,7 @@ export interface AdminReviewPage {
 export type AdminReviewFilter = "ALL" | "HIDDEN";
 
 /** The most product ids one summaries call takes (`review_summary_max`). */
-export const REVIEW_SUMMARY_MAX = 100;
+export const REVIEW_SUMMARY_MAX: number = REVIEW_RULES.summaryMax;
 /** The highest page number a list call takes. */
 export const REVIEW_PAGE_MAX = 10_000;
 
