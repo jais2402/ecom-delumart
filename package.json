@@ -13,6 +13,7 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "dev:setup": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/dev-setup.ts",
+    "dev:expedite-admin-actions": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/dev-expedite-admin-actions.ts",
     "dev:age-reviews": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/dev-age-reviews.ts",
     "db:doctor": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/db-doctor.ts",
     "db:migrate:prod": "node --experimental-strip-types --no-warnings --import ./scripts/ts-resolve.mjs scripts/db-migrate-prod.ts",

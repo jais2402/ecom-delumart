@@ -3120,8 +3120,14 @@ describe("money attacks (security review)", () => {
         "core.address_delete(uuid)",
         "core.address_set_default(uuid)",
         "core.address_update(uuid,text,bytea)",
+        // 0090: the Super Admin's delayed-action queue (each refuses anyone but the Super Admin; the jobs
+        // role applies, nothing is applied here)
+        "core.admin_action_cancel(uuid,text)",
+        "core.admin_action_propose(text,jsonb,text)",
+        "core.admin_actions(text,integer)",
         // 0039: Super Admin appeals and report cases (each refuses anyone but the Super Admin; no money moves)
         "core.admin_appeal_resolve(uuid,text,text)",
+        "core.admin_config_overview()",
         // 0072: deployment facts for the Super Admin (FORBIDDEN for anyone else)
         "core.admin_health()",
         // 0037: Super Admin moderation (each refuses anyone but the Super Admin; no money moves)
@@ -3214,6 +3220,8 @@ describe("money attacks (security review)", () => {
         "core.product_submit(uuid)",
         // 0038: a public "unavailable" answer for a hidden or archived product page
         "core.product_unavailable(uuid)",
+        // 0090: the public announcement of an executed economy change (no person, no reason)
+        "core.public_announcements()",
         // fifth review (0031): the database rate counter, hit by the server before a call; ninth
         // review (0076): with the client's network
         "core.rate_hit(text,bytea,integer,integer)",
@@ -3295,6 +3303,8 @@ describe("money attacks (security review)", () => {
       ]);
       // sixth review (0047): only the jobs' own functions
       expect(by("app_jobs")).toEqual([
+        // 0090: the delayed-action executor (the only function the jobs role gained)
+        "core.admin_actions_execute_due(integer)",
         // 0052: the analytics retention purge and the rollup of yesterday and today
         "core.analytics_purge_job()",
         "core.analytics_rollup_job()",

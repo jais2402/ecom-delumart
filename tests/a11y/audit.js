@@ -41,6 +41,8 @@ const pages = [
   { path: '/console/moderation', as: 'admin', operator: true },
   { path: '/console/reports', as: 'admin', operator: true },
   { path: '/console/reviews', as: 'admin', operator: true },
+  { path: '/console/actions', as: 'admin', operator: true },
+  { path: '/console/configuration', as: 'admin', operator: true },
   // analytics screens: the admin API is answered by fixtures (no Super Admin needed, see mockAnalytics)
   { path: '/console/analytics', as: 'mocked', operator: true },
   { path: '/console/analytics/places', as: 'mocked', operator: true },
@@ -52,6 +54,8 @@ const pages = [
   { path: '/console/analytics', label: '/console/analytics (not available)' },
   { path: '/console/reports', label: '/console/reports (not available)' },
   { path: '/console/moderation', label: '/console/moderation (not available)' },
+  { path: '/console/actions', label: '/console/actions (not available)' },
+  { path: '/console/configuration', label: '/console/configuration (not available)' },
 ];
 const sizes = [[1280, 900], [360, 800]];
 const schemes = ['light', 'dark'];

@@ -23,6 +23,7 @@ const ROLES = ["app_web", "app_pay", "app_jobs", "npc_worker", "research_ro"] as
 const ALSO_USER_ID_COLUMNS = [
   "analytics.experiment_exposure.subject_id",
   "audit.pending_action.requested_by",
+  "audit.config_change.actor_id", // 0090
   "core.config_version.created_by",
 ];
 

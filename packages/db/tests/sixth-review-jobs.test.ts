@@ -3,6 +3,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   acceptJobsRequest,
+  executeDueAdminActions,
   moderationSafetyNet,
   pendingScreenings,
   purgeIdempotencyRecords,
@@ -147,6 +148,8 @@ describe("sixth security review: the jobs credential", () => {
     expect(typeof (await purgeRateCounters(pool))).toBe("number");
     expect(typeof (await purgeIdempotencyRecords(pool))).toBe("number");
     expect(typeof (await terminateStuckMoneySessions(pool))).toBe("number");
+    // 0090: the delayed-action executor, the one function the jobs role gained for the queue
+    expect(await executeDueAdminActions(pool)).toEqual({ executed: 0, failed: 0, skipped: 0 });
   });
 
   it("major 3: the watchdog never ends a working transaction that blocks nobody, whatever max_age it is given", async () => {

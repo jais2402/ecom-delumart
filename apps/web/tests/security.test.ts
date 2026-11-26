@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { uuidv7 } from "@delulu/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import * as adminActionCancel from "../src/app/api/v1/admin/actions/[id]/cancel/route";
+import * as adminActions from "../src/app/api/v1/admin/actions/route";
+import * as adminConfig from "../src/app/api/v1/admin/config/route";
 import * as adminReviewHide from "../src/app/api/v1/admin/reviews/[id]/hide/route";
 import * as adminReviewRestore from "../src/app/api/v1/admin/reviews/[id]/restore/route";
 import * as adminReviews from "../src/app/api/v1/admin/reviews/route";
@@ -218,6 +221,35 @@ const PRIVATE: PrivateRoute[] = [
     method: "POST",
     path: `/api/v1/admin/reviews/${ID}/restore`,
     options: () => ({ params: { id: ID }, body: { reason: "Test reason" } }),
+  },
+  // the Super Admin's delayed actions and configuration (migration 0090, decisions.md #16)
+  {
+    name: "admin actions",
+    handler: adminActions.GET,
+    method: "GET",
+    path: "/api/v1/admin/actions",
+    options: () => ({}),
+  },
+  {
+    name: "admin action cancel",
+    handler: adminActionCancel.POST,
+    method: "POST",
+    path: `/api/v1/admin/actions/${ID}/cancel`,
+    options: () => ({ params: { id: ID }, body: { reason: "Test reason" } }),
+  },
+  {
+    name: "admin config",
+    handler: adminConfig.GET,
+    method: "GET",
+    path: "/api/v1/admin/config",
+    options: () => ({}),
+  },
+  {
+    name: "admin config change",
+    handler: adminConfig.POST,
+    method: "POST",
+    path: "/api/v1/admin/config",
+    options: () => ({ body: { key: "fee_percent", value: "6", reason: "Test reason" } }),
   },
 ];
 

@@ -25,6 +25,8 @@ export function ConsoleFrame({ current, children }: { current: string; children:
             { label: "Moderation", href: "/console/moderation" },
             { label: "Reports", href: "/console/reports" },
             { label: "Reviews", href: "/console/reviews" },
+            { label: "Pending actions", href: "/console/actions" },
+            { label: "Configuration", href: "/console/configuration" },
             { label: "Analytics", href: "/console/analytics" },
             { label: "Usage by place", href: "/console/analytics/places" },
             { label: "Top sellers", href: "/console/analytics/top" },

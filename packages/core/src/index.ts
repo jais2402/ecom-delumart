@@ -1,6 +1,7 @@
 export * from "./address/index";
 export * from "./analytics/index";
 export * from "./card/index";
+export * from "./console-config/index";
 export * from "./errors/index";
 export * from "./experiments/index";
 export * from "./fulfilment/index";

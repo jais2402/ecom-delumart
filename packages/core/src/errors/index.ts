@@ -88,6 +88,13 @@ export const ERROR_CODES = [
   // free Standard delivery (PRD R6.5): the price could not fund the delivery fee out of the
   // seller's proceeds, so the listing would be unbuyable
   "FREE_DELIVERY_UNFUNDED",
+  // Super Admin delayed actions and versioned configuration (decisions.md #16): an action kind that
+  // is not on the allow-list; the queue already holds its maximum of waiting proposals; a
+  // configuration key that is not on the allow-list; a value outside the key's bounds
+  "ADMIN_ACTION_UNKNOWN",
+  "ADMIN_ACTION_LIMIT",
+  "CONFIG_KEY_UNKNOWN",
+  "CONFIG_VALUE_INVALID",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

@@ -21,6 +21,7 @@ On 20 November 2026 the owner asked for open decisions to be made for them. Each
 | 13 | Tonight's build order | Foundation that can be proven without external accounts: design system, domain logic, database schema and tests, storefront pages on seed data | Everything else needs accounts only the owner can create | — |
 | 14 | Ratings and reviews (not in the PRD; the owner asked for big-marketplace features and delegated product decisions, 26 November 2026) | Owners of a product review it; details below | The most visible missing marketplace feature; kept small and private by default | Hide the product page section and revoke the review functions; the tables can stay |
 | 15 | Sale price, reference price and merchant-funded delivery (PRD R6.2, R6.5, R6.6, R8; the PRD is silent or loose on the points below, so the safer reading was taken, 26 November 2026) | Details below | A sale must not become a way to fake a discount, leak buyer timing, or move money outside the pricing function | Revoke `core.product_set_sale_price` and `core.product_end_sale`; `core.product_sale` can stay |
+| 16 | Super Admin delayed actions and versioned configuration (PRD R16.6, R7; the owner asked for the safety foundation) | A 24-hour, cancellable queue; the first kind changes one allow-listed configuration value (section 16 below) | A stolen session cannot cause immediate, irreversible damage and there is no second approver | Change `admin_action_delay_seconds` (clamped); add kinds in a new migration |
 
 ### 14. Ratings and reviews
 
@@ -58,6 +59,26 @@ On 20 November 2026 the owner asked for open decisions to be made for them. Each
 | Finances | `core.earnings_totals` gains `discountPaise`. Each period shows gross (after seller discounts), discounts given, marketplace fees, merchant-funded delivery and net once each; net = gross - fees - merchant-funded delivery and equals the owner's ledger credit. Order times stay delayed by a minute (0060). |
 | Cart preview and coupons | When a cart cannot be priced even without its coupon, the preview now reports the coupon's refusal first, as checkout does. Found by the extended 50-random-cart test. |
 | Delulu Plus | Not built. The pricing function's member flag is untouched: a member's Standard fee is 0, so a merchant-funded Standard delivery then costs the seller 0. |
+
+### 16. Super Admin delayed actions and configuration versions
+
+Migration 0090; `packages/core/src/console-config`; routes under `/api/v1/admin/actions` and `/api/v1/admin/config`; console pages Pending actions and Configuration.
+
+| Rule | Choice |
+|---|---|
+| Queue | `audit.pending_action`. A Super Admin proposes an action of an allow-listed kind with a reason (5 to 500 characters, no contact details or links); it waits `admin_action_delay_seconds` (default 24 h, clamped to 1 h .. 7 days, so a configuration value of 0 cannot remove the delay). The delay is read at proposal time and is not itself changeable through the queue. |
+| Kinds | Only `config.set` now. Platform coupon budgets, minting, reversals and research exports are not built; each is added as a kind in a new migration (validator and executor) without changing the queue. |
+| Allow-listed keys | `fee_percent` (0 to 20), `delivery_fee_paise.STANDARD`, `.EXPRESS`, `.ZAP` (0 to ₹1,00,000, paise as decimal strings). Ceilings are safety rails in the registry (`CONFIG_KEYS` and `core.config_key_registry()`, checked equal by a test), chosen so checkout cannot break; a test buys at every minimum and every maximum and reconciles. Grants, thresholds, price bounds and limits are not changeable from the console. |
+| Proposal checks | Super Admin only; a sign-in within five minutes (`REAUTH_REQUIRED`); a value equal to the current one is a conflict; one waiting change per key; at most `admin_action_open_max` (20) waiting at once. |
+| Cancelling | Allowed while the action is still `QUEUED`, even if it is overdue and only waiting for the next job run. It does not need a recent sign-in, because it only removes a change (an attacker who cancels the owner's change causes nuisance, not damage). |
+| Execution | The jobs endpoint's `pending_action.execute` step (`core.admin_actions_execute_due`, the only function `app_jobs` gained): due, queued rows in `not_before` order, `FOR UPDATE SKIP LOCKED`, each in its own sub-transaction. The payload hash, the proposer's role, the kind and the bounds are checked again. A failure marks the action `FAILED` with a code and is final (never retried); a lock timeout leaves it queued. Cancelled and finished actions never run. |
+| New version | A new `core.config_version`: the newest version's values plus the one change; an old version is never updated. Locks: pending rows, then the base version (`FOR NO KEY UPDATE`, so purchases never wait), then the audit chain head. Two changes in one run therefore both survive. |
+| Effective time | 30 seconds after the write (`config_apply_grace_seconds`), because a checkout session opened while the executing transaction is uncommitted would otherwise be priced under the old version yet start after the new one, and the pay check of 0016 would refuse it. Orders keep their version (`order_group.config_version`); a session opened before and paid after the change still prices under its own version (tested). |
+| Record | `audit.config_change` (the ConsoleConfigChange of R10: area, before, after, versions, actor, approver `DELAYED_EXECUTION`, reason), audit rows for propose, cancel, execute and fail, and an outbox row per step with ids, kind, key and time only. The version's `note` carries the key, never the reason (application roles can read it). |
+| Email | Not built (the app has no sender). `TODO(email-sender)`: the outbox relay turns `admin_action_proposed`, `_cancelled`, `_executed` and `_failed` into the alert email of R16.6. The Super Admin sign-in alert and the passkey are also not built. |
+| Analytics | `console_config_changed`, no props, no user id, written only by the executor; `analytics.record_event` refuses it from any caller. |
+| Announcement | `core.announcement`: the setting and the new value, no reason, no person, no old value. `GET /api/v1/announcements` is public (30 s shared cache, never reads the session). The storefront shows "Store news" for 72 hours (`announcement_window_hours`), at most three. |
+| Local helper | `pnpm dev:expedite-admin-actions` (owner connection, loopback database and server only, refuses production; a test checks the refusals) makes waiting actions due, calls the signed jobs endpoint and lets the new version take effect. It is not an app route. |
 
 ## Cannot be decided for you
 

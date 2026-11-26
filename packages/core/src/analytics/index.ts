@@ -27,6 +27,9 @@ export const SERVER_EVENT_NAMES = [
   // ratings and reviews (migration 0078): no props, no user id, no text
   "review_submitted",
   "review_hidden",
+  // Super Admin configuration change (migration 0090): written by the database when a delayed
+  // action runs; no props, no user id, no values
+  "console_config_changed",
 ] as const;
 export const ANALYTICS_EVENT_NAMES = [...BROWSER_EVENT_NAMES, ...SERVER_EVENT_NAMES] as const;
 

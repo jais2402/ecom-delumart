@@ -187,3 +187,28 @@ export async function purgeAnalyticsEvents(pool: Pool): Promise<number> {
     return Number(rows[0]?.n ?? 0);
   });
 }
+
+export interface AdminActionsRun {
+  /** Actions applied by this run. */
+  executed: number;
+  /** Actions marked FAILED by this run (a coded refusal; nothing was applied). */
+  failed: number;
+  /** Actions another run held, or whose lock timed out; they stay queued for the next run. */
+  skipped: number;
+}
+
+/**
+ * The pending_action.execute step (LLD §9, migration 0090): runs each due, still-queued Super Admin
+ * action once. Idempotent and safe under concurrent runs (row locks; an action another run holds is
+ * skipped); a cancelled or finished action is never run. At most `limit` (1-50) per call.
+ */
+export async function executeDueAdminActions(pool: Pool, limit = 10): Promise<AdminActionsRun> {
+  const r = await asJobs(pool, (c) =>
+    one<{ executed: number; failed: number; skipped: number }>(
+      c,
+      "SELECT core.admin_actions_execute_due($1) AS r",
+      [limit],
+    ),
+  );
+  return { executed: Number(r.executed), failed: Number(r.failed), skipped: Number(r.skipped) };
+}
