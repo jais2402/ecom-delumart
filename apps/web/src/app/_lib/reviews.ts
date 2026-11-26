@@ -1,3 +1,5 @@
+import { REVIEW_RULES } from "@delulu/core";
+
 /**
  * Ratings and reviews in the browser (docs/decisions.md #14): the API shapes and the words shown
  * for refusals. Averages arrive as integer tenths and are formatted by @delulu/core, never as floats.
@@ -94,9 +96,11 @@ export function reviewFieldMessage(field: ReviewField, code: string): string {
     case "OUT_OF_RANGE":
       return "Choose from 1 to 5 stars.";
     case "TOO_LONG":
-      return field === "title" ? "Use at most 80 characters." : "Use at most 1,000 characters.";
+      return `Use at most ${(field === "title" ? REVIEW_RULES.titleMaxChars : REVIEW_RULES.bodyMaxChars).toLocaleString("en-IN")} characters.`;
     case "CONTROL_CHARACTERS":
       return field === "title" ? "Keep the title on one line." : "Remove special characters.";
+    case "INVISIBLE":
+      return "Remove hidden or formatting characters (for example, text pasted from elsewhere).";
     case "LINK":
       return "Remove links and web addresses.";
     case "EMAIL":

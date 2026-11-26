@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { BYPASS_ATTACKS, NOT_A_CARD_NUMBER } from "../../../packages/core/src/screening/attack-cases";
 import * as adminHide from "../src/app/api/v1/admin/reviews/[id]/hide/route";
 import * as adminRestore from "../src/app/api/v1/admin/reviews/[id]/restore/route";
 import * as adminList from "../src/app/api/v1/admin/reviews/route";
@@ -7,6 +8,7 @@ import * as review from "../src/app/api/v1/products/[id]/review/route";
 import * as reviews from "../src/app/api/v1/products/[id]/reviews/route";
 import * as summaries from "../src/app/api/v1/review-summaries/route";
 import { settleTracking } from "../src/server/analytics";
+import { PUBLIC_SHORT_CACHE } from "../src/server/http";
 import { startTestApp, type TestApp } from "./helpers/app";
 import { arr, Browser, type CallResult, str } from "./helpers/browser";
 import { checkout, player, R } from "./helpers/flows";
@@ -27,7 +29,31 @@ afterAll(async () => {
   await app.stop();
 });
 
-const PUBLIC_CACHE = "public, s-maxage=60, stale-while-revalidate=300";
+/** Public review answers are cached briefly with no stale serving (review round 1, minor 2). */
+const PUBLIC_CACHE = PUBLIC_SHORT_CACHE;
+
+/**
+ * Test-only stand-in for "tomorrow" (0079: a review is public from the reporting day after the one
+ * it was written in): moves today's reviews back one day as the database owner. The app has no
+ * such route.
+ */
+async function aDayLater(): Promise<void> {
+  const c = await app.db.pool.connect();
+  try {
+    await c.query("BEGIN");
+    await c.query("SET LOCAL session_replication_role = replica");
+    await c.query(
+      `UPDATE core.product_review SET created_at = created_at - interval '1 day'
+        WHERE created_at >= core.review_public_before()`,
+    );
+    await c.query("COMMIT");
+  } catch (error) {
+    await c.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    c.release();
+  }
+}
 
 async function buy(b: Browser, id: string): Promise<void> {
   const s = await checkout(b, id);
@@ -93,7 +119,7 @@ describe("public reviews (GET /api/v1/products/{id}/reviews)", () => {
     // a signed-in owner gets exactly the public answer: no "your review" in a public response
     const b = await owner();
     expect((await put(b, { rating: 5, title: "Lovely" })).status).toBe(200);
-    await aMinuteLater(app);
+    await aDayLater();
     const signedIn = await list(b);
     const signedOut = await list(new Browser());
     expect(signedIn.text).toBe(signedOut.text);
@@ -113,7 +139,7 @@ describe("public reviews (GET /api/v1/products/{id}/reviews)", () => {
   it("REV-5: the public answer names no user id, email, order id or time; the author is a handle or none", async () => {
     const b = await owner(otherProductId);
     expect((await put(b, { rating: 3, title: "Mid", body: "Fine." }, otherProductId)).status).toBe(200);
-    await aMinuteLater(app);
+    await aDayLater();
     const res = await list(new Browser(), otherProductId);
     const userId = await userIdOf(app, b);
     expect(res.text).not.toContain(userId);
@@ -165,6 +191,19 @@ describe("summaries (GET /api/v1/review-summaries)", () => {
   });
 });
 
+describe("summaries rate limit", () => {
+  it("REV-3: the summaries route is limited per client address (configured), then RATE_LIMITED", async () => {
+    const { RATE_RULES } = await import("../src/server/rate-limit");
+    const anon = new Browser();
+    const path = `/api/v1/review-summaries?productIds=${productId}`;
+    for (let i = 0; i < RATE_RULES.reviewSummaryAddress.limit; i++)
+      expect((await anon.call(summaries.GET, "GET", path)).status).toBe(200);
+    expectError(await anon.call(summaries.GET, "GET", path), 429, "RATE_LIMITED");
+    // another address is unaffected
+    expect((await new Browser().call(summaries.GET, "GET", path)).status).toBe(200);
+  });
+});
+
 describe("writing a review (PUT/DELETE /api/v1/products/{id}/review)", () => {
   it("REV-1: needs a session (401), the CSRF token and the same origin (403); every answer is private", async () => {
     const anon = new Browser();
@@ -182,7 +221,7 @@ describe("writing a review (PUT/DELETE /api/v1/products/{id}/review)", () => {
     expectError(await my(signedOut), 401, "AUTH_REQUIRED");
   });
 
-  it("REV-1: an owner writes, edits and deletes; the review is public only after the purchase minute", async () => {
+  it("REV-1: an owner writes, edits and deletes; the review is public only from the next reporting day", async () => {
     const { b } = await player({ pin: false });
     await buy(b, otherProductId);
     const first = await put(b, { rating: 2, title: "Meh" }, otherProductId);
@@ -194,7 +233,12 @@ describe("writing a review (PUT/DELETE /api/v1/products/{id}/review)", () => {
     });
     const before = await list(new Browser(), otherProductId);
     expect(arr(before.json.items).some((i) => String(i.title) === "Meh")).toBe(false);
+    // not when the purchase minute ends: only from the next reporting day (0079)
     await aMinuteLater(app);
+    expect(
+      arr((await list(new Browser(), otherProductId)).json.items).some((i) => String(i.title) === "Meh"),
+    ).toBe(false);
+    await aDayLater();
     const edited = await put(b, { rating: 4, title: "Grew on me", body: "It glows." }, otherProductId);
     expect(edited.json).toMatchObject({ changed: true, review: { rating: 4, edited: true, public: true } });
     const again = await put(b, { rating: 4, title: "Grew on me", body: "It glows." }, otherProductId);
@@ -242,17 +286,25 @@ describe("writing a review (PUT/DELETE /api/v1/products/{id}/review)", () => {
       [{ rating: 4, body: "b".repeat(1001) }, "body:TOO_LONG"],
       [{ rating: 4, body: "find me at www.moonlamp-secret.example" }, "body:LINK"],
       [{ rating: 4, title: "ring 98765 43210" }, "title:PHONE"],
-      [{ rating: 4, body: "card 4111 1111 1111 1111 works" }, "body:PHONE"],
+      [{ rating: 4, body: `card ${NOT_A_CARD_NUMBER} works` }, "body:PHONE"],
+      // review round 1, M1 and minor 1
+      ...BYPASS_ATTACKS.map(([t, code]): [unknown, string] => [{ rating: 4, body: t }, `body:${code}`]),
+      ...BYPASS_ATTACKS.map(([t, code]): [unknown, string] => [{ rating: 4, title: t }, `title:${code}`]),
+      [{ rating: 4, title: "one\u2028two" }, "title:INVISIBLE"],
+      [{ rating: 4, body: "nice\u202Elamp" }, "body:INVISIBLE"],
       [{ rating: 4, body: "mail moon.secret@example.test" }, "body:EMAIL"],
     ];
-    for (const [body, reason] of cases) {
-      const res = await put(b, body);
+    // refusals count against the ten-an-hour write limit too: a fresh account every few cases
+    let writer = b;
+    for (const [i, [body, reason]] of cases.entries()) {
+      if (i > 0 && i % 8 === 0) writer = (await player({ pin: false })).b;
+      const res = await put(writer, body);
       expectError(res, 422, "REVIEW_INVALID");
       const reasons = arr(res.json.error?.details?.reasons).map(
         (r) => `${String(r.field)}:${String(r.code)}`,
       );
       expect(reasons, JSON.stringify(body)).toContain(reason);
-      expect(res.text).not.toMatch(/secret|4111|98765/);
+      expect(res.text).not.toMatch(/secret|1234 5678|98765|evil|९८७६/);
     }
     // an unknown field or a wrong type is a malformed request
     expectError(await put(b, { rating: 4, userId: "x" }), 400, "VALIDATION_FAILED");
@@ -295,6 +347,7 @@ describe("moderation (Super Admin)", () => {
   it("REV-4: only the Super Admin lists, hides and restores; hidden reviews leave the public answer", async () => {
     const author = await owner(otherProductId);
     expect((await put(author, { rating: 1, title: "Moderate me" }, otherProductId)).status).toBe(200);
+    await aDayLater();
     const notAdmin = (await player({ pin: false })).b;
     expectError(await notAdmin.call(adminList.GET, "GET", "/api/v1/admin/reviews"), 403, "FORBIDDEN");
     const { b: admin } = await player({ pin: false });

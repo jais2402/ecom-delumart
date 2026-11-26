@@ -1,7 +1,8 @@
 import { REVIEW_SUMMARY_MAX, reviewSummaries } from "@delulu/db/runtime";
 import { z } from "zod";
 import { webPool } from "@/server/db";
-import { route } from "@/server/http";
+import { PUBLIC_SHORT_CACHE, route } from "@/server/http";
+import { RATE_RULES } from "@/server/rate-limit";
 import { summaryView } from "@/server/reviews";
 
 const query = z.strictObject({
@@ -15,9 +16,17 @@ const query = z.strictObject({
 /**
  * GET /api/v1/review-summaries?productIds=a,b: rating summaries (count, rating sum, averageTenths)
  * for up to 100 products, for cards and rails. Published products only; others are left out.
- * Public and cacheable; never reads the session.
+ * Public and briefly cacheable (30 s); never reads the session. Limited per client address.
  */
-export const GET = route({ auth: "public", query }, async ({ query: q }) => {
-  const items = await reviewSummaries(webPool(), q.productIds);
-  return { json: { items: items.map(summaryView) } };
-});
+export const GET = route(
+  {
+    auth: "public",
+    query,
+    publicCache: PUBLIC_SHORT_CACHE,
+    rateLimits: [{ rule: RATE_RULES.reviewSummaryAddress }],
+  },
+  async ({ query: q }) => {
+    const items = await reviewSummaries(webPool(), q.productIds);
+    return { json: { items: items.map(summaryView) } };
+  },
+);
