@@ -1,7 +1,9 @@
 import "./server-only";
 import { DomainError, screenListing } from "@delulu/core";
 import {
+  type AdminActionsRun,
   applyScreening,
+  executeDueAdminActions,
   expiredPhoneHolds,
   moderationSafetyNet,
   pendingScreenings,
@@ -34,6 +36,10 @@ import { env } from "./env";
  *  5. phone holds (ninth review, major 1b; Supabase only): numbers the server set on a sign-in user
  *     whose code lifetime has passed and that are still unconfirmed are cleared through the Auth
  *     admin API, so an abandoned (or squatted) number is free again.
+ *  6. the Super Admin's delayed actions (migration 0090): each due, still-queued action is run once
+ *     by core.admin_actions_execute_due (row locks; an action another run holds is skipped; a failed
+ *     one is marked FAILED with a code and never retried; a cancelled one never runs). The alert
+ *     email to the Super Admin is not built: TODO(email-sender), the database writes the outbox rows.
  * Every step is idempotent, so overlapping or repeated runs are safe. The report holds counts only
  * (no listing text, no ids of people).
  */
@@ -46,6 +52,8 @@ export interface JobsReport {
     paused: boolean;
   };
   safetyNet: SafetyNetResult | null;
+  /** Delayed Super Admin actions run, failed or skipped by this run, or null when the step did not run. */
+  adminActions: AdminActionsRun | null;
   ratePurged: number | null;
   idempotencyPurged: number | null;
   terminated: number | null;
@@ -84,6 +92,7 @@ export async function runJobs(options: RunJobsOptions = {}): Promise<JobsReport>
   const report: JobsReport = {
     screening: { processed: 0, outcomes: {}, skipped: 0, failed: 0, paused: false },
     safetyNet: null,
+    adminActions: null,
     ratePurged: null,
     idempotencyPurged: null,
     terminated: null,
@@ -145,6 +154,7 @@ export async function runJobs(options: RunJobsOptions = {}): Promise<JobsReport>
     }
   };
   report.safetyNet = await step("moderation.safety_net", () => moderationSafetyNet(pool));
+  report.adminActions = await step("admin_actions.execute", () => executeDueAdminActions(pool));
   report.ratePurged = await step("rate.purge", () => purgeRateCounters(pool));
   report.idempotencyPurged = await step("idempotency.purge", () => purgeIdempotencyRecords(pool));
   report.terminated = await step("watchdog", () => terminateStuckMoneySessions(pool));

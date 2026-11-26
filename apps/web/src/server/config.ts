@@ -103,6 +103,18 @@ export const SERVER_CONFIG = {
     studioReadActor: { scope: "studio.read.actor", by: "actor", limit: 30, windowSeconds: 60 },
     /** Super Admin moderation calls per account. */
     adminActor: { scope: "admin.write.actor", by: "actor", limit: 60, windowSeconds: 60 },
+    /**
+     * Super Admin delayed-action proposals per account (migration 0090; the database also caps the
+     * proposals waiting at once).
+     */
+    adminProposeActor: { scope: "admin.propose.actor", by: "actor", limit: 20, windowSeconds: 3_600 },
+    /** The public announcement banner's reads per client address. */
+    announcementAddress: {
+      scope: "announcements.read.address",
+      by: "address",
+      limit: 120,
+      windowSeconds: 60,
+    },
     /** Reports per account (LLD §11.2: 5 / hour / account; the database also counts committed reports). */
     reportActor: { scope: "reports.write.actor", by: "actor", limit: 5, windowSeconds: 3_600 },
     /** Address-book writes (add, edit, delete, default) per account (PRD R5.2). */
