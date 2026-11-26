@@ -93,7 +93,7 @@ function play(actions: readonly Action[]): { history: PricePoint[]; listPaise: b
 }
 
 describe("price actions and the reference price (properties)", () => {
-  it("US-43: a shown reference is always an earlier, higher price that was live for 24 hours", () => {
+  it("US-43: a shown reference is above the current price and no earlier price in the 30 days before it was lower", () => {
     fc.assert(
       fc.property(fc.array(actionArb, { maxLength: 12 }), (actions) => {
         const { history } = play(actions);
@@ -101,14 +101,16 @@ describe("price actions and the reference price (properties)", () => {
         if (ref === null) return;
         const current = history[history.length - 1] as PricePoint;
         expect(ref).toBeGreaterThan(current.pricePaise);
-        // the run of the reference price right before the current price's run
         let i = history.length - 1;
         while (i > 0 && (history[i - 1] as PricePoint).pricePaise === current.pricePaise) i--;
-        let j = i - 1;
-        while (j > 0 && (history[j - 1] as PricePoint).pricePaise === ref) j--;
-        expect((history[j] as PricePoint).pricePaise).toBe(ref);
-        const span = (history[i] as PricePoint).at.getTime() - (history[j] as PricePoint).at.getTime();
-        expect(span).toBeGreaterThanOrEqual(24 * HOUR);
+        const start = (history[i] as PricePoint).at.getTime();
+        for (let k = 0; k < i; k++) {
+          const a = (history[k] as PricePoint).at.getTime();
+          const end = (history[k + 1] as PricePoint).at.getTime();
+          if (end > a && end > start - 30 * 24 * HOUR) {
+            expect((history[k] as PricePoint).pricePaise).toBeGreaterThanOrEqual(ref);
+          }
+        }
       }),
       { numRuns: 500 },
     );
@@ -128,9 +130,12 @@ describe("price actions and the reference price (properties)", () => {
     );
   });
 
-  it("US-43: a sale ended quickly and started again shows no reference until the list price has been live 24 hours", () => {
-    // 1000 (long) -> sale 800 -> end (back to 1000) -> sale 800 again: the 1000 run before it was short
-    expect(referencePrice([p(1000n, 0), p(800n, 100), p(1000n, 101), p(800n, 102)])).toBeNull();
-    expect(referencePrice([p(1000n, 0), p(800n, 100), p(1000n, 101), p(800n, 125)])).toBe(rupees(1000n));
+  it("US-43: a sale ended and started again at the same price shows no reference while the first sale is within 30 days", () => {
+    // 1000 (long) -> sale 800 -> end (back to 1000) -> sale 800 again: 800 was published in the window
+    expect(referencePrice([p(1000n, 0), p(800n, 100), p(1000n, 101), p(800n, 125)])).toBeNull();
+    // the same restart 31 days later: the first sale has left the 30-day window
+    expect(referencePrice([p(1000n, 0), p(800n, 100), p(1000n, 101), p(800n, 101 + 31 * 24)])).toBe(
+      rupees(1000n),
+    );
   });
 });

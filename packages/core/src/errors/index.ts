@@ -85,6 +85,9 @@ export const ERROR_CODES = [
   // sale price (PRD R6.2, US-43): the seller asked to show a reference price and the earlier price
   // was not the published price for the required continuous hours
   "REFERENCE_PRICE_INELIGIBLE",
+  // free Standard delivery (PRD R6.5): the price could not fund the delivery fee out of the
+  // seller's proceeds, so the listing would be unbuyable
+  "FREE_DELIVERY_UNFUNDED",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
