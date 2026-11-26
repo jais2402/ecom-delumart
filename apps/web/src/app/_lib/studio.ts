@@ -68,6 +68,15 @@ export interface Listing {
   stock: { available: number; issued: number; retired: number };
   edition: { supply: number; issued: number } | null;
   nextAction: NextAction;
+  /** The sale state (migration 0081); money fields are decimal strings. */
+  sale: {
+    active: boolean;
+    listPaise: string | null;
+    salePaise: string | null;
+    startedAt: string | null;
+    referencePaise: string | null;
+    canShowReference: boolean;
+  };
 }
 
 export interface ListingDetail extends Listing {
