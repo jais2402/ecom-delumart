@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describeFailure, PAYMENT_METHODS, TEST_DELULUPAY_IDS } from "@delulu/core";
+import fc from "fast-check";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { executeDueAdminActions } from "../src/admin-actions";
@@ -229,6 +230,148 @@ describe("DeluluPay review fixes", () => {
         "UPDATE audit.pending_action SET state = 'CANCELLED', cancelled_at = now(), cancel_reason = 'test' WHERE id = $1",
         [a.id],
       );
+    });
+  });
+
+  describe("future windows and concurrent runs (second review)", () => {
+    const DAY = 86_400_000;
+    const futureWindow = () => ({
+      maintenanceFrom: new Date(Date.now() + DAY).toISOString(),
+      maintenanceUntil: new Date(Date.now() + 2 * DAY).toISOString(),
+    });
+
+    it("US-35: a future window on one method, then the others disabled one by one: the one that would leave nothing usable in the window is refused", async () => {
+      try {
+        await change("BALANCE", futureWindow());
+        await change("CARD", { enabled: false });
+        await change("DELULUPAY_ID", { enabled: false });
+        expect(await codeOf(propose("NET_BANKING", { enabled: false }))).toBe("CONFIG_VALUE_INVALID");
+      } finally {
+        await restoreAll();
+      }
+    });
+
+    it("US-35: the reverse order is refused too: the window cannot be set once the others are disabled", async () => {
+      try {
+        for (const m of ["CARD", "DELULUPAY_ID", "NET_BANKING"] as const) await change(m, { enabled: false });
+        expect(await codeOf(propose("BALANCE", futureWindow()))).toBe("CONFIG_VALUE_INVALID");
+        // a change that sets no window and leaves one method usable is fine
+        const ok = await propose("BALANCE", { displayOrder: 2 });
+        await pool.query(
+          "UPDATE audit.pending_action SET state = 'CANCELLED', cancelled_at = now(), cancel_reason = 'test' WHERE id = $1",
+          [ok.id],
+        );
+      } finally {
+        await restoreAll();
+      }
+    });
+
+    it("US-35 (property): after any accepted sequence of changes, at now and at every window boundary some method is usable", async () => {
+      const methodArb = fc.constantFrom(...PAYMENT_METHODS);
+      const changeArb = fc.record({
+        method: methodArb,
+        enabled: fc.boolean(),
+        tiny: fc.boolean(),
+        window: fc.option(fc.tuple(fc.integer({ min: -1, max: 5 }), fc.integer({ min: 1, max: 6 })), {
+          nil: null,
+        }),
+      });
+      await fc.assert(
+        fc.asyncProperty(fc.array(changeArb, { minLength: 1, maxLength: 7 }), async (steps) => {
+          try {
+            for (const st of steps) {
+              const over: Partial<PaymentMethodChange> = {
+                enabled: st.enabled,
+                perAttemptLimitPaise: st.tiny ? "1" : null,
+                perDayLimitPaise: st.tiny ? "1" : null,
+                maintenanceFrom: null,
+                maintenanceUntil: null,
+              };
+              if (st.window) {
+                const [start, length] = st.window;
+                over.maintenanceFrom = new Date(Date.now() + start * DAY).toISOString();
+                over.maintenanceUntil = new Date(Date.now() + (start + length) * DAY).toISOString();
+              }
+              try {
+                const a = await propose(st.method, over);
+                await due(a.id);
+                await executeDueAdminActions(pool);
+              } catch (e) {
+                expect(["CONFIG_VALUE_INVALID", "CONFLICT"]).toContain((e as { code?: string }).code);
+              }
+            }
+            const methods = (await adminPaymentMethods(pool, { authSessionId: admin.authSessionId })).methods;
+            const floors = (
+              await pool.query<{ a: string; d: string }>(
+                "SELECT per_attempt::text AS a, per_day::text AS d FROM core.payment_limit_floors()",
+              )
+            ).rows[0];
+            const instants = new Set<number>([Date.now()]);
+            for (const m of methods) {
+              for (const t of [m.maintenanceFrom, m.maintenanceUntil]) {
+                if (t && Date.parse(t) >= Date.now()) instants.add(Date.parse(t));
+              }
+            }
+            for (const t of instants) {
+              const usable = methods.some(
+                (m) =>
+                  m.enabled &&
+                  m.switchOn &&
+                  (m.perAttemptLimitPaise === null ||
+                    BigInt(m.perAttemptLimitPaise) >= BigInt(floors?.a ?? "0")) &&
+                  (m.perDayLimitPaise === null || BigInt(m.perDayLimitPaise) >= BigInt(floors?.d ?? "0")) &&
+                  !(
+                    m.maintenanceFrom &&
+                    Date.parse(m.maintenanceFrom) <= t &&
+                    t < Date.parse(m.maintenanceUntil ?? "")
+                  ),
+              );
+              expect(usable, `no usable method at ${new Date(t).toISOString()}`).toBe(true);
+            }
+          } finally {
+            await restoreAll();
+          }
+        }),
+        { numRuns: 12 },
+      );
+    }, 180_000);
+
+    it("US-35: two runs of the executor at once cannot disable the last two methods together", async () => {
+      try {
+        await change("CARD", { enabled: false });
+        await change("DELULUPAY_ID", { enabled: false });
+        // each proposal alone leaves one other method enabled, so both are accepted into the queue
+        const net = await propose("NET_BANKING", { enabled: false });
+        const bal = await propose("BALANCE", { enabled: false });
+        await due(net.id);
+        await due(bal.id);
+        const c1 = await pool.connect();
+        const c2 = await pool.connect();
+        try {
+          await c1.query("BEGIN");
+          const first = await c1.query("SELECT core.admin_actions_execute_due(1) AS r");
+          await c2.query("BEGIN");
+          // the second run takes the other action and must wait for the first one's lock
+          const second = c2.query("SELECT core.admin_actions_execute_due(1) AS r");
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          await c1.query("COMMIT");
+          const r2 = await second;
+          await c2.query("COMMIT");
+          expect(first.rows[0].r.executed + r2.rows[0].r.executed).toBe(1);
+          expect(first.rows[0].r.failed + r2.rows[0].r.failed).toBe(1);
+        } finally {
+          await c1.query("ROLLBACK").catch(() => undefined);
+          await c2.query("ROLLBACK").catch(() => undefined);
+          c1.release();
+          c2.release();
+        }
+        const states = await Promise.all([net.id, bal.id].map(stateOfAction));
+        expect(states.map((x) => x?.state).sort()).toEqual(["EXECUTED", "FAILED"]);
+        const methods = (await adminPaymentMethods(pool, { authSessionId: admin.authSessionId })).methods;
+        expect(methods.some((m) => m.available)).toBe(true);
+      } finally {
+        await restoreAll();
+      }
     });
   });
 

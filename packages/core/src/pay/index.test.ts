@@ -141,6 +141,33 @@ describe("PRD R4.5 and R4.2: DeluluPay IDs and real payment data", () => {
     }
   });
 
+  it("US-37: card numbers and secrets hidden behind separators, invisible characters, other scripts or look-alikes are still refused", () => {
+    const ZW = "\u200B";
+    const bypass = [
+      "4111_1111_1111_1111",
+      "4111/1111/1111/1111",
+      "4111,1111,1111,1111",
+      "4111:1111:1111:1111",
+      "4111     1111     1111     1111",
+      `4111${ZW}1111${ZW}1111${ZW}1111`,
+      "4111\u20131111\u20131111\u20131111",
+      "4111\u00B71111\u00B71111\u00B71111",
+      "\u0664\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661 \u0661\u0661\u0661\u0661",
+      "\u096A\u0967\u0967\u0967\u0967\u0967\u0967\u0967\u0967\u0967\u0967\u0967\u0967\u0967\u0967\u0967",
+      "\u0440in 1234",
+      `c${ZW}vv 123`,
+      `12${ZW}/25`,
+      "1 2 / 2 5",
+      "12\\25",
+      "12\u201325",
+      "pin_1234",
+    ];
+    for (const text of bypass) expect(looksLikeRealPaymentData(text), JSON.stringify(text)).toBe(true);
+    for (const ok of ["SAVE-10-25", "SAVE-10-2025", "WELCOME10", "SPIN10", "FLAT-05-30"]) {
+      expect(looksLikeRealPaymentData(ok), ok).toBe(false);
+    }
+  });
+
   it("US-37: ordinary codes and a DeluluPay ID are not flagged", () => {
     for (const ok of ["WELCOME10", "SAVE-20", "diwali2026", "aarav@delulu", "HOLI 25"]) {
       expect(looksLikeRealPaymentData(ok), ok).toBe(false);

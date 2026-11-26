@@ -184,6 +184,9 @@ function baseForm(text: string): string {
   return mapChars(lower, LOOKALIKES);
 }
 
+/** baseForm for other modules (the payment-data screen): compatibility forms, ASCII digits, case, accents, look-alikes. */
+export const foldForScreening = baseForm;
+
 const collapseRepeats = (s: string): string => s.replace(/(.)\1+/gu, "$1");
 
 /** The normalised text: compatibility forms, case, accents, look-alikes and repeated characters. */

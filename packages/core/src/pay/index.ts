@@ -1,3 +1,4 @@
+import { foldForScreening } from "../screening/index";
 /**
  * DeluluPay payment simulator rules (PRD R4, R10, R11 US-34 to US-37). Pure functions and
  * constants: the methods, the status model, the decline wording, the challenge numbers, the test
@@ -205,29 +206,33 @@ export function parseDeluluPayId(text: string): DeluluPayIdCheck {
 // ---------------------------------------------------------------------------- real payment data
 
 /**
- * Does this text look like real payment data: a card number (13 to 19 digits however separated), a
+ * Does this text look like real payment data: a card number (13 or more digits however separated), a
  * UPI handle that is not a DeluluPay ID, a CVV or expiry, a PIN or a password (PRD R4.5, US-37)?
  * Applied to every free-text field in checkout (the coupon code, the DeluluPay ID). A false
  * positive only asks the player to type something else; a false negative would let a real credential
  * through, so the check leans strict.
  */
 export function looksLikeRealPaymentData(text: string): boolean {
-  const s = text.normalize("NFKC");
-  // a run of 13 to 19 digits, spaces, dots and dashes: a card number
-  for (const run of s.match(/\d(?:[\s.-]{0,3}\d){12,18}/g) ?? []) {
-    const n = run.replace(/\D/g, "").length;
-    if (n >= 13 && n <= 19) return true;
-  }
+  // hidden format characters (zero-width spaces and joiners, bidi marks) are dropped; every script's digits
+  // become ASCII; case, accents and Cyrillic and Greek look-alikes are folded (the screening module's form)
+  const s = foldForScreening(text.replace(/\p{Cf}/gu, ""));
+  // thirteen or more digits in all, however they are separated: a card number
+  if ((s.match(/[0-9]/g) ?? []).length >= 13) return true;
   // a handle at a provider: anything@something that is not @delulu
   for (const handle of s.match(/[^\s@]+@[^\s@]+/g) ?? []) {
-    if (!/@delulu$/i.test(handle)) return true;
+    if (!/@delulu$/.test(handle)) return true;
   }
-  // an expiry date: MM/YY or MM/YYYY anywhere; MM-YY or MM-YYYY only as the whole text (so a code such as
-  // SAVE-10-25 is not mistaken for one)
-  if (/(?:^|\D)(?:0[1-9]|1[0-2])\s*\/\s*(?:\d{2}|\d{4})(?:\D|$)/.test(s)) return true;
-  if (/^\s*(?:0[1-9]|1[0-2])\s*-\s*(?:\d{2}|\d{4})\s*$/.test(s)) return true;
-  // words that introduce a secret, followed by anything
-  if (/(?<![a-z])(?:cvv|cvc|cid|expiry|exp(?:ires?)?|pin|otp|passcode|password|passwd|pwd)(?![a-z])/i.test(s))
+  // an expiry date. Dashes of every kind are one dash and slashes of every kind one slash; spaces are
+  // squeezed out ("1 2 / 2 5"). MM/YY or MM/YYYY anywhere; MM, any separator, YY or YYYY only as the whole
+  // text (so a code such as SAVE-10-25 is not mistaken for one).
+  const squeezed = s
+    .replace(/[\p{Pd}\u2212]/gu, "-")
+    .replace(/[\\\u2044\u2215]/g, "/")
+    .replace(/\s+/g, "");
+  if (/(?:^|\D)(?:0[1-9]|1[0-2])\/(?:\d{2}|\d{4})(?:\D|$)/.test(squeezed)) return true;
+  if (/^(?:0[1-9]|1[0-2])[^a-z0-9]{1,3}(?:\d{2}|\d{4})$/.test(squeezed)) return true;
+  // words that introduce a secret (letters bound the word, so SPIN10 is fine and PIN_1234 is not)
+  if (/(?<![a-z])(?:cvv|cvc|cid|expiry|exp(?:ires?)?|pin|otp|passcode|password|passwd|pwd)(?![a-z])/.test(s))
     return true;
   return false;
 }
