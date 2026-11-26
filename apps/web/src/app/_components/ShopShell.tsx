@@ -2,6 +2,7 @@
 
 import { ShopLayout } from "@delulu/ui";
 import type { ReactNode } from "react";
+import { AnnouncementBanner } from "./AnnouncementBanner";
 import { CartNotice } from "./CartNotice";
 import { SessionHeader } from "./SessionHeader";
 import { ShopFooter } from "./ShopFooter";
@@ -21,6 +22,7 @@ export function ShopShell({
       footer={<ShopFooter />}
     >
       <PageViewTracker surface="shop" />
+      <AnnouncementBanner />
       <CartNotice />
       {children}
     </ShopLayout>
