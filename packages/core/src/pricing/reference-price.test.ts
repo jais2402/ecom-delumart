@@ -127,9 +127,8 @@ describe("referencePrice (lowest prior price rule, US-43)", () => {
           );
         });
         expect(prior.length).toBeGreaterThan(0);
-        expect(
-          prior.reduce((m, h) => (h.pricePaise < m ? h.pricePaise : m), prior[0]?.pricePaise ?? 0n),
-        ).toBe(ref);
+        const lowest = prior.map((h) => h.pricePaise).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))[0];
+        expect(lowest).toBe(ref);
       }),
       { numRuns: 400 },
     );

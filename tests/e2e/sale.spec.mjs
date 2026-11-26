@@ -304,11 +304,7 @@ try {
     async () => {
       ageHistory(productId, "25 hours");
       await seller.reload();
-      await seller
-        .getByText(
-          /A "Was" price of ₹5,000 will show if you set a lower sale price now/,
-        )
-        .waitFor();
+      await seller.getByText(/A "Was" price of ₹5,000 will show if you set a lower sale price now/).waitFor();
       await seller.getByLabel(`Sale price in rupees for ${NAME}`).fill("4000");
       await seller.getByLabel(/^Only do this if the earlier price can show/).check();
       await seller.getByRole("button", { name: "Start sale" }).click();

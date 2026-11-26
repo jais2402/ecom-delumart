@@ -9,7 +9,6 @@ import fc from "fast-check";
 import type pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { catalogProduct, catalogProducts, storeProducts } from "../src/catalog";
-import { createCheckoutSession } from "../src/checkout";
 import {
   archiveProduct,
   endSale,
@@ -28,7 +27,6 @@ import {
   checkout,
   codeOf,
   journalPostings,
-  key,
   type ProductFixture,
   payFor,
   RUPEE,
