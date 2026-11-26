@@ -90,6 +90,7 @@ export interface Listing {
   stock: { available: number; issued: number; retired: number };
   edition: { supply: number; issued: number } | null;
   nextAction: ListingNextAction;
+  sale: SaleView;
 }
 
 export interface AppealView {
@@ -104,6 +105,29 @@ export interface AppealView {
   decisionReason: string | null;
   productName: string | null;
 }
+
+/**
+ * The owner's view of a listing's sale (migration 0081). While a sale is open `listPaise` is the
+ * price it returns to and `salePaise` the live price. `referencePaise` is the "was" price buyers
+ * see now (null when none may be shown); `canShowReference` says whether a lower price set now
+ * would carry one (the current price has been published for the required continuous hours).
+ */
+export interface SaleView {
+  active: boolean;
+  listPaise: bigint | null;
+  salePaise: bigint | null;
+  startedAt: Date | null;
+  referencePaise: bigint | null;
+  canShowReference: boolean;
+}
+
+export type PriceChangeReason =
+  | "PUBLISHED"
+  | "PRICE_CHANGE"
+  | "REVISION"
+  | "SALE_START"
+  | "SALE_CHANGE"
+  | "SALE_END";
 
 export interface ListingDetail extends Listing {
   /** The listing's latest appeal (migration 0039), or null. */
@@ -126,7 +150,7 @@ export interface ListingDetail extends Listing {
     versionId: string;
     pricePaise: bigint;
     previousPaise: bigint | null;
-    reason: "PUBLISHED" | "PRICE_CHANGE" | "REVISION";
+    reason: PriceChangeReason;
     changedAt: Date;
   }[];
 }
@@ -230,6 +254,20 @@ function listingOf(raw: unknown): Listing {
     },
     edition: edition ? { supply: Number(edition.supply), issued: Number(edition.issued) } : null,
     nextAction: j.nextAction as ListingNextAction,
+    sale: saleOf(j.sale),
+  };
+}
+
+function saleOf(raw: unknown): SaleView {
+  const j = (raw ?? {}) as Json;
+  const money = (v: unknown): bigint | null => (v === null || v === undefined ? null : BigInt(String(v)));
+  return {
+    active: j.active === true,
+    listPaise: money(j.listPaise),
+    salePaise: money(j.salePaise),
+    startedAt: dateOrNull(j.startedAt),
+    referencePaise: money(j.referencePaise),
+    canShowReference: j.canShowReference === true,
   };
 }
 
@@ -272,7 +310,7 @@ function detailOf(raw: unknown): ListingDetail {
       versionId: String(h.versionId),
       pricePaise: BigInt(String(h.pricePaise)),
       previousPaise: h.previousPaise === null ? null : BigInt(String(h.previousPaise)),
-      reason: h.reason as "PUBLISHED" | "PRICE_CHANGE" | "REVISION",
+      reason: h.reason as PriceChangeReason,
       changedAt: date(h.changedAt),
     })),
   };
@@ -409,6 +447,31 @@ export function setProductPrice(
   return productCommand(pool, input.authSessionId, "SELECT core.product_set_price($1, $2) AS r", [
     input.productId,
     input.pricePaise.toString(),
+  ]);
+}
+
+/**
+ * Puts a live listing on sale (migration 0081). `requireReference`: refuse with
+ * REFERENCE_PRICE_INELIGIBLE, changing nothing, when no earlier price qualifies to show as the
+ * struck-through "was" price.
+ */
+export function setSalePrice(
+  pool: Pool,
+  input: Session & { productId: string; salePricePaise: bigint; requireReference?: boolean },
+): Promise<ListingDetail> {
+  requireUuid(input.productId, "productId");
+  return productCommand(pool, input.authSessionId, "SELECT core.product_set_sale_price($1, $2, $3) AS r", [
+    input.productId,
+    input.salePricePaise.toString(),
+    input.requireReference === true,
+  ]);
+}
+
+/** Ends the sale: the list price is the live price again. */
+export function endSale(pool: Pool, input: Session & { productId: string }): Promise<ListingDetail> {
+  requireUuid(input.productId, "productId");
+  return productCommand(pool, input.authSessionId, "SELECT core.product_end_sale($1) AS r", [
+    input.productId,
   ]);
 }
 

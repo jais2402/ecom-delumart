@@ -3199,6 +3199,8 @@ describe("money attacks (security review)", () => {
         "core.phone_verification_mode()",
         "core.product_allocate_and_publish(uuid,integer)",
         "core.product_archive(uuid)",
+        // 0081: the owner ends a sale (a new version at the list price; no money moves)
+        "core.product_end_sale(uuid)",
         "core.product_restock(uuid,integer)",
         "core.product_retire_units(uuid,integer)",
         // 0078: public ratings and reviews (no user id, order or time finer than a day)
@@ -3206,6 +3208,8 @@ describe("money attacks (security review)", () => {
         "core.product_reviews(uuid,integer)",
         "core.product_revise(uuid,text,text,text,text,integer)",
         "core.product_set_price(uuid,bigint)",
+        // 0081: the owner puts a listing on sale (a new version at the sale price; no money moves)
+        "core.product_set_sale_price(uuid,bigint,boolean)",
         "core.product_set_shipping(uuid,boolean,boolean)",
         "core.product_submit(uuid)",
         // 0038: a public "unavailable" answer for a hidden or archived product page

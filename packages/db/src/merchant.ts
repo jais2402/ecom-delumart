@@ -281,6 +281,8 @@ export interface EarningsTotals {
   to: Date;
   orders: number;
   grossPaise: bigint;
+  /** The seller-funded (merchant coupon) discount given on these orders (R8). */
+  discountPaise: bigint;
   feesPaise: bigint;
   merchantDeliveryPaise: bigint;
   netPaise: bigint;
@@ -305,6 +307,7 @@ function totalsOf(j: Json): EarningsTotals {
     to: date(j.to),
     orders: Number(j.orders),
     grossPaise: paise(j.grossPaise),
+    discountPaise: paise(j.discountPaise),
     feesPaise: paise(j.feesPaise),
     merchantDeliveryPaise: paise(j.merchantDeliveryPaise),
     netPaise: paise(j.netPaise),
