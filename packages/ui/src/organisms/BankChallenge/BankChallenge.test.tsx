@@ -41,6 +41,13 @@ describe("BankChallenge", () => {
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalled();
   });
+  it("US-36: names the account on the net banking page and shows the code field without any card field", () => {
+    setup({ method: "code", cardAlias: "DM-ACCT-ABCDEFGH", sourceLabel: "Account" });
+    expect(screen.getByText("Account")).toBeInTheDocument();
+    expect(screen.getByText("DM-ACCT-ABCDEFGH")).toBeInTheDocument();
+    expect(screen.queryByText("Card")).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/SecureCheck code/)).toBeInTheDocument();
+  });
   it("never asks for card number, expiry or CVV", () => {
     setup();
     expect(screen.queryByLabelText(/card number|expiry|cvv/i)).not.toBeInTheDocument();

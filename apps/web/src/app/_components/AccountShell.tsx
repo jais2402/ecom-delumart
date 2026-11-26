@@ -13,6 +13,8 @@ const ITEMS = [
   { label: "Overview", href: "/account" },
   { label: "Orders", href: "/account/orders" },
   { label: "Wallet", href: "/account/wallet" },
+  { label: "Payments", href: "/account/payments" },
+  { label: "Bank inbox", href: "/account/bank-inbox" },
   { label: "Cards", href: "/account/cards" },
   { label: "Addresses", href: "/account/addresses" },
   { label: "Collection", href: "/account/collection" },
