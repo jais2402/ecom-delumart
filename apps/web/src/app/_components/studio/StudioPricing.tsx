@@ -1,6 +1,6 @@
 "use client";
 
-import { LISTING_RULES, REFERENCE_PRICE_RULES } from "@delulu/core";
+import { formatInrExact } from "@delulu/core";
 import {
   Alert,
   Badge,
@@ -73,13 +73,16 @@ export function StudioPricing() {
   }, [tick]);
   const retry = useCallback(() => setTick((n) => n + 1), []);
 
+  const rules = state.status === "ready" ? state.items[0]?.sale.rules : undefined;
   return (
     <div className="flex flex-col gap-4">
       <PortalTitle>Pricing</PortalTitle>
       <Text size="sm" muted>
-        Put a live listing on sale at a lower price. The price it sold at before shows crossed out as "Was"
-        only if it was the published price for at least {REFERENCE_PRICE_RULES.minHours} hours in a row;
-        otherwise shoppers see only the current price. Ending a sale brings back the list price.
+        Put a live listing on sale at a lower price. Shoppers see a crossed-out "Was" price only when it is
+        the lowest price the listing had in the last {rules?.referenceLookbackDays ?? "…"} days, it is higher
+        than the sale price, and the listing was published for at least {rules?.referenceMinHours ?? "…"}{" "}
+        hours in that time; otherwise they see only the current price. Ending a sale brings back the list
+        price.
       </Text>
       {state.status === "loading" ? <LoadingBlock rows={3} label="Loading your prices" /> : null}
       {state.status === "error" ? <ErrorBlock message={state.message} onRetry={retry} /> : null}
@@ -113,6 +116,9 @@ function PricingCard({ initial }: { initial: Listing }) {
 
   const name = listing.live?.name ?? "Listing";
   const sale = listing.sale;
+  const rules = sale.rules;
+  const rupeeOf = (paise: string) => parsePaise(paise) / 100n;
+  const freeMin = rules.freeDeliveryMinPaise === null ? null : parsePaise(rules.freeDeliveryMinPaise);
   const livePrice = listing.live ? parsePaise(listing.live.pricePaise) : null;
   const headingId = `pc-${listing.id}`;
 
@@ -144,8 +150,12 @@ function PricingCard({ initial }: { initial: Listing }) {
         tone: "danger",
         text:
           code === "REFERENCE_PRICE_INELIGIBLE"
-            ? `The earlier price was not the published price for ${REFERENCE_PRICE_RULES.minHours} hours in a row, so it cannot show as "Was". Nothing was changed. Start the sale without that option to show only the current price.`
-            : (Object.values(fields)[0]?.[0] ?? studioErrorText(error)),
+            ? `A "Was" price cannot show for this sale price: the lowest price of the last ${rules.referenceLookbackDays} days must be higher than it, and the listing must have been published for ${rules.referenceMinHours} hours. Nothing was changed. Start the sale without that option to show only the current price.`
+            : code === "FREE_DELIVERY_UNFUNDED" && error instanceof Error
+              ? error.message
+              : code === "RATE_LIMITED"
+                ? `This listing's price changed ${rules.priceChangesPerDay} times in ${rules.priceChangeWindowHours} hours. Try again later. You can still end a sale.`
+                : (Object.values(fields)[0]?.[0] ?? studioErrorText(error)),
       });
     } finally {
       setBusy(false);
@@ -154,9 +164,16 @@ function PricingCard({ initial }: { initial: Listing }) {
 
   function start() {
     const rupees = parseRupees(price);
-    const { min, max } = LISTING_RULES.priceRupees;
-    if (rupees === null || rupees < BigInt(min) || rupees > BigInt(max)) {
+    const min = rupeeOf(rules.priceMinPaise);
+    const max = rupeeOf(rules.priceMaxPaise);
+    if (rupees === null || rupees < min || rupees > max) {
       setPriceError(`Enter whole rupees from ${min} to ${max}.`);
+      return;
+    }
+    if (listing.freeStandardDelivery && freeMin !== null && rupees * 100n < freeMin) {
+      setPriceError(
+        `Free Standard delivery is on, so the price must be at least ${formatInrExact(freeMin)}: the delivery fee comes out of your proceeds.`,
+      );
       return;
     }
     const list = sale.active ? sale.listPaise : listing.live?.pricePaise;
@@ -208,9 +225,13 @@ function PricingCard({ initial }: { initial: Listing }) {
         label={`Sale price in rupees for ${name}`}
         hint={
           priceReading(price) ??
-          (sale.canShowReference
-            ? `The current price can show as "Was" if you set a lower one now.`
-            : `A "Was" price would not show now: the current price has not been live for ${REFERENCE_PRICE_RULES.minHours} hours in a row.`)
+          (sale.canShowReference && sale.referenceCeilingPaise
+            ? `A "Was" price of ${formatInrExact(parsePaise(sale.referenceCeilingPaise))} will show if you set a lower sale price now (the lowest price of the last ${rules.referenceLookbackDays} days).`
+            : `A "Was" price would not show now: the listing has not been published for ${rules.referenceMinHours} hours yet (hidden time does not count).`) +
+            (listing.freeStandardDelivery && freeMin !== null
+              ? ` Free Standard delivery is on: the price must be at least ${formatInrExact(freeMin)}.`
+              : "") +
+            ` ${rules.changesRemaining} of ${rules.priceChangesPerDay} price changes left in ${rules.priceChangeWindowHours} hours.`
         }
         error={priceError}
       >

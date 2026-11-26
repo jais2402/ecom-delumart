@@ -505,6 +505,78 @@ describe("sale price routes (R6.2, US-43)", () => {
     expect((await endSaleCall(s.b, id)).json.error?.code).toBe("NOT_EDITABLE"); // nothing to end
   });
 
+  it("US-45 R8: a signed-in player without a shop or creator access is refused; another owner gets 404; a missing CSRF token or a foreign Origin is refused and nothing changes", async () => {
+    const id = await publishedListing(s.b, { priceRupees: 1_000, quantity: 3 });
+    const { b: stranger } = await player({ pin: false });
+    const locked = await setSale(stranger, id, 800);
+    expect(locked.status).toBe(403);
+    expect(locked.json.error?.code).toBe("CREATOR_LOCKED");
+    expect((await endSaleCall(stranger, id)).status).toBe(403);
+    const other = await seller();
+    const notMine = await setSale(other.b, id, 800);
+    expect(notMine.status).toBe(404);
+    expect(notMine.json).toEqual((await setSale(other.b, randomUUID(), 800)).json);
+    const token = s.b.csrfToken;
+    s.b.csrfToken = null;
+    expect((await setSale(s.b, id, 800)).status).toBe(403);
+    expect((await endSaleCall(s.b, id)).status).toBe(403);
+    s.b.csrfToken = token;
+    const foreign = await s.b.call(salePrice.PUT, "PUT", `/api/v1/studio/products/${id}/sale-price`, {
+      ...p(id),
+      body: { salePriceRupees: 800 },
+      origin: "https://evil.example",
+    });
+    expect(foreign.status).toBe(403);
+    const foreignEnd = await s.b.call(
+      salePrice.DELETE,
+      "DELETE",
+      `/api/v1/studio/products/${id}/sale-price`,
+      {
+        ...p(id),
+        origin: "https://evil.example",
+      },
+    );
+    expect(foreignEnd.status).toBe(403);
+    expect((await productPage(id)).json.pricePaise).toBe("100000");
+    expect((await getDraft(s.b, id)).json.product).toMatchObject({ sale: { active: false } });
+  });
+
+  it("R6.5: FREE_DELIVERY_UNFUNDED (422) when a sale price or free delivery could not fund the Standard fee; the owner's view carries the configured rules", async () => {
+    const id = await publishedListing(s.b, { priceRupees: 1_000, quantity: 3 });
+    const view = (await getDraft(s.b, id)).json.product;
+    expect(view?.sale).toMatchObject({
+      rules: {
+        referenceMinHours: 24,
+        referenceLookbackDays: 30,
+        priceChangesPerDay: 20,
+        priceChangeWindowHours: 24,
+        changesRemaining: 20,
+        priceMinPaise: "10000",
+        freeDeliveryMinPaise: "105300",
+      },
+    });
+    const refused = await shippingCall(s.b, id, { freeStandardDelivery: true });
+    expect(refused.status).toBe(422);
+    expect(refused.json.error?.code).toBe("FREE_DELIVERY_UNFUNDED");
+    expect(refused.json.error?.message).toContain("1053");
+    expect((await getDraft(s.b, id)).json.product?.freeStandardDelivery).toBe(false);
+    const rich = await publishedListing(s.b, { priceRupees: 5_000, quantity: 3, freeStandardDelivery: true });
+    const sale = await setSale(s.b, rich, 1_000);
+    expect(sale.status).toBe(422);
+    expect(sale.json.error?.code).toBe("FREE_DELIVERY_UNFUNDED");
+    expect((await setSale(s.b, rich, 1_053)).status).toBe(200);
+  });
+
+  it("US-43 (review major 1): raising the price first and cutting later shows no reference through the routes", async () => {
+    const id = await publishedListing(s.b, { priceRupees: 1_000, quantity: 3 });
+    await ageHistory(id, "26 hours");
+    expect((await setPrice(s.b, id, 100_000)).status).toBe(200);
+    await ageHistory(id, "25 hours");
+    expect((await setSale(s.b, id, 50_000)).status).toBe(200);
+    expect((await productPage(id)).json).toMatchObject({ pricePaise: "5000000", referencePricePaise: null });
+    expect((await setSale(s.b, id, 40_000, true)).json.error?.code).toBe("REFERENCE_PRICE_INELIGIBLE");
+  });
+
   it("US-08: the list price cannot be changed during a sale (end the sale first)", async () => {
     const id = await publishedListing(s.b, { priceRupees: 1_000, quantity: 3 });
     await setSale(s.b, id, 800);

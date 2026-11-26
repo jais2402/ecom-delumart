@@ -287,11 +287,11 @@ try {
       await seller.getByRole("heading", { level: 1, name: "Pricing" }).waitFor();
       await seller.getByText("All amounts are fictional").waitFor();
       await seller.getByRole("heading", { level: 2, name: NAME }).waitFor();
-      await seller.getByText(/would not show now/).waitFor();
+      await seller.getByText(/A "Was" price would not show now/).waitFor();
       await seller.getByLabel(`Sale price in rupees for ${NAME}`).fill("4000");
       await seller.getByLabel(/^Only do this if the earlier price can show/).check();
       await seller.getByRole("button", { name: "Start sale" }).click();
-      await seller.getByText(/cannot show as "Was"\. Nothing was changed/).waitFor();
+      await seller.getByText(/cannot show for this sale price.*Nothing was changed/).waitFor();
       const page = await (await fetch(`${BASE}/api/v1/products/${productId}`)).json();
       assert.equal(page.pricePaise, "500000");
       await noOverflow(seller, "/studio/pricing");
@@ -304,7 +304,11 @@ try {
     async () => {
       ageHistory(productId, "25 hours");
       await seller.reload();
-      await seller.getByText(/can show as "Was" if you set a lower one now/).waitFor();
+      await seller
+        .getByText(
+          /A "Was" price of ₹5,000 will show if you set a lower sale price now/,
+        )
+        .waitFor();
       await seller.getByLabel(`Sale price in rupees for ${NAME}`).fill("4000");
       await seller.getByLabel(/^Only do this if the earlier price can show/).check();
       await seller.getByRole("button", { name: "Start sale" }).click();
@@ -404,7 +408,7 @@ try {
       await seller.getByLabel(`Sale price in rupees for ${NAME}`).fill("4000");
       await seller.getByLabel(/^Only do this if the earlier price can show/).check();
       await seller.getByRole("button", { name: "Start sale" }).click();
-      await seller.getByText(/cannot show as "Was"\. Nothing was changed/).waitFor();
+      await seller.getByText(/cannot show for this sale price.*Nothing was changed/).waitFor();
       assert.equal((await (await fetch(`${BASE}/api/v1/products/${productId}`)).json()).pricePaise, "500000");
     },
   );

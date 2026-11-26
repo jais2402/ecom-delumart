@@ -1,5 +1,6 @@
 "use client";
 
+import { formatInrExact } from "@delulu/core";
 import { Alert, Button, Checkbox, EmptyState, Heading, Text } from "@delulu/ui";
 import { useCallback, useEffect, useState } from "react";
 import { api, describeError } from "../../_lib/api";
@@ -75,6 +76,9 @@ function ShippingCard({ initial }: { initial: Listing }) {
   const [notice, setNotice] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
   const name = listing.live?.name ?? "Listing";
   const headingId = `sc-${listing.id}`;
+  const freeMin =
+    listing.sale.rules.freeDeliveryMinPaise === null ? null : BigInt(listing.sale.rules.freeDeliveryMinPaise);
+  const livePaise = BigInt(listing.live?.pricePaise ?? "0");
   const dirty = freeStd !== listing.freeStandardDelivery || express !== listing.offersExpress;
 
   async function save() {
@@ -88,7 +92,14 @@ function ShippingCard({ initial }: { initial: Listing }) {
       setListing(r.product);
       setNotice({ tone: "success", text: "Delivery options saved." });
     } catch (error) {
-      setNotice({ tone: "danger", text: studioErrorText(error) });
+      const code = error instanceof Error && "code" in error ? String((error as { code: unknown }).code) : "";
+      setNotice({
+        tone: "danger",
+        text:
+          code === "FREE_DELIVERY_UNFUNDED" && error instanceof Error
+            ? error.message
+            : studioErrorText(error),
+      });
     } finally {
       setBusy(false);
     }
@@ -111,6 +122,12 @@ function ShippingCard({ initial }: { initial: Listing }) {
         />
         {freeStd ? (
           <Text size="sm">You pay for it: the delivery fee comes out of your proceeds on every order.</Text>
+        ) : null}
+        {freeMin !== null ? (
+          <Text size="sm" muted>
+            Free Standard delivery needs a price of at least {formatInrExact(freeMin)}, so the fee can come
+            out of your proceeds. This listing sells at {formatInrExact(livePaise)}.
+          </Text>
         ) : null}
         <Checkbox
           checked={express}
