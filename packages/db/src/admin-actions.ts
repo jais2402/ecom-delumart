@@ -1,6 +1,6 @@
 /**
  * The Super Admin's delayed, cancellable actions and versioned configuration (migration 0090;
- * PRD R16.6, US-60; docs/decisions.md #15). The web calls run as app_web for the admin's session;
+ * PRD R16.6, US-60; docs/decisions.md #16). The web calls run as app_web for the admin's session;
  * each database function checks the Super Admin itself and answers FORBIDDEN to anyone else. The
  * proposal is validated here with the shared allow-list first (@delulu/core) and again by the
  * database. The executor step (jobs role) is `executeDueAdminActions` in ./jobs.

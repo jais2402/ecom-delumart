@@ -20,7 +20,7 @@ On 20 November 2026 the owner asked for open decisions to be made for them. Each
 | 12 | Raw analytics retention on the free database | 30 days, then archive | Keeps the database under its size limit | Raise it on a paid plan |
 | 13 | Tonight's build order | Foundation that can be proven without external accounts: design system, domain logic, database schema and tests, storefront pages on seed data | Everything else needs accounts only the owner can create | — |
 | 14 | Ratings and reviews (not in the PRD; the owner asked for big-marketplace features and delegated product decisions, 26 November 2026) | Owners of a product review it; details below | The most visible missing marketplace feature; kept small and private by default | Hide the product page section and revoke the review functions; the tables can stay || 15 | Super Admin delayed actions and versioned configuration (PRD R16.6, R7; owner asked for the safety foundation, 26 November 2026) | A 24-hour, cancellable queue; the first kind changes one allow-listed configuration value; details below | A stolen session cannot cause immediate, irreversible damage, and no second approver exists | Raise or lower `admin_action_delay_seconds` (clamped); add kinds in a new migration |
-| 15 | Super Admin delayed actions and versioned configuration (PRD R16.6, R7; the owner asked for the safety foundation) | A 24-hour, cancellable queue; the first kind changes one allow-listed configuration value (section 15 below) | A stolen session cannot cause immediate, irreversible damage and there is no second approver | Change `admin_action_delay_seconds` (clamped); add kinds in a new migration |
+| 16 | Super Admin delayed actions and versioned configuration (PRD R16.6, R7; the owner asked for the safety foundation) | A 24-hour, cancellable queue; the first kind changes one allow-listed configuration value (section 16 below) | A stolen session cannot cause immediate, irreversible damage and there is no second approver | Change `admin_action_delay_seconds` (clamped); add kinds in a new migration |
 
 
 ### 14. Ratings and reviews
@@ -40,7 +40,7 @@ On 20 November 2026 the owner asked for open decisions to be made for them. Each
 | Why the next day (decided in review round 1) | A review under a public handle says that this player owns the product, which is its purpose. The seller sees each order to the minute with no buyer. Publishing a review the moment it is written (or the minute after the purchase) would let a seller match a handle to an order for a product that sells rarely; publishing only the next day, and showing only the day, decouples the review from the order's time, so a review says no more than "bought on or before that day". |
 | Not in this round | Reporting a review (use the console for now), helpfulness votes, photos, seller replies. |
 
-### 15. Super Admin delayed actions and configuration versions
+### 16. Super Admin delayed actions and configuration versions
 
 Migration 0090; `packages/core/src/console-config`; routes under `/api/v1/admin/actions` and `/api/v1/admin/config`; console pages Pending actions and Configuration.
 

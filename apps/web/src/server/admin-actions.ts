@@ -3,7 +3,7 @@ import type { AdminActionPage, AdminActionView, Announcement, ConfigOverview } f
 import { z } from "zod";
 
 /**
- * The Super Admin's delayed actions and configuration (docs/decisions.md #15): request schemas and
+ * The Super Admin's delayed actions and configuration (docs/decisions.md #16): request schemas and
  * the response shapes. Each view copies named fields only, so nothing the database adds later
  * reaches a response by accident. Money and counts are decimal strings (invariant 1). No view names
  * a user. The announcement view is the only public one: the setting and the new value, nothing else.

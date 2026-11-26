@@ -31,11 +31,19 @@ import {
   standard,
   user,
 } from "./checkout-fixtures";
-import { asActor, createTestDatabase, stateOf, type TestDatabase, type TestUser, uuidv7 } from "./helpers";
+import {
+  asActor,
+  createTestDatabase,
+  plant,
+  stateOf,
+  type TestDatabase,
+  type TestUser,
+  uuidv7,
+} from "./helpers";
 
 /**
  * The Super Admin's 24-hour delayed, cancellable queue and versioned configuration changes
- * (migration 0090; PRD R16.6, R7 Economy, R10 ConsoleConfigChange; US-60; docs/decisions.md #15).
+ * (migration 0090; PRD R16.6, R7 Economy, R10 ConsoleConfigChange; US-60; docs/decisions.md #16).
  */
 const REASON = "Seasonal change agreed after reviewing the numbers";
 const DAY_MS = 86_400_000;
@@ -177,7 +185,7 @@ describe("Super Admin delayed actions and configuration versions (migration 0090
         expect(await errorOf(propose("fee_percent", "9"))).toBe("REAUTH_REQUIRED");
         const read = await adminActions(pool, { authSessionId: admin.authSessionId, scope: "OPEN", page: 1 });
         expect(read.items.some((i) => i.id === a.id)).toBe(true);
-        // cancelling only ever removes a change, so a stale session may do it (decisions.md #15)
+        // cancelling only ever removes a change, so a stale session may do it (decisions.md #16)
         await cancel(a.id);
         expect(await stateOfAction(a.id)).toBe("CANCELLED");
       } finally {
@@ -525,6 +533,42 @@ describe("Super Admin delayed actions and configuration versions (migration 0090
       await makeEffective();
     });
 
+    it("US-60, race: a run that waited for the base version builds on the version written meanwhile, loses nothing and keeps effective_from in step with id", async () => {
+      const a = await propose("delivery_fee_paise.STANDARD", "130000");
+      await makeDue(a.id);
+      const holder = await pool.connect();
+      let running: ReturnType<typeof executeDueAdminActions> | undefined;
+      try {
+        await holder.query("BEGIN");
+        // the run will want this row: hold it, as another executor in the middle of its write would
+        await holder.query(
+          "SELECT 1 FROM core.config_version WHERE id = (SELECT max(id) FROM core.config_version) FOR NO KEY UPDATE",
+        );
+        running = executeDueAdminActions(pool);
+        await new Promise((r) => setTimeout(r, 500)); // the run is now waiting, with a clock reading from before
+        await holder.query(
+          `INSERT INTO core.config_version (values, effective_from, note)
+           SELECT jsonb_set(values, '{delivery_fee_paise,EXPRESS}', '"1700000"'),
+                  clock_timestamp() + make_interval(secs => ${ADMIN_ACTION_RULES.applyGraceSeconds}), 'the other executor'
+             FROM core.config_version ORDER BY id DESC LIMIT 1`,
+        );
+        await holder.query("COMMIT");
+      } finally {
+        holder.release();
+      }
+      expect(await running).toMatchObject({ executed: 1, failed: 0 });
+      expect(await tipValues()).toMatchObject({
+        delivery_fee_paise: { STANDARD: "130000", EXPRESS: "1700000" },
+      });
+      const { rows } = await pool.query<{ ok: boolean }>(
+        `SELECT bool_and(effective_from >= prev) AS ok FROM (
+           SELECT effective_from, lag(effective_from) OVER (ORDER BY id) AS prev FROM core.config_version) x
+          WHERE prev IS NOT NULL`,
+      );
+      expect(rows[0]?.ok).toBe(true);
+      await makeEffective();
+    });
+
     it("US-60: an action a run has locked is skipped by other runs, and a cancel waits for it and wins", async () => {
       const a = await propose("fee_percent", "9");
       await makeDue(a.id);
@@ -807,7 +851,10 @@ describe("Super Admin delayed actions and configuration versions (migration 0090
       const times = list.map((i) => Date.parse(i.announcedAt));
       expect([...times].sort((x, y) => y - x)).toEqual(times);
       // after the window an announcement is no longer shown
-      await pool.query("UPDATE core.announcement SET announced_at = announced_at - interval '30 days'");
+      // (the table is immutable, so the passing of 30 days is planted with triggers off)
+      await plant(pool, (c) =>
+        c.query("UPDATE core.announcement SET announced_at = announced_at - interval '30 days'"),
+      );
       expect(await publicAnnouncements(pool)).toEqual([]);
     });
 
@@ -938,6 +985,11 @@ describe("Super Admin delayed actions and configuration versions (migration 0090
         "UPDATE audit.config_change SET new_value = '1'",
         "DELETE FROM audit.config_change",
         "TRUNCATE audit.config_change",
+        // the public announcement is as immutable as the change it announces
+        "UPDATE core.announcement SET new_value = '1'",
+        "UPDATE core.announcement SET announced_at = now()",
+        "DELETE FROM core.announcement",
+        "TRUNCATE core.announcement",
       ])
         expect(await stateOf(pool, sql), sql).not.toBe("no error");
     });

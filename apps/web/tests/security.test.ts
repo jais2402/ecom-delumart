@@ -222,7 +222,7 @@ const PRIVATE: PrivateRoute[] = [
     path: `/api/v1/admin/reviews/${ID}/restore`,
     options: () => ({ params: { id: ID }, body: { reason: "Test reason" } }),
   },
-  // the Super Admin's delayed actions and configuration (migration 0090, decisions.md #15)
+  // the Super Admin's delayed actions and configuration (migration 0090, decisions.md #16)
   {
     name: "admin actions",
     handler: adminActions.GET,

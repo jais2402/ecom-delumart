@@ -1,6 +1,6 @@
 /**
  * The Super Admin's delayed, cancellable actions and versioned configuration changes (PRD R16.6,
- * R7 Settings and Economy, R10 ConsoleConfigChange; docs/decisions.md #15). Pure: the allow-list
+ * R7 Settings and Economy, R10 ConsoleConfigChange; docs/decisions.md #16). Pure: the allow-list
  * of action kinds, the allow-list of configuration keys with their bounds, and the arithmetic and
  * wording around them. The database (migration 0090) holds the same allow-lists in
  * core.config_key_registry() and core.admin_action_kinds() and enforces them again when an action

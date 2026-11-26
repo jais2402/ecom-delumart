@@ -1,5 +1,5 @@
 // End-to-end check of the Super Admin's delayed actions and versioned configuration against a
-// running dev server (AUTH_PROVIDER=dev), docs/decisions.md #15:
+// running dev server (AUTH_PROVIDER=dev), docs/decisions.md #16:
 //   DEV_DB_NAME=delulu_dev node tests/e2e/admin-actions.spec.mjs   (BASE_URL defaults to http://localhost:3000)
 // Plain Node plus the globally installed `playwright` package; no test runner. 390px viewport.
 //

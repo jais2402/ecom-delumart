@@ -1,7 +1,7 @@
 /**
  * Local development only: makes the Super Admin's waiting delayed actions due now, runs the jobs
  * once, and lets the configuration version they created take effect now, as if 24 hours and the
- * grace period had passed (migration 0090, docs/decisions.md #15). The browser journey
+ * grace period had passed (migration 0090, docs/decisions.md #16). The browser journey
  * tests/e2e/admin-actions.spec.mjs runs it; there is no route for it in the app and no application
  * role can do it: it connects as the database owner.
  *
@@ -18,6 +18,10 @@ import { isLoopbackHost } from "../packages/db/src/connection.ts";
 
 const require = createRequire(new URL("../packages/db/package.json", import.meta.url));
 const pg = require("pg") as typeof import("pg");
+// pg's own parser (a dependency of pg), resolved from pg's location
+const { parse: parseConnectionString } = createRequire(require.resolve("pg"))(
+  "pg-connection-string",
+) as typeof import("pg-connection-string");
 
 if (process.env.NODE_ENV === "production")
   throw new Error("dev:expedite-admin-actions is for development only");
@@ -28,12 +32,21 @@ const BASE_URL = (process.env.BASE_URL ?? "http://localhost:3000").replace(/\/$/
 
 if (!/^[a-z_][a-z0-9_]{0,62}$/.test(DB_NAME))
   throw new Error("DEV_DB_NAME must be a plain lowercase identifier");
-const url = new URL(ADMIN_URL);
-if (!isLoopbackHost(url.hostname))
+// The libpq environment can override any host in a URL: refuse it outright.
+for (const name of ["PGHOST", "PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE"]) {
+  if (process.env[name] !== undefined)
+    throw new Error(`${name} must not be set for dev:expedite-admin-actions`);
+}
+// A query string can carry host= or hostaddr= (pg-connection-string lets it override the URL's host).
+if (new URL(ADMIN_URL).search !== "")
+  throw new Error("DATABASE_URL must have no query string here; local database only");
+// What the driver would use, parsed the way pg parses it, and then passed on as explicit fields.
+const parsed = parseConnectionString(ADMIN_URL);
+const dbHost = parsed.host ?? "";
+if (!(isLoopbackHost(dbHost) || dbHost.startsWith("/")))
   throw new Error("dev:expedite-admin-actions runs against a local database only");
 if (!isLoopbackHost(new URL(BASE_URL).hostname))
   throw new Error("dev:expedite-admin-actions calls a local server only");
-url.pathname = `/${DB_NAME}`;
 
 function jobsKey(): Buffer {
   const text = readFileSync(new URL("../apps/web/.env.local", import.meta.url), "utf8");
@@ -42,9 +55,20 @@ function jobsKey(): Buffer {
   return Buffer.from(match[1], "hex");
 }
 
-const client = new pg.Client({ connectionString: url.toString() });
+const client = new pg.Client({
+  host: dbHost,
+  port: parsed.port ? Number(parsed.port) : 5432,
+  ...(parsed.user ? { user: parsed.user } : {}),
+  ...(parsed.password ? { password: parsed.password } : {}),
+  database: DB_NAME,
+});
 await client.connect();
 try {
+  // belt and braces: the server reached is on this machine (a unix socket reports NULL)
+  const where = await client.query<{ a: string | null }>("SELECT host(inet_server_addr()) AS a");
+  const addr = where.rows[0]?.a ?? null;
+  if (addr !== null && !isLoopbackHost(addr))
+    throw new Error("dev:expedite-admin-actions runs against a local database only");
   const due = await client.query(
     `UPDATE audit.pending_action SET not_before = clock_timestamp() - interval '1 second' WHERE state = 'QUEUED'`,
   );

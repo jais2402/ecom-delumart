@@ -57,4 +57,22 @@ describe("the local helper that shortens the delay refuses everything but a loca
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("plain lowercase identifier");
   });
+
+  it("refuses a host smuggled in through the connection string's query or the environment", () => {
+    const base = { DEV_DB_NAME: "delulu_dev" };
+    const local = "postgres://postgres:secret@127.0.0.1:5432/postgres";
+    const cases: [string, Record<string, string>][] = [
+      ["?host=", { ...base, DATABASE_URL: `${local}?host=db.example.com` }],
+      ["?hostaddr=", { ...base, DATABASE_URL: `${local}?hostaddr=203.0.113.7` }],
+      ["?sslmode", { ...base, DATABASE_URL: `${local}?sslmode=disable` }],
+      ["PGHOST", { ...base, DATABASE_URL: local, PGHOST: "db.example.com" }],
+      ["PGHOSTADDR", { ...base, DATABASE_URL: local, PGHOSTADDR: "203.0.113.7" }],
+    ];
+    for (const [name, env] of cases) {
+      const r = run(env);
+      expect(r.status, name).not.toBe(0);
+      expect(r.stderr, name).toMatch(/local database only|no query string|PGHOST/);
+      expect(r.stderr, name).not.toContain("secret");
+    }
+  });
 });

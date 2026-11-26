@@ -12,7 +12,7 @@ import { makeAdmin, runJobs, userIdOf } from "./helpers/studio";
 
 /**
  * The Super Admin's 24-hour delayed, cancellable actions and versioned configuration through the
- * routes and the jobs endpoint (migration 0090; PRD R16.6, R7; US-60; docs/decisions.md #15).
+ * routes and the jobs endpoint (migration 0090; PRD R16.6, R7; US-60; docs/decisions.md #16).
  */
 let app: TestApp;
 let admin: Browser;
