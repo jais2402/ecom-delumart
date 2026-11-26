@@ -39,6 +39,12 @@ export function trackingDeclined(b: BrowserLike): boolean {
   return b.navigator?.globalPrivacyControl === true || b.navigator?.doNotTrack === "1";
 }
 
+/** True when this browser asks not to be tracked; other local conveniences (such as "Recently viewed") honour it too. */
+export function trackingDeclinedHere(): boolean {
+  const target = browser();
+  return target !== null && trackingDeclined(target);
+}
+
 /** Sends one event; never throws and never waits. `target` is injectable for tests. */
 export function trackClient<N extends ClientEventName>(
   name: N,

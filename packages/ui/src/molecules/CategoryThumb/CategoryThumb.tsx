@@ -25,7 +25,7 @@ export function CategoryThumb({ name, motif, hue, seed, imageSrc, className, ...
       className={cn("group flex flex-col items-center gap-2 rounded-lg font-body text-fg", className)}
       {...props}
     >
-      <span className="block size-24 overflow-hidden rounded-xl bg-surface-raised md:size-28">
+      <span className="block size-24 overflow-hidden rounded-lg bg-surface-raised md:size-28">
         <ProductPicture
           imageSrc={imageSrc}
           alt=""
@@ -35,7 +35,7 @@ export function CategoryThumb({ name, motif, hue, seed, imageSrc, className, ...
           className="rounded-none transition-transform duration-base group-hover:scale-105"
         />
       </span>
-      <span className="text-center text-sm font-semibold">{name}</span>
+      <span className="text-center text-sm font-bold">{name}</span>
     </a>
   );
 }

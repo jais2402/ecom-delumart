@@ -6,6 +6,8 @@ import { CATEGORIES } from "../../data/seed-catalog";
 import { useBlockedSellerKeys, withoutBlocked } from "../_lib/blocks-store";
 import { deriveHomeRails, deriveTopPicks, type HomeRailData, type TopPicksTab } from "../_lib/home-rails";
 import { usePublicCatalog } from "../_lib/use-public-catalog";
+import { RecentlyViewedRail } from "./RecentlyViewed";
+import { SavedForLaterRail } from "./SavedForLater";
 import { toShopGridItem } from "./shop-items";
 import { TopPicks } from "./TopPicks";
 
@@ -13,7 +15,9 @@ import { TopPicks } from "./TopPicks";
  * The home page's product sections: "Top picks" with its category tabs, then the plain rails. The
  * server derives them from the catalogue it already read; if the page was built without products,
  * the browser reads the public catalogue instead and derives the same sections (see
- * usePublicCatalog). Products of shops the viewer blocked are left out.
+ * usePublicCatalog). Products of shops the viewer blocked are left out. After them come the two
+ * personal rails, each drawn only when it has something: "Saved for later" (signed in) and
+ * "Recently viewed" (this browser only).
  */
 export function HomeRails({
   topPicks: initialTabs,
@@ -42,15 +46,15 @@ export function HomeRails({
   if (loading) {
     return (
       <>
-        <ProductRail title="Top picks." items={[]} loading />
-        <ProductRail title="Lowest prices." items={[]} loading />
+        <ProductRail title="Top picks" items={[]} loading />
+        <ProductRail title="Lowest prices" items={[]} loading />
       </>
     );
   }
   if (tabs.length === 0 && rails.length === 0) {
     return (
       <ProductRail
-        title="Top picks."
+        title="Top picks"
         items={[]}
         emptyText="The shelves are being restocked. Check back soon."
       />
@@ -67,6 +71,8 @@ export function HomeRails({
           items={rail.products.map(toShopGridItem)}
         />
       ))}
+      <SavedForLaterRail />
+      <RecentlyViewedRail />
     </>
   );
 }

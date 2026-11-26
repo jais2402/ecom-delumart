@@ -61,7 +61,6 @@ export * from "./TrackingTimeline";
 export * from "./TrendStatGrid";
 export * from "./TrustStrip";
 export * from "./UnlockCelebration";
-export * from "./UtilityBar";
 export * from "./VirtualCard";
 export * from "./WarehouseUsage";
 export * from "./WelcomePanel";

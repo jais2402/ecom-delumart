@@ -45,15 +45,9 @@ describe("SiteHeader", () => {
     await userEvent.keyboard("{Enter}");
     expect(onSignOut).toHaveBeenCalledTimes(1);
   });
-  it("shows a Sell link only when given an address for it", () => {
+  it("shows the Departments and Services pills, the delivery pill and the Saved link only when given", () => {
     const { rerender } = render(<SiteHeader balancePaise={null} cartCount={0} onSearch={() => {}} />);
-    expect(screen.queryByRole("link", { name: "Sell" })).not.toBeInTheDocument();
-    rerender(<SiteHeader balancePaise={null} cartCount={0} onSearch={() => {}} sellHref="/sell" />);
-    expect(screen.getByRole("link", { name: "Sell" })).toHaveAttribute("href", "/sell");
-  });
-  it("shows the Categories button, the announcement strip and the Saved link only when given", () => {
-    const { rerender } = render(<SiteHeader balancePaise={null} cartCount={0} onSearch={() => {}} />);
-    expect(screen.queryByRole("button", { name: "Categories" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Departments" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Saved" })).not.toBeInTheDocument();
     rerender(
       <SiteHeader
@@ -62,20 +56,31 @@ describe("SiteHeader", () => {
         onSearch={() => {}}
         savedHref="/account/saved"
         categories={[{ slug: "a", name: "Impossible Tech", href: "/c/a", motif: "tech" }]}
-        utility={{
-          message: "Zap delivery in about 10 minutes on eligible products",
-          links: [{ label: "How it works", href: "/#how-it-works" }],
+        services={[{ name: "Sell on DeluluMart", href: "/sell" }]}
+        delivery={{
+          label: "Standard or Zap delivery",
+          speeds: [{ name: "Zap", arrival: "Arrives in about 10 minutes" }],
+          helpHref: "/#how-it-works",
         }}
       />,
     );
-    expect(screen.getByRole("button", { name: "Categories" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Departments" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Services" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Standard or Zap delivery" }).length).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: "Saved" })).toHaveAttribute("href", "/account/saved");
-    expect(screen.getByText("Zap delivery in about 10 minutes on eligible products")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "How it works" })).toBeInTheDocument();
   });
-  it("hands cart and account to the tab bar below 768px when one is used", () => {
+  it("shows the cart total under the cart icon when given, without changing the link's name", () => {
+    render(<SiteHeader balancePaise={null} cartCount={2} cartTotalLabel="₹4,999" onSearch={() => {}} />);
+    expect(screen.getByRole("link", { name: "Cart, 2 items" })).toHaveTextContent("₹4,999");
+  });
+  it("makes the search a GET form for visitors without JavaScript when given an action", () => {
+    render(<SiteHeader balancePaise={null} cartCount={0} onSearch={() => {}} searchAction="/search" />);
+    expect(screen.getByRole("search")).toHaveAttribute("action", "/search");
+    expect(screen.getByRole("searchbox", { name: "Search" })).toHaveAttribute("name", "q");
+  });
+  it("hands the account link to the tab bar below 768px when one is used", () => {
     render(<SiteHeader balancePaise={null} cartCount={2} onSearch={() => {}} withTabBar />);
-    expect(screen.getByRole("link", { name: "Cart, 2 items" })).toHaveClass("max-md:hidden");
+    expect(screen.getByRole("link", { name: "Cart, 2 items" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Account" })).toHaveClass("max-md:hidden");
   });
 });

@@ -27,7 +27,7 @@ export function TopPicks({ tabs: initial }: { tabs: readonly TopPicksTab[] }) {
   return (
     <ProductRail
       id="top-picks"
-      title="Top picks."
+      title="Top picks"
       lead="Across the whole range."
       items={items}
       {...(tab.href ? { seeAll: { href: tab.href, label: "View all" } } : {})}

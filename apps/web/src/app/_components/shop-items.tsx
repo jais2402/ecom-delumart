@@ -4,7 +4,7 @@ import { toGridItem } from "../_lib/catalog";
 import { AddToCartButton } from "./AddToCartButton";
 import { SaveToggle } from "./SaveToggle";
 
-/** A catalog card with its full-width "Add to cart" button under the price and the save heart on the picture's corner. */
+/** A catalog card with its small "+ Add" pill under the picture and the save heart on the picture's corner. */
 export function toShopGridItem(product: ProductResponse): ProductGridItem {
   return {
     ...toGridItem(product),
@@ -16,6 +16,7 @@ export function toShopGridItem(product: ProductResponse): ProductGridItem {
         appearance="filled"
         size="md"
         quietHint
+        compact
       />
     ),
     overlay: <SaveToggle productId={product.id} name={product.name} round />,

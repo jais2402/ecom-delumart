@@ -30,12 +30,17 @@ export default async function CategoryPage({ params }: { params: Promise<{ categ
   return (
     <ShopShell>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: found.name }]} />
-      <Heading level={1} size="xl" className="mt-2">
-        {found.name}
-      </Heading>
-      <Text muted className="mb-6 max-w-reading">
-        {found.blurb}
-      </Text>
+      <header className="mt-2 mb-6 rounded-lg bg-surface p-5 md:p-6">
+        <Heading level={1} size="xl">
+          {found.name}
+        </Heading>
+        <Text muted className="mt-1 max-w-reading">
+          {found.blurb}
+        </Text>
+        <Text size="sm" muted className="mt-2">
+          {items.length} {items.length === 1 ? "product" : "products"}
+        </Text>
+      </header>
       <CategoryBrowser items={items} sellers={sellers} />
     </ShopShell>
   );

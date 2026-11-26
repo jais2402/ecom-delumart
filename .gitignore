@@ -7,3 +7,6 @@ coverage
 !.env.example
 *.tsbuildinfo
 .turbo
+
+# Agent worktrees (local only)
+.claude/worktrees/

@@ -11,15 +11,19 @@ const categories = [
 describe("CategoryThumbs", () => {
   it("is a labelled navigation with the id the tab bar links to and one link per category", () => {
     render(<CategoryThumbs categories={categories} />);
-    const nav = screen.getByRole("navigation", { name: "Shop by category" });
+    const nav = screen.getByRole("navigation", { name: "Shop by department" });
     expect(nav).toHaveAttribute("id", "categories");
     expect(within(nav).getAllByRole("link")).toHaveLength(2);
   });
-  it("has a centred visible heading that names the navigation", () => {
+  it("has a visible bold heading that names the navigation", () => {
     render(<CategoryThumbs categories={categories} />);
-    const heading = screen.getByRole("heading", { level: 2, name: "Shop by category" });
-    expect(heading).toHaveClass("text-center");
-    expect(screen.getByRole("navigation")).toHaveAccessibleName("Shop by category");
+    const heading = screen.getByRole("heading", { level: 2, name: "Shop by department" });
+    expect(heading).toBeVisible();
+    expect(screen.getByRole("navigation")).toHaveAccessibleName("Shop by department");
+  });
+  it("has an arrow button to scroll the row", () => {
+    render(<CategoryThumbs categories={categories} />);
+    expect(screen.getByRole("button", { name: "Next in Shop by department" })).toBeInTheDocument();
   });
   it("lets the keyboard walk the categories in order", async () => {
     render(<CategoryThumbs categories={categories} />);

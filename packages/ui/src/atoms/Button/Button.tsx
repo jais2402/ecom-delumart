@@ -5,12 +5,12 @@ import type { ComponentPropsWithRef } from "react";
 import { cn } from "../../lib/cn";
 
 export const buttonVariants = cva(
-  "inline-flex min-h-touch items-center justify-center gap-2 rounded-md font-body font-medium transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
+  "inline-flex min-h-touch items-center justify-center gap-2 rounded-pill font-body font-semibold transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
   {
     variants: {
       variant: {
         primary: "bg-action text-fg-on-action hover:bg-action-hover",
-        secondary: "border border-border-strong bg-surface text-fg hover:bg-action-soft",
+        secondary: "border border-fg bg-surface text-fg hover:bg-action-soft",
         ghost: "bg-transparent text-fg hover:bg-action-soft",
         danger: "bg-danger text-fg-on-action hover:opacity-90",
         cta: "bg-cta text-fg-on-cta hover:bg-cta-hover",

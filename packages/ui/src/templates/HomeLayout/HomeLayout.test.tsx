@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { HomeLayout } from "./HomeLayout";
 
 describe("HomeLayout", () => {
-  it("places the slots in order: hero, promises, categories, rails, promos, story, steps, creator", () => {
+  it("places the slots in order: hero, departments, rails, promises, promos, story, steps, creator", () => {
     const { container } = render(
       <HomeLayout
         hero={<p>hero</p>}
@@ -17,7 +17,7 @@ describe("HomeLayout", () => {
         <p>rails</p>
       </HomeLayout>,
     );
-    expect(container.textContent).toBe("heropromisescatsrailspromosstorystepscreator");
+    expect(container.textContent).toBe("herocatsrailspromisespromosstorystepscreator");
     expect(screen.getByText("rails")).toBeInTheDocument();
   });
   it("merges the class name", () => {

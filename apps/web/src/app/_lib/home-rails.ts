@@ -93,13 +93,13 @@ export function deriveHomeRails(
   const rails: HomeRailData[] = [
     {
       key: "pocket-change",
-      title: "Lowest prices.",
+      title: "Lowest prices",
       lead: "Start small.",
       products: sorted.slice(0, pocketChangeCount),
     },
     {
       key: "big-flex",
-      title: "Premium picks.",
+      title: "Premium picks",
       lead: "More from the top of the range.",
       products: sorted
         .filter((product) => !exclude.has(product.id))

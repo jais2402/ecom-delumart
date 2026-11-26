@@ -1,10 +1,11 @@
 "use client";
 
 import { rupees } from "@delulu/core";
-import { FilterPanel, ProductGrid, type ProductGridItem } from "@delulu/ui";
+import { FilterPanel, ProductGrid, type ProductGridItem, SortMenu } from "@delulu/ui";
 import { useMemo, useState } from "react";
 import { useBlockedSellerKeys } from "../../_lib/blocks-store";
 import { PRICE_STEPS } from "../../_lib/price-steps";
+import { isSortKey, SORT_OPTIONS, type SortKey, sortItems } from "../../_lib/sort-items";
 
 /** `sellers` maps a product id to its seller key, so products of shops the viewer blocked can be left out. */
 export function CategoryBrowser({
@@ -22,16 +23,20 @@ export function CategoryBrowser({
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [zapOnly, setZapOnly] = useState(false);
+  const [sort, setSort] = useState<SortKey>("match");
 
   const visible = useMemo(
     () =>
-      items.filter((item) => {
-        if (minPrice && item.pricePaise < rupees(BigInt(minPrice))) return false;
-        if (maxPrice && item.pricePaise > rupees(BigInt(maxPrice))) return false;
-        if (zapOnly && !item.zapEligible) return false;
-        return true;
-      }),
-    [items, minPrice, maxPrice, zapOnly],
+      sortItems(
+        items.filter((item) => {
+          if (minPrice && item.pricePaise < rupees(BigInt(minPrice))) return false;
+          if (maxPrice && item.pricePaise > rupees(BigInt(maxPrice))) return false;
+          if (zapOnly && !item.zapEligible) return false;
+          return true;
+        }),
+        sort,
+      ),
+    [items, minPrice, maxPrice, zapOnly, sort],
   );
 
   return (
@@ -53,9 +58,12 @@ export function CategoryBrowser({
         }}
       />
       <div className="min-w-0 rounded-lg bg-surface p-5 md:p-6">
-        <p role="status" className="mb-3 text-sm text-fg-muted">
-          Showing {visible.length} of {items.length} products
-        </p>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <p role="status" className="text-sm text-fg-muted">
+            Showing {visible.length} of {items.length} products
+          </p>
+          <SortMenu options={SORT_OPTIONS} value={sort} onChange={(key) => isSortKey(key) && setSort(key)} />
+        </div>
         <ProductGrid
           items={visible}
           label="Products in this category"

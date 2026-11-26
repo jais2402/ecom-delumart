@@ -1,49 +1,71 @@
-import { Heart, LogOut, ShoppingCart, Store, User } from "lucide-react";
-import type { ComponentPropsWithRef } from "react";
+import { Heart, LogOut, ShoppingCart, User } from "lucide-react";
+import type { ComponentPropsWithRef, ReactNode } from "react";
 import { Icon } from "../../atoms/Icon";
 import { LogoMark } from "../../atoms/LogoMark";
 import { Skeleton } from "../../atoms/Skeleton";
 import { cn } from "../../lib/cn";
 import { BalancePill } from "../../molecules/BalancePill";
 import type { CategoryLink } from "../../molecules/CategoryThumb";
-import { SearchBar } from "../../molecules/SearchBar";
+import { DeliveryPill, type DeliveryPillProps } from "../../molecules/DeliveryPill";
+import { LinkMenu, type LinkMenuItem } from "../../molecules/LinkMenu";
+import { SearchBar, type SearchBarProps } from "../../molecules/SearchBar";
 import { CategoryMenu } from "../CategoryMenu";
-import { UtilityBar, type UtilityBarProps } from "../UtilityBar";
 
 export type SiteHeaderProps = Omit<ComponentPropsWithRef<"header">, "children"> & {
   /** The balance to show; null hides the chip (signed out, or not known yet). */
   balancePaise: bigint | null;
   /** Reserve the chip's space while the balance loads, so the header does not jump. */
   balanceLoading?: boolean;
-  /** Text of the account link: "Account" when signed in, "Sign in" otherwise. */
+  /** Text of the account link: "Account" when signed in, "Sign in" otherwise. It is also the link's accessible name. */
   accountLabel?: string;
   /** When set, a "Sign out" button is shown. */
   onSignOut?: () => void;
   cartCount: number;
+  /** The cart's total as formatted text, shown under the cart icon when the browser already knows it. */
+  cartTotalLabel?: string;
   onSearch: (query: string) => void;
   searchDefaultValue?: string;
+  /** Where the search form goes when JavaScript is not running (a GET form with the field named q). */
+  searchAction?: string;
+  /** Suggestions under the search field; see SearchBar. */
+  suggestions?: SearchBarProps["suggestions"];
+  onQueryChange?: SearchBarProps["onQueryChange"];
+  onSelectSuggestion?: SearchBarProps["onSelectSuggestion"];
   homeHref?: string;
   cartHref?: string;
   accountHref?: string;
-  /** When set, a "Sell" link is shown (to the creator access page). */
-  sellHref?: string;
-  /** When set, a "Saved" heart link is shown. */
+  /** When set, a "Saved / My items" heart link is shown. */
   savedHref?: string;
-  /** When given, the Categories button and its dropdown are shown. */
+  /** The delivery pill beside the logo and its popover. */
+  delivery?: Pick<DeliveryPillProps, "label" | "speeds" | "helpHref">;
+  /** When given, the Departments pill and its dropdown are shown in the sub-navigation. */
   categories?: readonly CategoryLink[];
-  /** When given, a thin announcement strip (one message and links) is shown above the band. */
-  utility?: Pick<UtilityBarProps, "message" | "links">;
-  /** Set when a MobileTabBar is on the page: the cart and account links then leave the header below 768px. */
+  /** When given, a Services pill and its dropdown are shown in the sub-navigation. */
+  services?: readonly LinkMenuItem[];
+  /** Plain text links after the pills, from 1024px. */
+  quickLinks?: readonly LinkMenuItem[];
+  /** Set when a MobileTabBar is on the page: the account link then leaves the header below 768px. */
   withTabBar?: boolean;
 };
 
 const control =
-  "relative inline-flex min-h-touch min-w-touch items-center justify-center gap-2 rounded-md px-2 font-body text-sm font-medium text-fg-on-band transition-colors duration-fast hover:bg-band-hover focus-visible:outline-fg-on-band";
+  "relative inline-flex min-h-touch min-w-touch items-center justify-center gap-2 rounded-md px-2 font-body text-fg-on-band transition-colors duration-fast hover:bg-band-hover focus-visible:outline-fg-on-band";
+
+/** Two lines of text beside an icon, from 1024px: a small line over a bold one. Hidden from assistive technology; the link carries the name. */
+function Lines({ top, bottom }: { top: string; bottom: string }): ReactNode {
+  return (
+    <span aria-hidden="true" className="hidden flex-col text-left leading-tight lg:flex">
+      <span className="text-xs">{top}</span>
+      <span className="text-sm font-bold">{bottom}</span>
+    </span>
+  );
+}
 
 /**
- * A thin brand-coloured announcement strip, then a solid brand band with the logo, a Categories button, a large pill
- * search, the wallet chip and outline icon actions. Wraps into rows so nothing overflows at 320px.
- * From 768px up it is sticky and the strip scrolls away.
+ * One brand band with the logo, a delivery pill, a wide white pill search and two-line actions
+ * (Saved / My items, Sign in / Account, the cart with its count and total), then a white
+ * sub-navigation row of pills (Departments, Services) and a few text links. Rows wrap so nothing
+ * overflows at 320px; the sub-navigation scrolls sideways on phones. Sticky from 768px.
  */
 export function SiteHeader({
   balancePaise,
@@ -51,23 +73,34 @@ export function SiteHeader({
   accountLabel = "Account",
   onSignOut,
   cartCount,
+  cartTotalLabel,
   onSearch,
   searchDefaultValue,
+  searchAction,
+  suggestions,
+  onQueryChange,
+  onSelectSuggestion,
   homeHref = "/",
   cartHref = "/cart",
   accountHref = "/account",
-  sellHref,
   savedHref,
+  delivery,
   categories,
-  utility,
+  services,
+  quickLinks,
   withTabBar = false,
   className,
   ...props
 }: SiteHeaderProps) {
   const desktopOnly = withTabBar ? "max-md:hidden" : "";
+  const hasSubNav = Boolean(
+    (categories && categories.length > 0) ||
+      (services && services.length > 0) ||
+      (quickLinks && quickLinks.length > 0) ||
+      delivery,
+  );
   return (
-    <header className={cn("z-40 bg-surface text-fg md:sticky md:-top-8", className)} {...props}>
-      {utility ? <UtilityBar {...utility} /> : null}
+    <header className={cn("z-40 bg-surface text-fg md:sticky md:top-0", className)} {...props}>
       <div className="bg-band text-fg-on-band">
         <div className="mx-auto flex max-w-content flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 md:flex-nowrap md:gap-4">
           <a
@@ -77,16 +110,16 @@ export function SiteHeader({
             <LogoMark tone="onBand" />
             <span className="sr-only min-[380px]:not-sr-only">DeluluMart</span>
           </a>
-          {categories && categories.length > 0 ? (
-            <CategoryMenu categories={categories} className="order-last md:order-none" />
-          ) : null}
+          {delivery ? <DeliveryPill {...delivery} className="max-lg:hidden" /> : null}
           <SearchBar
             variant="pill"
             onSearch={onSearch}
+            {...(searchAction ? { action: searchAction, method: "get" } : {})}
             {...(searchDefaultValue !== undefined ? { defaultValue: searchDefaultValue } : {})}
-            className={cn(
-              "order-last min-w-0 max-md:basis-full md:order-none md:max-w-3xl md:flex-1 md:basis-0",
-            )}
+            {...(suggestions ? { suggestions } : {})}
+            {...(onQueryChange ? { onQueryChange } : {})}
+            {...(onSelectSuggestion ? { onSelectSuggestion } : {})}
+            className="order-last min-w-0 max-md:basis-full md:order-none md:max-w-3xl md:flex-1 md:basis-0"
           />
           <div className="ml-auto flex min-w-0 items-center gap-1 md:ml-0 md:gap-2">
             {balancePaise !== null ? (
@@ -98,11 +131,16 @@ export function SiteHeader({
               {savedHref ? (
                 <a href={savedHref} className={cn(control, "max-md:hidden")} aria-label="Saved">
                   <Icon icon={Heart} />
+                  <Lines top="Saved" bottom="My items" />
                 </a>
               ) : null}
+              <a href={accountHref} className={cn(control, desktopOnly)} aria-label={accountLabel}>
+                <Icon icon={User} />
+                <Lines top={accountLabel === "Account" ? "Your" : accountLabel} bottom="Account" />
+              </a>
               <a
                 href={cartHref}
-                className={cn(control, desktopOnly)}
+                className={cn(control, "flex-col gap-0 py-1")}
                 aria-label={`Cart, ${cartCount} ${cartCount === 1 ? "item" : "items"}`}
               >
                 <span className="relative">
@@ -114,16 +152,11 @@ export function SiteHeader({
                     {cartCount}
                   </span>
                 </span>
-              </a>
-              {sellHref ? (
-                <a href={sellHref} className={control}>
-                  <Icon icon={Store} />
-                  <span className="sr-only md:not-sr-only">Sell</span>
-                </a>
-              ) : null}
-              <a href={accountHref} className={cn(control, desktopOnly)}>
-                <Icon icon={User} />
-                <span className="sr-only sm:not-sr-only">{accountLabel}</span>
+                {cartTotalLabel ? (
+                  <span aria-hidden="true" className="hidden text-xs leading-tight md:block">
+                    {cartTotalLabel}
+                  </span>
+                ) : null}
               </a>
               {onSignOut ? (
                 <button type="button" onClick={onSignOut} className={control}>
@@ -135,6 +168,35 @@ export function SiteHeader({
           </div>
         </div>
       </div>
+      {hasSubNav ? (
+        <div className="border-b border-border bg-surface">
+          <div className="mx-auto flex max-w-content items-center gap-2 overflow-x-auto px-4 py-2 md:overflow-visible [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {delivery ? (
+              <DeliveryPill {...delivery} tone="plain" className="shrink-0 max-md:hidden lg:hidden" />
+            ) : null}
+            {categories && categories.length > 0 ? <CategoryMenu categories={categories} /> : null}
+            {services && services.length > 0 ? (
+              <LinkMenu label="Services" panelLabel="All services" links={services} />
+            ) : null}
+            {quickLinks && quickLinks.length > 0 ? (
+              <nav aria-label="Popular departments" className="hidden lg:block">
+                <ul className="flex items-center gap-1">
+                  {quickLinks.map((link) => (
+                    <li key={link.href}>
+                      <a
+                        href={link.href}
+                        className="inline-flex min-h-touch items-center rounded-pill px-3 font-body text-sm text-fg hover:bg-action-soft hover:underline"
+                      >
+                        {link.name}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </nav>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </header>
   );
 }

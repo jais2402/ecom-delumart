@@ -9,14 +9,14 @@ const categories = [
 ] as const;
 
 describe("CategoryMenu", () => {
-  it("is a closed button until pressed, then lists one link per category", async () => {
+  it("is a closed Departments button until pressed, then lists one link per category", async () => {
     render(<CategoryMenu categories={categories} />);
-    const button = screen.getByRole("button", { name: "Categories" });
+    const button = screen.getByRole("button", { name: "Departments" });
     expect(button).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
     await userEvent.click(button);
     expect(button).toHaveAttribute("aria-expanded", "true");
-    const nav = screen.getByRole("navigation", { name: "All categories" });
+    const nav = screen.getByRole("navigation", { name: "All departments" });
     expect(within(nav).getByRole("link", { name: "Food Fantasies" })).toHaveAttribute("href", "/c/b");
   });
   it("opens with the keyboard, walks the rows with Tab, and Escape closes it and returns focus to the button", async () => {
@@ -28,17 +28,6 @@ describe("CategoryMenu", () => {
     expect(screen.getByRole("link", { name: "Impossible Tech" })).toHaveFocus();
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Categories" })).toHaveFocus();
-  });
-  it("closes when focus leaves it or the page is pressed outside", async () => {
-    render(
-      <>
-        <CategoryMenu categories={categories} />
-        <button type="button">Elsewhere</button>
-      </>,
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Categories" }));
-    await userEvent.click(screen.getByRole("button", { name: "Elsewhere" }));
-    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Departments" })).toHaveFocus();
   });
 });

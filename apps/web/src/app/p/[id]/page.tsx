@@ -2,6 +2,7 @@ import { Breadcrumbs, Button, EmptyState, Heading, ProductPicture, Text } from "
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BuyPanel } from "../../_components/BuyPanel";
+import { RecentlyViewedRail, RecentlyViewedRecorder } from "../../_components/RecentlyViewed";
 import { ShopShell } from "../../_components/ShopShell";
 import { ProductSafetyActions } from "../../_components/safety/ProductSafetyActions";
 import { TrackEvent } from "../../_components/TrackEvent";
@@ -47,6 +48,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   return (
     <ShopShell>
       <TrackEvent name="product_view" props={{ productId: product.id }} />
+      <RecentlyViewedRecorder productId={product.id} />
       <Breadcrumbs
         items={[
           { label: "Home", href: "/" },
@@ -93,6 +95,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
               {product.name}
             </Heading>
             {product.hook ? <Text muted>{product.hook}</Text> : null}
+            {/* Room for a rating summary (stars and review count) once ratings exist. Nothing is drawn now. */}
           </div>
           <BuyPanel product={product} />
           <section
@@ -112,6 +115,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           />
         </div>
       </div>
+      <RecentlyViewedRail excludeId={product.id} className="mt-6 md:mt-8" />
     </ShopShell>
   );
 }

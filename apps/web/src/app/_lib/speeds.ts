@@ -21,8 +21,12 @@ export function arrivalPhrase(speed: Speed): string {
   return ms % HOUR_MS === 0 ? `about ${ms / HOUR_MS} hours` : `about ${Math.round(ms / MINUTE_MS)} minutes`;
 }
 
-/** The short delivery lines shown on product cards, from the same configured durations. */
-export const CARD_DELIVERY = {
-  standard: `Delivery in ${arrivalPhrase("STANDARD")}`,
-  zap: `Zap in ${Math.round(DEFAULT_DELIVERY_DURATIONS_MS.ZAP / MINUTE_MS)} min`,
+/** The header's delivery pill: its label, and the speeds its popover explains with their configured arrival times. */
+export const DELIVERY_PILL = {
+  label: "Standard or Zap delivery",
+  speeds: (["STANDARD", "EXPRESS", "ZAP"] as const).map((speed) => ({
+    name: SPEED_COPY[speed].name,
+    arrival: `Arrives in ${arrivalPhrase(speed)}`,
+  })),
+  helpHref: "/#how-it-works",
 } as const;

@@ -1,12 +1,13 @@
 "use client";
 
-import { Heading, ProductGrid, SearchBar } from "@delulu/ui";
+import { Heading, ProductGrid, SearchBar, SortMenu } from "@delulu/ui";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toShopGridItem } from "../_components/shop-items";
 import { trackClient } from "../_lib/analytics";
 import type { ProductResponse } from "../_lib/api";
 import { useBlockedSellerKeys, withoutBlocked } from "../_lib/blocks-store";
+import { isSortKey, SORT_OPTIONS, type SortKey, sortItems } from "../_lib/sort-items";
 import { usePublicCatalog } from "../_lib/use-public-catalog";
 
 export function SearchResults({ products: initial }: { products: readonly ProductResponse[] }) {
@@ -15,6 +16,7 @@ export function SearchResults({ products: initial }: { products: readonly Produc
   const products = useMemo(() => withoutBlocked(all, blocked), [all, blocked]);
   const router = useRouter();
   const query = useSearchParams().get("q") ?? "";
+  const [sort, setSort] = useState<SortKey>("match");
 
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -23,6 +25,7 @@ export function SearchResults({ products: initial }: { products: readonly Produc
       .filter((product) => `${product.name} ${product.hook ?? ""}`.toLowerCase().includes(needle))
       .map(toShopGridItem);
   }, [products, query]);
+  const shown = useMemo(() => sortItems(results, sort), [results, sort]);
 
   // one search event per query: its length and result count only, never the query itself
   const tracked = useRef<string | null>(null);
@@ -49,14 +52,19 @@ export function SearchResults({ products: initial }: { products: readonly Produc
         onSearch={search}
         className="max-w-reading"
       />
-      <p role="status" className="text-sm text-fg-muted">
-        {query
-          ? `${results.length} ${results.length === 1 ? "product" : "products"} found`
-          : "Type a name or a hook."}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p role="status" className="text-sm text-fg-muted">
+          {query
+            ? `${results.length} ${results.length === 1 ? "product" : "products"} found`
+            : "Type a name or a hook."}
+        </p>
+        {query && results.length > 1 ? (
+          <SortMenu options={SORT_OPTIONS} value={sort} onChange={(key) => isSortKey(key) && setSort(key)} />
+        ) : null}
+      </div>
       {query ? (
         <ProductGrid
-          items={results}
+          items={shown}
           label="Search results"
           headingLevel={2}
           emptyTitle="Nothing matches that search"

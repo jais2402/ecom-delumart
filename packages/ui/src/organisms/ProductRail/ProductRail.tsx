@@ -1,22 +1,21 @@
 "use client";
 
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { type ComponentPropsWithRef, useCallback, useEffect, useId, useRef, useState } from "react";
+import { type ComponentPropsWithRef, useId } from "react";
 import type { HeadingLevel } from "../../atoms/Heading";
-import { Icon } from "../../atoms/Icon";
 import { cn } from "../../lib/cn";
 import { type FilterOption, FilterTabs } from "../../molecules/FilterTabs";
 import { ProductCardSkeleton } from "../../molecules/ProductCardSkeleton";
+import { ScrollRow } from "../../molecules/ScrollRow";
 import { SectionHeading } from "../../molecules/SectionHeading";
 import { ProductCard } from "../ProductCard";
 import type { ProductGridItem } from "../ProductGrid";
 
 export type ProductRailProps = Omit<ComponentPropsWithRef<"section">, "title" | "children"> & {
   title: string;
-  /** A grey sentence after the bold title, on the same line. */
+  /** One muted subtitle line under the bold title. */
   lead?: string;
   items: readonly ProductGridItem[];
-  /** Link to the full list, drawn as an outlined "View all" button. */
+  /** Link to the full list, drawn as an underlined "View all" at the right of the heading. */
   seeAll?: { href: string; label: string };
   /**
    * Filter tabs under the heading (toggle buttons). The rail only draws them: the parent owns the
@@ -37,15 +36,16 @@ export type ProductRailProps = Omit<ComponentPropsWithRef<"section">, "title" | 
   emptyText?: string;
 };
 
-const arrow =
-  "absolute top-1/3 z-10 inline-flex min-h-touch min-w-touch items-center justify-center rounded-pill border border-border bg-surface text-fg shadow-raised transition-colors duration-fast hover:bg-surface-raised aria-disabled:cursor-not-allowed aria-disabled:opacity-40";
-
-const cell = "w-[calc((100%-1rem)/2)] shrink-0 snap-start min-[480px]:w-64 lg:w-[calc((100%-3rem)/4)]";
+/** Two and a bit cards on a phone, four from 768px, six from 1024px. */
+const cell =
+  "relative w-[calc((100%-1rem)/2.3)] shrink-0 snap-start md:w-[calc((100%-3rem)/4)] lg:w-[calc((100%-5rem)/6)]";
 
 /**
- * A row of product cards that snaps as it scrolls, four visible from 1024px, with previous and next
- * buttons at its edges. The row scrolls with touch, trackpad and the keyboard (Tab through the cards);
- * the buttons are for pointer users and stay focusable at either end so focus is never lost.
+ * A heading with a muted subtitle and a "View all" link, over a row of product cards that snaps as
+ * it scrolls, with previous and next buttons at its edges. The row scrolls with touch, trackpad and
+ * the keyboard (Tab through the cards); the buttons are for pointer users and stay focusable at
+ * either end so focus is never lost. Sections sit directly on the page, with no panel of their own
+ * beyond the white section surface.
  */
 export function ProductRail({
   title,
@@ -62,38 +62,6 @@ export function ProductRail({
 }: ProductRailProps) {
   const uid = useId();
   const headingId = `${uid}-title`;
-  const scroller = useRef<HTMLUListElement>(null);
-  const [edges, setEdges] = useState({ start: true, end: false });
-
-  const measure = useCallback(() => {
-    const el = scroller.current;
-    if (!el) return;
-    setEdges({
-      start: el.scrollLeft <= 1,
-      end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 1,
-    });
-  }, []);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure when the number of cards changes
-  useEffect(() => {
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [measure, items.length, loading]);
-
-  const filterValue = filters?.value;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new filter starts the row from its first card
-  useEffect(() => {
-    scroller.current?.scrollTo?.({ left: 0, behavior: "auto" });
-  }, [filterValue]);
-
-  function scrollBy(direction: -1 | 1) {
-    const el = scroller.current;
-    if (!el?.scrollBy) return;
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    el.scrollBy({ left: direction * el.clientWidth * 0.9, behavior: reduce ? "auto" : "smooth" });
-  }
-
   const hasCards = loading || items.length > 0;
   return (
     <section
@@ -117,45 +85,20 @@ export function ProductRail({
         />
       ) : null}
       {hasCards ? (
-        <div className="relative">
-          <ul
-            ref={scroller}
-            onScroll={measure}
-            aria-busy={loading || undefined}
-            className="-mx-4 flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto scroll-smooth px-4 pt-1 pb-2 md:-mx-5 md:scroll-px-5 md:px-5 [scrollbar-width:none] motion-reduce:scroll-auto [&::-webkit-scrollbar]:hidden"
-          >
-            {loading
-              ? Array.from({ length: 5 }, (_, index) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: identical placeholders with no identity
-                  <li key={index} className={cell}>
-                    <ProductCardSkeleton />
-                  </li>
-                ))
-              : items.map(({ id, ...card }) => (
-                  <li key={id} className={cell}>
-                    <ProductCard headingLevel={cardHeadingLevel} {...card} />
-                  </li>
-                ))}
-          </ul>
-          <button
-            type="button"
-            aria-label={`Previous in ${title}`}
-            aria-disabled={edges.start || undefined}
-            onClick={() => !edges.start && scrollBy(-1)}
-            className={cn(arrow, "left-0 max-md:hidden")}
-          >
-            <Icon icon={ChevronLeft} />
-          </button>
-          <button
-            type="button"
-            aria-label={`Next in ${title}`}
-            aria-disabled={edges.end || undefined}
-            onClick={() => !edges.end && scrollBy(1)}
-            className={cn(arrow, "right-0 max-md:hidden")}
-          >
-            <Icon icon={ChevronRight} />
-          </button>
-        </div>
+        <ScrollRow label={title} loading={loading} resetKey={filters?.value} listClassName="gap-4">
+          {loading
+            ? Array.from({ length: 6 }, (_, index) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: identical placeholders with no identity
+                <li key={index} className={cell}>
+                  <ProductCardSkeleton />
+                </li>
+              ))
+            : items.map(({ id, ...card }) => (
+                <li key={id} className={cell}>
+                  <ProductCard headingLevel={cardHeadingLevel} {...card} />
+                </li>
+              ))}
+        </ScrollRow>
       ) : (
         <p className="rounded-lg border border-dashed border-border-strong bg-surface p-4 font-body text-sm text-fg-muted">
           {emptyText}

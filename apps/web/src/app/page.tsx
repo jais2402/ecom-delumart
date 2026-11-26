@@ -17,11 +17,10 @@ import type { Metadata } from "next";
 import { CATEGORIES } from "../data/seed-catalog";
 import { HomeRails } from "./_components/HomeRails";
 import { ShopShell } from "./_components/ShopShell";
-import { storeNameOf } from "./_lib/catalog";
+import { categoryName, storeNameOf } from "./_lib/catalog";
 import { loadCatalog } from "./_lib/catalog-server";
 import { CATEGORY_LINKS, motifOfCategory } from "./_lib/category-style";
 import { deriveHomeRails, deriveTopPicks, pickHeroProducts, representativeOf } from "./_lib/home-rails";
-import { parsePaise } from "./_lib/money";
 import { photoSrcOf } from "./_lib/product-photos";
 import { arrivalPhrase } from "./_lib/speeds";
 
@@ -83,18 +82,30 @@ export default async function HomePage() {
       <HomeLayout
         hero={
           <HomeHero
-            title={`${GRANT} welcome balance for every new account.`}
-            text="Create an account, pick something from the catalogue and have it on its way in minutes."
-            slides={heroProducts.map((product) => ({
-              id: product.id,
-              href: `/p/${product.id}`,
-              name: product.name,
-              hook: product.hook ?? "",
-              pricePaise: parsePaise(product.pricePaise),
-              hue: product.templateId,
-              motif: motifOfCategory(product.category),
-              imageSrc: photoSrcOf(product),
-            }))}
+            cards={[
+              {
+                id: "welcome",
+                href: "/sign-in",
+                eyebrow: "New accounts",
+                headline: `${GRANT} welcome balance for every new account`,
+                linkLabel: "Create an account",
+                tone: "brand",
+                hue: thumbs[0]?.hue ?? FALLBACK_HUE,
+                motif: thumbs[0]?.motif ?? "magic",
+                imageSrc: thumbs[0]?.imageSrc,
+              },
+              ...heroProducts.map((product, index) => ({
+                id: product.id,
+                href: `/p/${product.id}`,
+                eyebrow: categoryName(product.category),
+                headline: product.name,
+                linkLabel: "Shop now",
+                tone: index === 1 ? ("warm" as const) : ("brand" as const),
+                hue: product.templateId,
+                motif: motifOfCategory(product.category),
+                imageSrc: photoSrcOf(product),
+              })),
+            ]}
           />
         }
         promises={<TrustStrip items={TRUST} label="Good to know" />}

@@ -7,7 +7,6 @@ const item = (id: string, name: string) => ({
   id,
   href: `/p/${id}`,
   name,
-  hook: "hook",
   hue: 100,
   pricePaise: 100_00n,
   storeName: "Store",
@@ -81,7 +80,7 @@ describe("ProductRail", () => {
     expect(onChange).toHaveBeenCalledWith("tech");
     expect(screen.getByRole("status")).toHaveTextContent("Showing 3 products");
   });
-  it("shows a View all button as an outlined link when a destination is given", () => {
+  it("shows an underlined View all link when a destination is given", () => {
     render(<ProductRail title="Top picks" items={items} seeAll={{ href: "/search", label: "View all" }} />);
     expect(screen.getByRole("link", { name: "View all" })).toHaveAttribute("href", "/search");
   });

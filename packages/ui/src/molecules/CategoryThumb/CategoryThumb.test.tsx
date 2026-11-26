@@ -27,7 +27,7 @@ describe("CategoryThumb", () => {
   it("draws a small light tile with a soft corner and the name centred beneath", () => {
     const { container } = render(<CategoryThumb {...props} />);
     const tile = container.querySelector("span");
-    expect(tile).toHaveClass("size-24", "bg-surface-raised", "rounded-xl");
+    expect(tile).toHaveClass("size-24", "bg-surface-raised", "rounded-lg");
     expect(screen.getByText("Impossible Tech")).toHaveClass("text-center");
   });
 });
