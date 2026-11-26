@@ -9,6 +9,7 @@ import {
   mySellerOrder,
   mySellerOrders,
 } from "../src/merchant";
+import { productReviews, reviewSummaries, saveReview } from "../src/review";
 import {
   aMinuteLater,
   CLEAN,
@@ -23,6 +24,7 @@ import {
   become,
   createTestDatabase,
   inRolledBackTx,
+  plant,
   stateOf,
   type TestDatabase,
   type TestUser,
@@ -87,6 +89,14 @@ describe("eighth security review: no application role reads an order's time-orde
     buyer = await user(pool);
     stranger = await user(pool);
     await payFor(pool, buyer, await checkout(pool, buyer, [p], { [s.companyId]: "STANDARD" }));
+    // the buyer reviews it at once (0078): the review rows join the scans below
+    await saveReview(pool, {
+      authSessionId: buyer.authSessionId,
+      productId: p.id,
+      rating: 5,
+      title: "Fast",
+      body: null,
+    });
     const p2 = asFixture(await publishListing(pool, s, { quantity: 3 }));
     const seed = seeds[0];
     if (!seed) throw new Error("fixture: no seed product");
@@ -330,6 +340,52 @@ describe("eighth security review: no application role reads an order's time-orde
     ).toBe(true);
     expect(ticks.sort()).toEqual([]);
   }, 240_000);
+
+  it("minor 5 (reviews, 0078/0079): a product's public review answers do not change at a sale, nor when its buyer reviews, nor when the minute ends; only from the next reporting day", async () => {
+    const p = asFixture(await publishListing(pool, s, { quantity: 3 }));
+    await aMinuteLater(pool);
+    const publicView = async () =>
+      JSON.stringify([await productReviews(pool, { productId: p.id }), await reviewSummaries(pool, [p.id])]);
+    let settled = false;
+    for (let attempt = 0; attempt < 3 && !settled; attempt++) {
+      const minute = async () =>
+        (await pool.query<{ m: string }>("SELECT date_trunc('minute', clock_timestamp())::text AS m")).rows[0]
+          ?.m;
+      const b = await user(pool);
+      const start = await minute();
+      const before = await publicView();
+      await payFor(pool, b, await checkout(pool, b, [p], { [s.companyId]: "STANDARD" }));
+      const atSale = await publicView();
+      await saveReview(pool, {
+        authSessionId: b.authSessionId,
+        productId: p.id,
+        rating: 4,
+        title: null,
+        body: null,
+      });
+      const atReview = await publicView();
+      if ((await minute()) !== start) {
+        await aMinuteLater(pool);
+        continue;
+      }
+      expect(atSale).toBe(before);
+      expect(atReview).toBe(before);
+      settled = true;
+      // 0079: not when the minute ends either: only from the next reporting day
+      await aMinuteLater(pool);
+      expect(await publicView()).toBe(before);
+      await plant(pool, (c) =>
+        c.query(
+          `UPDATE core.product_review SET created_at = created_at - interval '1 day'
+            WHERE created_at >= core.review_public_before()`,
+        ),
+      );
+      expect(await publicView()).not.toBe(before);
+      // a time finer than a day never appears
+      expect(await publicView()).not.toMatch(/T\d{2}:|\d{2}:\d{2}/);
+    }
+    expect(settled).toBe(true);
+  });
 
   it("minor 5: a coupon's redemptions reach the seller's coupon list only once the minute of the order has ended", async () => {
     const as = { authSessionId: s.u.authSessionId };

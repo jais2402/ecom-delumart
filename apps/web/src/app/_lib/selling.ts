@@ -146,6 +146,7 @@ const SCREEN_TEXT: Record<string, string> = {
   WATCH: "This wording needs a review before it can be used. Try describing it differently.",
   CAPS: "Too many capital letters. Use ordinary capitalisation.",
   CONTROL_CHARACTERS: "Remove special control characters. Line breaks are fine.",
+  INVISIBLE: "Remove hidden or formatting characters (for example, text pasted from elsewhere).",
 };
 
 const FIELD_TEXT: Record<string, Record<string, string>> = {

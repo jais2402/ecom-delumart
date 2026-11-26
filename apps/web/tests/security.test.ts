@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { uuidv7 } from "@delulu/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import * as adminReviewHide from "../src/app/api/v1/admin/reviews/[id]/hide/route";
+import * as adminReviewRestore from "../src/app/api/v1/admin/reviews/[id]/restore/route";
+import * as adminReviews from "../src/app/api/v1/admin/reviews/route";
+import * as myReview from "../src/app/api/v1/me/reviews/[productId]/route";
+import * as productReview from "../src/app/api/v1/products/[id]/review/route";
 import type { RouteHandler } from "../src/server/http";
 import { serverSecrets, startTestApp, type TestApp } from "./helpers/app";
 import { Browser, type CallOptions, type CallResult, str } from "./helpers/browser";
@@ -44,7 +49,7 @@ afterAll(async () => {
 interface PrivateRoute {
   name: string;
   handler: RouteHandler;
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
   options: () => CallOptions;
 }
@@ -170,6 +175,49 @@ const PRIVATE: PrivateRoute[] = [
     method: "POST",
     path: `/api/v1/checkout-sessions/${ID}/pay`,
     options: () => ({ params: { id: ID }, body: { attemptId: ID }, idempotencyKey: true }),
+  },
+  // ratings and reviews (decisions.md #14)
+  {
+    name: "my review",
+    handler: myReview.GET,
+    method: "GET",
+    path: `/api/v1/me/reviews/${ID}`,
+    options: () => ({ params: { productId: ID } }),
+  },
+  {
+    name: "review write",
+    handler: productReview.PUT,
+    method: "PUT",
+    path: `/api/v1/products/${ID}/review`,
+    options: () => ({ params: { id: ID }, body: { rating: 5 } }),
+  },
+  {
+    name: "review delete",
+    handler: productReview.DELETE,
+    method: "DELETE",
+    path: `/api/v1/products/${ID}/review`,
+    options: () => ({ params: { id: ID } }),
+  },
+  {
+    name: "admin reviews",
+    handler: adminReviews.GET,
+    method: "GET",
+    path: "/api/v1/admin/reviews",
+    options: () => ({}),
+  },
+  {
+    name: "admin review hide",
+    handler: adminReviewHide.POST,
+    method: "POST",
+    path: `/api/v1/admin/reviews/${ID}/hide`,
+    options: () => ({ params: { id: ID }, body: { reason: "Test reason" } }),
+  },
+  {
+    name: "admin review restore",
+    handler: adminReviewRestore.POST,
+    method: "POST",
+    path: `/api/v1/admin/reviews/${ID}/restore`,
+    options: () => ({ params: { id: ID }, body: { reason: "Test reason" } }),
   },
 ];
 

@@ -1,5 +1,6 @@
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { saveReview } from "../src/review";
 import {
   CLEAN,
   checkout,
@@ -69,6 +70,21 @@ describe("seventh security review: no application role reads another person's us
     const cb = await merchantCoupon(pool, shop(b), { percent: 10, publicCode: "MOONB10" });
     await payFor(pool, a.u, await checkout(pool, a.u, [lb], standard(shop(b)), cb.code));
     await payFor(pool, b.u, await checkout(pool, b.u, [la], standard(shop(a)), ca.code));
+    // each reviews what they bought (migration 0078): the review tables hold both users' ids
+    await saveReview(pool, {
+      authSessionId: a.u.authSessionId,
+      productId: lb.id,
+      rating: 4,
+      title: "A",
+      body: null,
+    });
+    await saveReview(pool, {
+      authSessionId: b.u.authSessionId,
+      productId: la.id,
+      rating: 5,
+      title: "B",
+      body: null,
+    });
     // rows the purchase journey does not create, planted for both users (who can SEE them is the question)
     await plant(pool, async (x) => {
       const experiment = uuidv7();
@@ -172,6 +188,16 @@ describe("seventh security review: no application role reads another person's us
       }
     }
     expect(leaks).toEqual([]);
+  });
+
+  it("blocker 1 (reviews, 0078): both users' reviews are stored, and no application role can read a review's author", async () => {
+    const { rows } = await pool.query<{ n: string }>(
+      "SELECT count(DISTINCT user_id) AS n FROM core.product_review WHERE user_id = ANY ($1::uuid[])",
+      [[a.u.userId, b.u.userId]],
+    );
+    expect(Number(rows[0]?.n)).toBe(2);
+    const columns = await userIdColumns();
+    expect(columns.filter((c) => c.rel.startsWith("core.product_review"))).toEqual([]);
   });
 
   it("blocker 1: the reviewer's query — a store's listings joined to their author — no longer yields the owner's user id", async () => {

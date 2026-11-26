@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BuyPanel } from "../../_components/BuyPanel";
 import { RecentlyViewedRail, RecentlyViewedRecorder } from "../../_components/RecentlyViewed";
+import { ProductReviews } from "../../_components/reviews/ProductReviews";
 import { ShopShell } from "../../_components/ShopShell";
 import { ProductSafetyActions } from "../../_components/safety/ProductSafetyActions";
 import { TrackEvent } from "../../_components/TrackEvent";
@@ -114,6 +115,10 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
             shopName={storeNameOf(product)}
           />
         </div>
+      </div>
+      {/* Ratings and reviews (decisions.md #14): self-contained, below the description */}
+      <div className="mt-4 md:mt-6">
+        <ProductReviews productId={product.id} />
       </div>
       <RecentlyViewedRail excludeId={product.id} className="mt-6 md:mt-8" />
     </ShopShell>

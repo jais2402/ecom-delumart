@@ -29,6 +29,11 @@ import { cookieNames, readCookie, readSessionId } from "./session";
  */
 
 export const PUBLIC_CACHE = "public, s-maxage=60, stale-while-revalidate=300";
+/**
+ * Public data that a moderator can take down (reviews): a short shared cache and no stale serving,
+ * so a hidden review leaves every cache within a minute (review round 1, minor 2).
+ */
+export const PUBLIC_SHORT_CACHE = "public, s-maxage=30";
 export const PRIVATE_CACHE = "private, no-store";
 
 export type ApiErrorCode = ErrorCode | "INTERNAL";
@@ -93,6 +98,9 @@ const STATUS: Record<ErrorCode, number> = {
   ADDRESS_NOT_FOUND: 404,
   ADDRESS_LIMIT: 409,
   CAPTCHA_FAILED: 403,
+  REVIEW_NOT_ALLOWED: 403,
+  REVIEW_NOT_FOUND: 404,
+  REVIEW_INVALID: 422,
   RATE_LIMITED: 429,
   BUSY: 503,
   MAINTENANCE: 503,
@@ -275,6 +283,8 @@ export interface RouteOptions<B, Q> {
   rateLimits?: readonly RouteRateLimit<B>[];
   /** The sign-in route only: a pre-session (random) CSRF token is accepted. */
   preSessionCsrf?: boolean;
+  /** Public routes only: the Cache-Control of a success (PUBLIC_CACHE when absent). */
+  publicCache?: typeof PUBLIC_CACHE | typeof PUBLIC_SHORT_CACHE;
 }
 
 export interface RouteRateLimit<B> {
@@ -360,7 +370,7 @@ export function route<B = Record<string, never>, Q = Record<string, never>>(
       });
       const headers = new Headers({
         "content-type": "application/json; charset=utf-8",
-        "cache-control": publicRoute ? PUBLIC_CACHE : PRIVATE_CACHE,
+        "cache-control": publicRoute ? (options.publicCache ?? PUBLIC_CACHE) : PRIVATE_CACHE,
       });
       for (const cookie of result.setCookies ?? []) headers.append("set-cookie", cookie);
       return new Response(JSON.stringify(result.json), { status: result.status ?? 200, headers });

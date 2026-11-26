@@ -116,6 +116,17 @@ export const SERVER_CONFIG = {
       limit: 30,
       windowSeconds: 60,
     },
+    /** Review writes (create, edit, delete) per account (decisions.md #14). */
+    reviewWriteActor: { scope: "reviews.write.actor", by: "actor", limit: 10, windowSeconds: 3_600 },
+    /** Public review summaries (cards and rails) per client address. */
+    reviewSummaryAddress: {
+      scope: "reviews.summaries.address",
+      by: "address",
+      limit: 120,
+      windowSeconds: 60,
+    },
+    /** The signed-in player's own review reads per account (the product page's private overlay). */
+    reviewReadActor: { scope: "reviews.read.actor", by: "actor", limit: 120, windowSeconds: 60 },
     /** Blocks and unblocks per account. */
     blockActor: { scope: "blocks.write.actor", by: "actor", limit: 30, windowSeconds: 60 },
     /** Browser analytics events per client address (beyond it events are dropped, still 204). */

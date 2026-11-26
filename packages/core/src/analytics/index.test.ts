@@ -27,7 +27,16 @@ describe("analytics event names", () => {
     for (const n of SERVER_EVENT_NAMES) expect(browser.has(n)).toBe(false);
     expect([...BROWSER_EVENT_NAMES, ...SERVER_EVENT_NAMES].sort()).toEqual([...ANALYTICS_EVENT_NAMES].sort());
     expect([...SERVER_EVENT_NAMES].sort()).toEqual(
-      ["creator_unlock", "listing_published", "purchase", "shop_registered", "sign_up"].sort(),
+      [
+        "creator_unlock",
+        "listing_published",
+        "purchase",
+        "shop_registered",
+        "sign_up",
+        // ratings and reviews (decisions.md #14): recorded by the server, never by a browser
+        "review_submitted",
+        "review_hidden",
+      ].sort(),
     );
   });
 });

@@ -12,4 +12,5 @@ export * from "./pin/index";
 export * from "./policy/index";
 export * from "./pricing/index";
 export * from "./progression/index";
+export * from "./review/index";
 export * from "./screening/index";

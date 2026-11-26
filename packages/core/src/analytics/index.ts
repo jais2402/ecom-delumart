@@ -24,6 +24,9 @@ export const SERVER_EVENT_NAMES = [
   "creator_unlock",
   "shop_registered",
   "listing_published",
+  // ratings and reviews (migration 0078): no props, no user id, no text
+  "review_submitted",
+  "review_hidden",
 ] as const;
 export const ANALYTICS_EVENT_NAMES = [...BROWSER_EVENT_NAMES, ...SERVER_EVENT_NAMES] as const;
 

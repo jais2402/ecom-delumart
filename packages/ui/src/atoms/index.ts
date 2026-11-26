@@ -20,6 +20,7 @@ export * from "./Radio";
 export * from "./Select";
 export * from "./Skeleton";
 export * from "./Spinner";
+export * from "./StarRating";
 export * from "./Switch";
 export * from "./Tag";
 export * from "./Text";

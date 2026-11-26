@@ -23,6 +23,7 @@ export * from "./SearchBar";
 export * from "./SectionHeading";
 export * from "./SortMenu";
 export * from "./SourceBadge";
+export * from "./StarRatingInput";
 export * from "./Stat";
 export * from "./StepCard";
 export * from "./StepIndicator";
