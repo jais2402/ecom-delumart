@@ -26,11 +26,11 @@ export function HowItWorks({
     <section
       id={id}
       aria-labelledby={headingId}
-      className={cn("scroll-mt-32 flex flex-col gap-4 rounded-lg bg-surface p-5 md:p-6", className)}
+      className={cn("scroll-mt-32 flex flex-col gap-4 rounded-lg bg-surface p-4 md:p-5", className)}
       {...props}
     >
       <SectionHeading title={title} {...(lead ? { lead } : {})} headingId={headingId} />
-      <ol className="grid gap-4 md:grid-cols-3">
+      <ol className="grid gap-3 md:grid-cols-3">
         {steps.map((step, index) => (
           <li key={step.title}>
             <StepCard step={index + 1} title={step.title} text={step.text} className="h-full" />

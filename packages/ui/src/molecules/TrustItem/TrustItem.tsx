@@ -9,14 +9,22 @@ export type TrustItemProps = Omit<ComponentPropsWithRef<"div">, "title" | "child
   text: string;
 };
 
-/** An outline icon, a bold short title and one muted line. */
+/** A compact promise: an outline icon, a bold short title and one muted line beneath it. */
 export function TrustItem({ icon, title, text, className, ...props }: TrustItemProps) {
   return (
-    <div className={cn("flex items-start gap-3 font-body", className)} {...props}>
-      <Icon icon={icon} size={28} strokeWidth={1.5} className="mt-0.5 shrink-0 text-action" />
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="text-base font-bold text-fg">{title}</span>
-        <span className="text-sm text-fg-muted">{text}</span>
+    <div
+      className={cn(
+        "flex flex-col items-start gap-2 font-body sm:flex-row sm:items-center sm:gap-3",
+        className,
+      )}
+      {...props}
+    >
+      <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-pill bg-action-soft text-action">
+        <Icon icon={icon} size={22} strokeWidth={1.75} />
+      </span>
+      <div className="flex min-w-0 flex-col">
+        <span className="text-sm font-bold text-fg">{title}</span>
+        <span className="text-xs text-fg-muted">{text}</span>
       </div>
     </div>
   );

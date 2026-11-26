@@ -8,10 +8,12 @@ describe("SectionHeading", () => {
     render(<SectionHeading title="Big flex" headingLevel={2} />);
     expect(screen.getByRole("heading", { level: 2, name: "Big flex" })).toBeInTheDocument();
   });
-  it("offers a see-all link that is keyboard reachable", async () => {
-    render(<SectionHeading title="Big flex" seeAll={{ href: "/search", label: "See all" }} />);
+  it("offers a View all link, drawn as an outlined button, that is keyboard reachable", async () => {
+    render(<SectionHeading title="Big flex" seeAll={{ href: "/search", label: "View all" }} />);
     await userEvent.tab();
-    expect(screen.getByRole("link", { name: "See all" })).toHaveFocus();
+    const link = screen.getByRole("link", { name: "View all" });
+    expect(link).toHaveFocus();
+    expect(link).toHaveClass("border", "min-h-touch");
   });
   it("shows no link when none is given", () => {
     render(<SectionHeading title="Big flex" />);

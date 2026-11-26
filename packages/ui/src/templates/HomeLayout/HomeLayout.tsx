@@ -2,41 +2,43 @@ import type { ComponentPropsWithRef, ReactNode } from "react";
 import { cn } from "../../lib/cn";
 
 export type HomeLayoutProps = Omit<ComponentPropsWithRef<"div">, "children"> & {
-  /** The row of category pictures under the header. */
-  categories: ReactNode;
+  /** The product-led hero carousel. */
   hero: ReactNode;
-  /** A featured rail of large picture cards. */
-  featured: ReactNode;
-  /** The two half-width banners under the hero. */
-  promos: ReactNode;
+  /** The compact promise row directly under the hero. */
+  promises: ReactNode;
+  /** The row of category pictures. */
+  categories: ReactNode;
   /** The product rails, in order. */
   children: ReactNode;
-  trust: ReactNode;
+  /** The two half-width banners after the rails. */
+  promos: ReactNode;
+  /** The brand story panel. */
+  story: ReactNode;
   steps: ReactNode;
   creator: ReactNode;
 };
 
 /** The storefront home page's vertical rhythm. Slots only; no content of its own. */
 export function HomeLayout({
-  categories,
   hero,
-  featured,
-  promos,
+  promises,
+  categories,
   children,
-  trust,
+  promos,
+  story,
   steps,
   creator,
   className,
   ...props
 }: HomeLayoutProps) {
   return (
-    <div className={cn("flex flex-col gap-12", className)} {...props}>
-      {categories}
+    <div className={cn("flex flex-col gap-6 md:gap-8", className)} {...props}>
       {hero}
-      {featured}
-      <div className="grid gap-6 md:grid-cols-2">{promos}</div>
+      {promises}
+      {categories}
       {children}
-      {trust}
+      <div className="grid gap-4 md:grid-cols-2 md:gap-6">{promos}</div>
+      {story}
       {steps}
       {creator}
     </div>

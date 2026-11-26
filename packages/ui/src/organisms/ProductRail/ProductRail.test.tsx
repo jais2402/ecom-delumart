@@ -62,4 +62,27 @@ describe("ProductRail", () => {
     expect(screen.getByText("Nothing yet.")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
+  it("draws filter tabs under the heading, hands the chosen key back and announces the count", async () => {
+    const onChange = vi.fn();
+    const options = [
+      { key: "all", label: "All" },
+      { key: "tech", label: "Impossible Tech" },
+    ];
+    render(
+      <ProductRail
+        title="Top picks"
+        items={items}
+        filters={{ label: "Filter top picks by category", options, value: "all", onChange }}
+      />,
+    );
+    const group = screen.getByRole("group", { name: "Filter top picks by category" });
+    expect(within(group).getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(within(group).getByRole("button", { name: "Impossible Tech" }));
+    expect(onChange).toHaveBeenCalledWith("tech");
+    expect(screen.getByRole("status")).toHaveTextContent("Showing 3 products");
+  });
+  it("shows a View all button as an outlined link when a destination is given", () => {
+    render(<ProductRail title="Top picks" items={items} seeAll={{ href: "/search", label: "View all" }} />);
+    expect(screen.getByRole("link", { name: "View all" })).toHaveAttribute("href", "/search");
+  });
 });

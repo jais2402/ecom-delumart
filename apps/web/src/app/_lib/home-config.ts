@@ -5,16 +5,18 @@
  * are the cheapest and dearest products, so only counts are needed.
  */
 export const HOME_CONFIG = {
-  rails: {
-    /** Products in "Pocket change" (the cheapest). */
-    pocketChangeCount: 10,
-    /** Products in "Big flex" (the dearest). */
-    bigFlexCount: 10,
-    /** Products in each category's rail. */
-    categoryRailCount: 10,
-    /** A category gets a rail only with at least this many products. */
-    categoryRailMinimum: 3,
+  hero: {
+    /** Featured products in the hero carousel: the dearest, those with a photo first. */
+    slideCount: 4,
   },
-  /** Product-art tiles floating in the hero and creator band, by catalogue position. */
-  stickers: { heroCount: 3, creatorCount: 3 },
+  topPicks: {
+    /** Products in each tab of "Top picks". */
+    perTab: 10,
+  },
+  rails: {
+    /** Products in "Lowest prices" (the cheapest). */
+    pocketChangeCount: 10,
+    /** Products in "Premium picks" (the dearest after the hero's). */
+    bigFlexCount: 10,
+  },
 } as const;

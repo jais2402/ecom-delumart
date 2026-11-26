@@ -36,13 +36,20 @@ export type ProductCardProps = Omit<ComponentPropsWithRef<"article">, "children"
   /** Semantic level of the product name; pick the level below the surrounding heading. */
   headingLevel?: HeadingLevel;
   /**
-   * Controls shown under the price, e.g. an "Add to cart" button. They sit above the card's
-   * stretched link, so they stay clickable and keyboard reachable on their own.
+   * The full-width control under the price, e.g. an "Add to cart" button. It sits above the
+   * card's stretched link, so it stays clickable and keyboard reachable on its own.
    */
   actions?: ReactNode;
+  /** A small control on the picture's top-right corner, e.g. the save heart. Same stacking as `actions`. */
+  overlay?: ReactNode;
 };
 
-/** Flat product card, no box: picture on a light tile, name, seller, price, actions, a quiet delivery line. The whole card is one link named after the product. */
+/**
+ * Flat product card, no box: a picture on a light tile with a state tag at its top-left and an
+ * optional control at its top-right, then name, hook, seller, price, a full-width action and quiet
+ * delivery lines. The tag shows only states the data has: sold out, low stock, an edition number, or
+ * Zap eligibility. The whole card is one link named after the product.
+ */
 export function ProductCard({
   href,
   name,
@@ -61,6 +68,7 @@ export function ProductCard({
   zapNote,
   headingLevel = 3,
   actions,
+  overlay,
   className,
   ...props
 }: ProductCardProps) {
@@ -89,9 +97,22 @@ export function ProductCard({
           <div className="pointer-events-none absolute top-2 left-2">
             <StockBadge {...stock} />
           </div>
+        ) : zapEligible ? (
+          <div className="pointer-events-none absolute top-2 left-2">
+            <Badge tone="accent">
+              <Icon icon={Zap} size={12} />
+              Zap
+            </Badge>
+          </div>
         ) : null}
+        {overlay ? <div className="absolute top-1 right-1 z-10">{overlay}</div> : null}
       </div>
-      <Heading level={headingLevel} size="sm" id={nameId} className="mt-3 line-clamp-2 text-base font-normal">
+      <Heading
+        level={headingLevel}
+        size="sm"
+        id={nameId}
+        className="mt-1 line-clamp-2 min-h-12 text-base font-normal"
+      >
         <a
           href={href}
           aria-labelledby={nameId}
@@ -121,7 +142,7 @@ export function ProductCard({
           ) : null}
         </span>
       </p>
-      {actions ? <div className="relative z-10 mt-1 flex items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="relative z-10 mt-1 flex flex-col">{actions}</div> : null}
       {stock?.state === "in-stock" ? <p className="text-xs font-medium text-success">In stock</p> : null}
       {deliveryNote || (zapEligible && zapNote) ? (
         <p className="flex flex-col gap-0.5 text-xs text-fg-muted">
@@ -132,10 +153,10 @@ export function ProductCard({
             </span>
           ) : null}
           {zapEligible && zapNote ? (
-            <Badge tone="accent" className="self-start">
-              <Icon icon={Zap} size={12} />
-              {zapNote}
-            </Badge>
+            <span className="flex items-center gap-1.5">
+              <Icon icon={Zap} size={14} />
+              <span>{zapNote}</span>
+            </span>
           ) : null}
         </p>
       ) : null}

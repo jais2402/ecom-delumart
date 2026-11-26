@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, CartIcon, cn, Icon, Text } from "@delulu/ui";
+import { Button, cn, Text } from "@delulu/ui";
 import { useId, useState } from "react";
 import { trackClient } from "../_lib/analytics";
 import { useCart } from "../_lib/cart-store";
@@ -13,10 +13,12 @@ interface Props {
   owned?: boolean;
   size?: "sm" | "md" | "lg";
   /**
-   * "outline" is the quiet full-width button, "filled" the wide amber one of the product
-   * page, "icon" the small square amber cart button of a product card (its text stays for screen readers).
+   * "outline" is the quiet full-width button, "filled" the wide amber one of the product page
+   * and of every product card.
    */
-  appearance?: "outline" | "filled" | "icon";
+  appearance?: "outline" | "filled";
+  /** Keep the "Not available right now." line for screen readers only (on cards, where the picture already says sold out). */
+  quietHint?: boolean;
   className?: string;
 }
 
@@ -32,6 +34,7 @@ export function AddToCartButton({
   owned = false,
   size = "lg",
   appearance = "outline",
+  quietHint = false,
   className,
 }: Props) {
   const cart = useCart();
@@ -58,28 +61,24 @@ export function AddToCartButton({
     }
   }
 
-  const icon = appearance === "icon";
   const look = {
     variant: appearance === "outline" ? ("secondary" as const) : ("cta" as const),
-    size: icon ? ("md" as const) : size,
+    size,
   };
-  const shape = icon ? "min-w-touch px-0" : "w-full";
-  const label = (text: string) => (icon ? <span className="sr-only">{text}</span> : text);
+  const shape = "w-full";
   const live = (
     <span role="status" aria-live="polite" className="sr-only">
       {announce}
     </span>
   );
   const nameHint = <span className="sr-only">: {name}</span>;
-  const cartIcon = icon ? <Icon icon={CartIcon} size={18} /> : null;
-  const wrap = icon ? cn("shrink-0", className) : className;
+  const wrap = className;
 
   if (owned || ownedHere) {
     return (
       <div className={wrap}>
         <Button variant="secondary" size={look.size} disabled className={shape}>
-          {cartIcon}
-          {label("In your collection")}
+          In your collection
           {nameHint}
         </Button>
         {live}
@@ -90,11 +89,10 @@ export function AddToCartButton({
     return (
       <div className={wrap}>
         <Button variant="secondary" size={look.size} disabled aria-describedby={hintId} className={shape}>
-          {cartIcon}
-          {label("Add to cart")}
+          Add to cart
           {nameHint}
         </Button>
-        <Text as="span" size="sm" muted id={hintId} className={icon ? "sr-only" : undefined}>
+        <Text as="span" size="sm" muted id={hintId} className={quietHint ? "sr-only" : undefined}>
           Not available right now.
         </Text>
         {live}
@@ -106,8 +104,7 @@ export function AddToCartButton({
       <div className={wrap}>
         <Button asChild variant="secondary" size={look.size} className={cn(shape, "motion-safe:animate-pop")}>
           <a href="/cart">
-            {cartIcon}
-            {label("In cart")}
+            In cart
             {nameHint}
             <span className="sr-only"> View cart</span>
           </a>
@@ -126,8 +123,7 @@ export function AddToCartButton({
         {...(message ? { "aria-describedby": hintId } : {})}
         className={shape}
       >
-        {!adding ? cartIcon : null}
-        {label("Add to cart")}
+        Add to cart
         {nameHint}
       </Button>
       {message ? (

@@ -14,13 +14,13 @@ export function CreatorBand({ title, text, cta, className, ...props }: CreatorBa
   return (
     <section
       className={cn(
-        "flex flex-col items-start gap-6 rounded-lg bg-surface p-8 md:flex-row md:items-center md:justify-between md:p-10",
+        "flex flex-col items-start gap-4 rounded-lg bg-surface p-5 md:flex-row md:items-center md:justify-between md:px-8 md:py-6",
         className,
       )}
       {...props}
     >
       <div className="flex max-w-xl flex-col gap-2">
-        <Heading level={2} size="md" className="text-3xl">
+        <Heading level={2} size="md" className="text-2xl md:text-3xl">
           {title}
         </Heading>
         <p className="font-body text-base text-fg-muted">{text}</p>

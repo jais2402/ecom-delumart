@@ -12,10 +12,10 @@ export type StepCardProps = Omit<ComponentPropsWithRef<"div">, "title" | "childr
 /** One numbered step of a short how-it-works list. */
 export function StepCard({ step, title, text, headingLevel = 3, className, ...props }: StepCardProps) {
   return (
-    <div className={cn("flex flex-col gap-3 rounded-lg bg-surface-raised p-6", className)} {...props}>
+    <div className={cn("flex flex-col gap-2 rounded-lg bg-surface-raised p-4 md:p-5", className)} {...props}>
       <span
         aria-hidden="true"
-        className="inline-flex size-10 items-center justify-center rounded-pill bg-band font-body text-base font-bold text-fg-on-band"
+        className="inline-flex size-9 items-center justify-center rounded-pill bg-band font-body text-base font-bold text-fg-on-band"
       >
         {step}
       </span>

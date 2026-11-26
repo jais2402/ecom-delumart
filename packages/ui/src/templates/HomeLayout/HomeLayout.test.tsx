@@ -3,21 +3,21 @@ import { describe, expect, it } from "vitest";
 import { HomeLayout } from "./HomeLayout";
 
 describe("HomeLayout", () => {
-  it("places the slots in order: categories, hero, featured, promos, rails, trust, steps, creator", () => {
+  it("places the slots in order: hero, promises, categories, rails, promos, story, steps, creator", () => {
     const { container } = render(
       <HomeLayout
-        categories={<p>cats</p>}
         hero={<p>hero</p>}
-        featured={<p>featured</p>}
+        promises={<p>promises</p>}
+        categories={<p>cats</p>}
         promos={<p>promos</p>}
-        trust={<p>trust</p>}
+        story={<p>story</p>}
         steps={<p>steps</p>}
         creator={<p>creator</p>}
       >
         <p>rails</p>
       </HomeLayout>,
     );
-    expect(container.textContent).toBe("catsherofeaturedpromosrailstruststepscreator");
+    expect(container.textContent).toBe("heropromisescatsrailspromosstorystepscreator");
     expect(screen.getByText("rails")).toBeInTheDocument();
   });
   it("merges the class name", () => {
@@ -25,10 +25,10 @@ describe("HomeLayout", () => {
       <HomeLayout
         className="x-test"
         hero={null}
-        featured={null}
-        promos={null}
+        promises={null}
         categories={null}
-        trust={null}
+        promos={null}
+        story={null}
         steps={null}
         creator={null}
       >

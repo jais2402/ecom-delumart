@@ -5,6 +5,7 @@ import { type ComponentPropsWithRef, useCallback, useEffect, useId, useRef, useS
 import type { HeadingLevel } from "../../atoms/Heading";
 import { Icon } from "../../atoms/Icon";
 import { cn } from "../../lib/cn";
+import { type FilterOption, FilterTabs } from "../../molecules/FilterTabs";
 import { ProductCardSkeleton } from "../../molecules/ProductCardSkeleton";
 import { SectionHeading } from "../../molecules/SectionHeading";
 import { ProductCard } from "../ProductCard";
@@ -15,8 +16,18 @@ export type ProductRailProps = Omit<ComponentPropsWithRef<"section">, "title" | 
   /** A grey sentence after the bold title, on the same line. */
   lead?: string;
   items: readonly ProductGridItem[];
-  /** Link to the full list. */
+  /** Link to the full list, drawn as an outlined "View all" button. */
   seeAll?: { href: string; label: string };
+  /**
+   * Filter tabs under the heading (toggle buttons). The rail only draws them: the parent owns the
+   * chosen key and passes the matching `items`. The row of cards goes back to its start on a change.
+   */
+  filters?: {
+    label: string;
+    options: readonly FilterOption[];
+    value: string;
+    onChange: (key: string) => void;
+  };
   headingLevel?: HeadingLevel;
   /** Level of each card's name; one below the rail's heading. */
   cardHeadingLevel?: HeadingLevel;
@@ -29,7 +40,7 @@ export type ProductRailProps = Omit<ComponentPropsWithRef<"section">, "title" | 
 const arrow =
   "absolute top-1/3 z-10 inline-flex min-h-touch min-w-touch items-center justify-center rounded-pill border border-border bg-surface text-fg shadow-raised transition-colors duration-fast hover:bg-surface-raised aria-disabled:cursor-not-allowed aria-disabled:opacity-40";
 
-const cell = "w-[72%] shrink-0 snap-start min-[480px]:w-64 lg:w-[calc((100%-4.5rem)/4)]";
+const cell = "w-[calc((100%-1rem)/2)] shrink-0 snap-start min-[480px]:w-64 lg:w-[calc((100%-3rem)/4)]";
 
 /**
  * A row of product cards that snaps as it scrolls, four visible from 1024px, with previous and next
@@ -41,6 +52,7 @@ export function ProductRail({
   lead,
   items,
   seeAll,
+  filters,
   headingLevel = 2,
   cardHeadingLevel = 3,
   loading = false,
@@ -69,6 +81,12 @@ export function ProductRail({
     return () => window.removeEventListener("resize", measure);
   }, [measure, items.length, loading]);
 
+  const filterValue = filters?.value;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new filter starts the row from its first card
+  useEffect(() => {
+    scroller.current?.scrollTo?.({ left: 0, behavior: "auto" });
+  }, [filterValue]);
+
   function scrollBy(direction: -1 | 1) {
     const el = scroller.current;
     if (!el?.scrollBy) return;
@@ -80,7 +98,7 @@ export function ProductRail({
   return (
     <section
       aria-labelledby={headingId}
-      className={cn("flex flex-col gap-6 rounded-lg bg-surface p-5 md:p-6", className)}
+      className={cn("flex flex-col gap-4 rounded-lg bg-surface p-4 md:p-5", className)}
       {...props}
     >
       <SectionHeading
@@ -90,13 +108,21 @@ export function ProductRail({
         headingLevel={headingLevel}
         {...(seeAll ? { seeAll } : {})}
       />
+      {filters ? (
+        <FilterTabs
+          label={filters.label}
+          options={filters.options}
+          value={filters.value}
+          onChange={filters.onChange}
+        />
+      ) : null}
       {hasCards ? (
         <div className="relative">
           <ul
             ref={scroller}
             onScroll={measure}
             aria-busy={loading || undefined}
-            className="-mx-5 flex snap-x snap-mandatory scroll-px-5 gap-6 overflow-x-auto scroll-smooth px-5 pt-1 pb-2 md:-mx-6 md:scroll-px-6 md:px-6 [scrollbar-width:none] motion-reduce:scroll-auto [&::-webkit-scrollbar]:hidden"
+            className="-mx-4 flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto scroll-smooth px-4 pt-1 pb-2 md:-mx-5 md:scroll-px-5 md:px-5 [scrollbar-width:none] motion-reduce:scroll-auto [&::-webkit-scrollbar]:hidden"
           >
             {loading
               ? Array.from({ length: 5 }, (_, index) => (
@@ -138,6 +164,10 @@ export function ProductRail({
       {loading ? (
         <p role="status" className="sr-only">
           Loading {title}
+        </p>
+      ) : filters ? (
+        <p role="status" className="sr-only">
+          Showing {items.length} {items.length === 1 ? "product" : "products"}
         </p>
       ) : null}
     </section>

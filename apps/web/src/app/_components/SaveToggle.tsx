@@ -14,10 +14,13 @@ export function SaveToggle({
   productId,
   name,
   className,
+  round = false,
 }: {
   productId: string;
   name: string;
   className?: string;
+  /** A round button with a faint shadow, for sitting on a picture's corner. */
+  round?: boolean;
 }) {
   const router = useRouter();
   const session = useSession();
@@ -51,6 +54,7 @@ export function SaveToggle({
       <SaveButton
         productName={name}
         saved={saved}
+        {...(round ? { className: "rounded-pill shadow-raised" } : {})}
         disabled={
           session.status === "loading" ||
           (signedIn && (saves.status === "idle" || saves.status === "loading"))

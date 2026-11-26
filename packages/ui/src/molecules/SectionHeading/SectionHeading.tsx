@@ -1,5 +1,6 @@
 import { ArrowRight } from "lucide-react";
 import type { ComponentPropsWithRef, ReactNode } from "react";
+import { Button } from "../../atoms/Button";
 import { Heading, type HeadingLevel } from "../../atoms/Heading";
 import { Icon } from "../../atoms/Icon";
 import { cn } from "../../lib/cn";
@@ -11,13 +12,13 @@ export type SectionHeadingProps = Omit<ComponentPropsWithRef<"div">, "title"> & 
   /** Id of the heading, so the section can be named by it. */
   headingId?: string;
   headingLevel?: HeadingLevel;
-  /** Link to the full list. */
+  /** Link to the full list, drawn as a small outlined "View all" button. */
   seeAll?: { href: string; label: string };
   /** Extra controls at the end of the row. */
   actions?: ReactNode;
 };
 
-/** A section's bold title with an optional "see all" link and controls. */
+/** A section's bold title with an optional outlined "View all" button and controls. */
 export function SectionHeading({
   title,
   lead,
@@ -30,7 +31,7 @@ export function SectionHeading({
 }: SectionHeadingProps) {
   return (
     <div className={cn("flex flex-wrap items-end justify-between gap-x-4 gap-y-1", className)} {...props}>
-      <Heading level={headingLevel} size="md" id={headingId} className="min-w-0 text-3xl">
+      <Heading level={headingLevel} size="md" id={headingId} className="min-w-0 text-2xl md:text-3xl">
         {title}
         {lead ? (
           <>
@@ -41,13 +42,12 @@ export function SectionHeading({
       </Heading>
       <div className="flex items-center gap-2">
         {seeAll ? (
-          <a
-            href={seeAll.href}
-            className="inline-flex min-h-touch items-center gap-1 rounded-md px-2 font-body text-sm font-semibold text-action hover:underline"
-          >
-            {seeAll.label}
-            <Icon icon={ArrowRight} size={16} />
-          </a>
+          <Button asChild variant="secondary" size="sm">
+            <a href={seeAll.href}>
+              {seeAll.label}
+              <Icon icon={ArrowRight} size={16} />
+            </a>
+          </Button>
         ) : null}
         {actions}
       </div>

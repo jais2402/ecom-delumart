@@ -9,7 +9,7 @@ import { signOut, useSession } from "../_lib/session-store";
 import { arrivalPhrase } from "../_lib/speeds";
 
 const UTILITY = {
-  items: [`Standard delivery in ${arrivalPhrase("STANDARD")}`, `Zap delivery in ${arrivalPhrase("ZAP")}`],
+  message: `Zap delivery in ${arrivalPhrase("ZAP")} on eligible products`,
   links: [
     { label: "How it works", href: "/#how-it-works" },
     { label: "Sell on DeluluMart", href: "/sell" },

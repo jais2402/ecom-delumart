@@ -32,7 +32,7 @@ export function ProductGrid({
   className,
   ...props
 }: ProductGridProps) {
-  const columns = "grid grid-cols-1 gap-x-6 gap-y-10 min-[480px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4";
+  const columns = "grid grid-cols-2 gap-x-4 gap-y-8 md:gap-x-6 md:gap-y-10 md:grid-cols-3 lg:grid-cols-4";
   if (loading) {
     return (
       <div className={className} {...props}>

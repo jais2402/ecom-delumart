@@ -31,8 +31,8 @@ export type SiteHeaderProps = Omit<ComponentPropsWithRef<"header">, "children"> 
   savedHref?: string;
   /** When given, the Categories button and its dropdown are shown. */
   categories?: readonly CategoryLink[];
-  /** When given, a slim white row of plain statements and links is shown above the band. */
-  utility?: Pick<UtilityBarProps, "items" | "links">;
+  /** When given, a thin announcement strip (one message and links) is shown above the band. */
+  utility?: Pick<UtilityBarProps, "message" | "links">;
   /** Set when a MobileTabBar is on the page: the cart and account links then leave the header below 768px. */
   withTabBar?: boolean;
 };
@@ -41,9 +41,9 @@ const control =
   "relative inline-flex min-h-touch min-w-touch items-center justify-center gap-2 rounded-md px-2 font-body text-sm font-medium text-fg-on-band transition-colors duration-fast hover:bg-band-hover focus-visible:outline-fg-on-band";
 
 /**
- * A slim white utility row, then a solid brand band with the logo, a Categories button, a large pill
+ * A thin brand-coloured announcement strip, then a solid brand band with the logo, a Categories button, a large pill
  * search, the wallet chip and outline icon actions. Wraps into rows so nothing overflows at 320px.
- * From 768px up it is sticky and the utility row scrolls away.
+ * From 768px up it is sticky and the strip scrolls away.
  */
 export function SiteHeader({
   balancePaise,

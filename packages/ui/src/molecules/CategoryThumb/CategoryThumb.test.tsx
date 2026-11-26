@@ -24,4 +24,10 @@ describe("CategoryThumb", () => {
     expect(screen.getByRole("link")).toHaveFocus();
     expect(container.querySelector("img")).toHaveAttribute("src", "/products/a.webp");
   });
+  it("draws a small light tile with a soft corner and the name centred beneath", () => {
+    const { container } = render(<CategoryThumb {...props} />);
+    const tile = container.querySelector("span");
+    expect(tile).toHaveClass("size-24", "bg-surface-raised", "rounded-xl");
+    expect(screen.getByText("Impossible Tech")).toHaveClass("text-center");
+  });
 });

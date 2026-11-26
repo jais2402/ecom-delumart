@@ -11,12 +11,12 @@ export type TrustStripProps = Omit<ComponentPropsWithRef<"ul">, "children"> & {
   label?: string;
 };
 
-/** A quiet row of reassurances between two thin rules: icon, bold title, one line. */
+/** A compact promise row: four icon and two-line items in one panel; a 2 by 2 grid on phones. */
 export function TrustStrip({ items, label = "Good to know", className, ...props }: TrustStripProps) {
   return (
     <ul
       aria-label={label}
-      className={cn("grid gap-6 rounded-lg bg-surface p-5 sm:grid-cols-2 md:p-6 lg:grid-cols-4", className)}
+      className={cn("grid grid-cols-2 gap-x-4 gap-y-4 rounded-lg bg-surface p-4 lg:grid-cols-4", className)}
       {...props}
     >
       {items.map((item) => (

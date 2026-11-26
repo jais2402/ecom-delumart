@@ -2,6 +2,7 @@ import type { ProductResponse } from "./api";
 import { featuredAcrossPrices } from "./catalog";
 import { HOME_CONFIG } from "./home-config";
 import { parsePaise } from "./money";
+import { photoSrcOf } from "./product-photos";
 
 export interface HomeRailData {
   /** Stable key for the rail. */
@@ -9,8 +10,6 @@ export interface HomeRailData {
   title: string;
   /** A grey sentence after the title. */
   lead?: string;
-  /** Category slug when the rail is one category's. */
-  category?: string;
   products: readonly ProductResponse[];
 }
 
@@ -21,28 +20,77 @@ const byPriceAscending = (a: ProductResponse, b: ProductResponse): number => {
   return x < y ? -1 : x > y ? 1 : 0;
 };
 
+/** Seed products with a photo come first so the large hero panels are pictures where possible; the order within each group is kept. */
+function photosFirst(products: readonly ProductResponse[]): ProductResponse[] {
+  return [
+    ...products.filter((product) => photoSrcOf(product) !== undefined),
+    ...products.filter((product) => photoSrcOf(product) === undefined),
+  ];
+}
+
 /**
- * The home page's rails, derived only from the catalogue the page already has: the spread across
- * prices ("New arrivals"), the cheapest, the dearest, then one rail per category with
- * enough products. A rail with nothing in it is left out.
+ * The hero's featured products: the dearest available ones, those with a photo first, as many as
+ * the configuration says. Deterministic for a given catalogue; money compared as bigint paise.
+ */
+export function pickHeroProducts(products: readonly ProductResponse[]): ProductResponse[] {
+  const dearest = products.filter((product) => product.available).sort((a, b) => byPriceAscending(b, a));
+  return photosFirst(dearest).slice(0, HOME_CONFIG.hero.slideCount);
+}
+
+export interface TopPicksTab {
+  /** "all" or the category slug. */
+  key: string;
+  label: string;
+  /** Where "View all" goes: the category's page. "All" has none, because no page lists the whole catalogue. */
+  href?: string;
+  products: readonly ProductResponse[];
+}
+
+/** The key of the first tab, which shows every category. */
+export const TOP_PICKS_ALL = "all";
+
+/**
+ * The "Top picks" tabs, from the catalogue the page already has: "All" is the spread across prices
+ * (two per category, cheapest first), then one tab per category that has available products, in the
+ * catalogue's own order, capped by configuration. Nothing here is a popularity ranking.
+ */
+export function deriveTopPicks(
+  products: readonly ProductResponse[],
+  categories: readonly { slug: string; name: string }[],
+): TopPicksTab[] {
+  const available = products.filter((product) => product.available);
+  const all = featuredAcrossPrices(
+    available,
+    categories.map((c) => c.slug),
+  ).slice(0, HOME_CONFIG.topPicks.perTab);
+  if (all.length === 0) return [];
+  const tabs: TopPicksTab[] = [{ key: TOP_PICKS_ALL, label: "All", products: all }];
+  for (const category of categories) {
+    const inCategory = available.filter((product) => product.category === category.slug);
+    if (inCategory.length > 0) {
+      tabs.push({
+        key: category.slug,
+        label: category.name,
+        href: `/c/${category.slug}`,
+        products: inCategory.slice(0, HOME_CONFIG.topPicks.perTab),
+      });
+    }
+  }
+  return tabs;
+}
+
+/**
+ * The home page's plain rails, derived only from the catalogue the page already has: the cheapest,
+ * and the dearest that the hero is not already showing (`exclude` holds the hero's product ids). A
+ * rail with nothing in it is left out.
  */
 export function deriveHomeRails(
   products: readonly ProductResponse[],
-  categories: readonly { slug: string; name: string }[],
+  exclude: ReadonlySet<string> = new Set(),
 ): HomeRailData[] {
-  const { pocketChangeCount, bigFlexCount, categoryRailCount, categoryRailMinimum } = HOME_CONFIG.rails;
-  const available = products.filter((product) => product.available);
-  const sorted = [...available].sort(byPriceAscending);
+  const { pocketChangeCount, bigFlexCount } = HOME_CONFIG.rails;
+  const sorted = products.filter((product) => product.available).sort(byPriceAscending);
   const rails: HomeRailData[] = [
-    {
-      key: "fresh",
-      title: "New arrivals.",
-      lead: "The latest additions.",
-      products: featuredAcrossPrices(
-        available,
-        categories.map((c) => c.slug),
-      ),
-    },
     {
       key: "pocket-change",
       title: "Lowest prices.",
@@ -52,21 +100,13 @@ export function deriveHomeRails(
     {
       key: "big-flex",
       title: "Premium picks.",
-      lead: "The top of the range.",
-      products: sorted.slice(-bigFlexCount).reverse(),
+      lead: "More from the top of the range.",
+      products: sorted
+        .filter((product) => !exclude.has(product.id))
+        .slice(-bigFlexCount)
+        .reverse(),
     },
   ];
-  for (const category of categories) {
-    const inCategory = available.filter((product) => product.category === category.slug);
-    if (inCategory.length >= categoryRailMinimum) {
-      rails.push({
-        key: `category-${category.slug}`,
-        title: `${category.name}.`,
-        category: category.slug,
-        products: inCategory.slice(0, categoryRailCount),
-      });
-    }
-  }
   return rails.filter((rail) => rail.products.length > 0);
 }
 

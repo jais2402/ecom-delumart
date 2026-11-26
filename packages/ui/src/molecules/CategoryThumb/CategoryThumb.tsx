@@ -18,19 +18,24 @@ export type CategoryThumbProps = Omit<ComponentPropsWithRef<"a">, "children"> &
     imageSrc?: string | undefined;
   };
 
-/** A square picture with the category's name beneath it, as one link. */
+/** A small soft-square picture on a light tile with the category's name centred beneath it, as one link. */
 export function CategoryThumb({ name, motif, hue, seed, imageSrc, className, ...props }: CategoryThumbProps) {
   return (
-    <a className={cn("group flex flex-col gap-2 font-body text-fg", className)} {...props}>
-      <ProductPicture
-        imageSrc={imageSrc}
-        alt=""
-        hue={hue}
-        seed={seed}
-        motif={motif}
-        className="transition-opacity duration-fast group-hover:opacity-90"
-      />
-      <span className="text-sm font-semibold">{name}</span>
+    <a
+      className={cn("group flex flex-col items-center gap-2 rounded-lg font-body text-fg", className)}
+      {...props}
+    >
+      <span className="block size-24 overflow-hidden rounded-xl bg-surface-raised md:size-28">
+        <ProductPicture
+          imageSrc={imageSrc}
+          alt=""
+          hue={hue}
+          seed={seed}
+          motif={motif}
+          className="rounded-none transition-transform duration-base group-hover:scale-105"
+        />
+      </span>
+      <span className="text-center text-sm font-semibold">{name}</span>
     </a>
   );
 }

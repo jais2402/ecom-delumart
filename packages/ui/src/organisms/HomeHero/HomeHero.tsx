@@ -1,89 +1,80 @@
-import type { ComponentPropsWithRef } from "react";
-import { Button } from "../../atoms/Button";
-import { Heading } from "../../atoms/Heading";
-import type { ProductArtMotif } from "../../atoms/ProductArt";
-import { ProductPicture } from "../../atoms/ProductPicture";
-import { cn } from "../../lib/cn";
+"use client";
 
-export type HeroTile = {
-  href: string;
-  /** The caption's bold first line, usually a category name. */
-  caption: string;
-  /** A short second line. */
-  detail?: string;
-  hue: number;
-  seed: string;
-  motif: ProductArtMotif;
-  /** A photo from our own origin; generated art is drawn when absent. */
-  imageSrc?: string | undefined;
-};
-export type HeroAction = { label: string; href: string };
+import { type ComponentPropsWithRef, useCallback, useRef, useState } from "react";
+import { Heading } from "../../atoms/Heading";
+import { cn } from "../../lib/cn";
+import { CarouselControls } from "../../molecules/CarouselControls";
+import { HeroSlide, type HeroSlideItem } from "../../molecules/HeroSlide";
 
 export type HomeHeroProps = Omit<ComponentPropsWithRef<"section">, "title" | "children"> & {
-  /** The page's one h1. */
+  /** The page's one h1, shown in the slim banner under the carousel. */
   title: string;
-  /** One line of subcopy. */
+  /** One line of subcopy beside it. */
   text: string;
-  action: HeroAction;
-  /** Up to three picture tiles beside the colour block; each links to a category. */
-  tiles?: readonly HeroTile[];
+  /** The featured products, one per slide. Nothing moves on its own. */
+  slides: readonly HeroSlideItem[];
 };
 
-function Tile({ tile, className, eager }: { tile: HeroTile; className?: string; eager?: boolean }) {
-  return (
-    <a
-      href={tile.href}
-      className={cn(
-        "group relative isolate flex min-w-0 flex-col justify-end overflow-hidden rounded-lg bg-ink text-fg-on-ink",
-        className,
-      )}
-    >
-      <ProductPicture
-        imageSrc={tile.imageSrc}
-        alt=""
-        hue={tile.hue}
-        seed={tile.seed}
-        motif={tile.motif}
-        eager={eager}
-        className="absolute inset-0 -z-20 aspect-auto size-full rounded-none transition-transform duration-base group-hover:scale-[1.02]"
-      />
-      <span
-        aria-hidden="true"
-        className="absolute inset-0 -z-10 bg-gradient-to-t from-ink/90 via-ink/40 to-transparent"
-      />
-      <span className="flex flex-col gap-0.5 p-4">
-        <span className="text-lg font-bold">{tile.caption}</span>
-        {tile.detail ? <span className="text-sm text-fg-on-ink-muted">{tile.detail}</span> : null}
-      </span>
-    </a>
-  );
-}
+/**
+ * A product-led hero: a large photo carousel (previous and next buttons, dots, swipe with
+ * scroll-snap on touch) that only moves when asked, with a slim amber banner carrying the page's h1
+ * beneath it (first in the markup so it is read first, last on screen; it has no controls). Slides out of view are inert, so Tab never lands on an unseen link.
+ */
+export function HomeHero({ title, text, slides, className, ...props }: HomeHeroProps) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const [index, setIndex] = useState(0);
 
-/** A mosaic: a large blue block with the headline, one line and one button, beside up to three picture tiles with captions on a dark scrim. */
-export function HomeHero({ title, text, action, tiles = [], className, ...props }: HomeHeroProps) {
-  const [first, second, third] = tiles;
+  const onScroll = useCallback(() => {
+    const el = scroller.current;
+    if (!el || el.clientWidth === 0) return;
+    setIndex(Math.min(Math.max(Math.round(el.scrollLeft / el.clientWidth), 0), slides.length - 1));
+  }, [slides.length]);
+
+  function show(next: number) {
+    setIndex(next);
+    const el = scroller.current;
+    if (!el?.scrollTo) return;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    el.scrollTo({ left: next * el.clientWidth, behavior: reduce ? "auto" : "smooth" });
+  }
+
   return (
-    <section className={cn("grid gap-4 lg:h-[24rem] lg:grid-cols-12", className)} {...props}>
-      <div className="flex flex-col items-start justify-between gap-8 rounded-lg bg-band p-8 text-fg-on-band md:p-10 lg:col-span-6">
-        <Heading level={1} size="xl" className="text-4xl leading-tight text-fg-on-band md:text-5xl">
+    <section className={cn("flex flex-col gap-3", className)} {...props}>
+      <div className="order-last flex flex-col gap-0.5 rounded-lg bg-cta px-4 py-3 text-fg-on-cta sm:flex-row sm:items-baseline sm:justify-center sm:gap-x-4 md:px-6">
+        <Heading level={1} size="md" className="text-lg leading-snug text-fg-on-cta md:text-xl">
           {title}
         </Heading>
-        <div className="flex flex-col items-start gap-5">
-          <p className="max-w-md font-body text-base text-fg-on-band-muted md:text-lg">{text}</p>
-          <Button
-            asChild
-            size="lg"
-            className="bg-cta text-fg-on-cta hover:bg-cta-hover focus-visible:outline-fg-on-band"
-          >
-            <a href={action.href}>{action.label}</a>
-          </Button>
-        </div>
+        <p className="font-body text-sm text-fg-on-cta">{text}</p>
       </div>
-      {first ? <Tile tile={first} eager className="aspect-square lg:col-span-3 lg:aspect-auto" /> : null}
-      {second || third ? (
-        <div className="grid grid-cols-2 gap-4 lg:col-span-3 lg:grid-cols-1 lg:grid-rows-2">
-          {second ? <Tile tile={second} eager className="aspect-square lg:aspect-auto" /> : null}
-          {third ? <Tile tile={third} eager className="aspect-square lg:aspect-auto" /> : null}
+      {slides.length > 0 ? (
+        // biome-ignore lint/a11y/useSemanticElements: the carousel pattern is a group with aria-roledescription; a fieldset is for form fields
+        <div role="group" aria-roledescription="carousel" aria-label="Featured products" className="min-w-0">
+          <div
+            ref={scroller}
+            onScroll={onScroll}
+            className="flex snap-x snap-mandatory overflow-x-auto rounded-lg scroll-smooth motion-reduce:scroll-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {slides.map((slide, i) => (
+              // biome-ignore lint/a11y/useSemanticElements: the carousel pattern is a group with aria-roledescription; a fieldset is for form fields
+              <div
+                key={slide.id}
+                role="group"
+                aria-roledescription="slide"
+                aria-label={`${i + 1} of ${slides.length}`}
+                inert={i !== index}
+                className="w-full min-w-0 shrink-0 snap-center"
+              >
+                <HeroSlide item={slide} eager={i === 0} />
+              </div>
+            ))}
+          </div>
+          <CarouselControls
+            count={slides.length}
+            index={index}
+            onSelect={show}
+            noun="featured product"
+            className="mt-1"
+          />
         </div>
       ) : null}
     </section>

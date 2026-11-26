@@ -51,7 +51,7 @@ describe("SiteHeader", () => {
     rerender(<SiteHeader balancePaise={null} cartCount={0} onSearch={() => {}} sellHref="/sell" />);
     expect(screen.getByRole("link", { name: "Sell" })).toHaveAttribute("href", "/sell");
   });
-  it("shows the Categories button, the utility row and the Saved link only when given", () => {
+  it("shows the Categories button, the announcement strip and the Saved link only when given", () => {
     const { rerender } = render(<SiteHeader balancePaise={null} cartCount={0} onSearch={() => {}} />);
     expect(screen.queryByRole("button", { name: "Categories" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Saved" })).not.toBeInTheDocument();
@@ -63,14 +63,14 @@ describe("SiteHeader", () => {
         savedHref="/account/saved"
         categories={[{ slug: "a", name: "Impossible Tech", href: "/c/a", motif: "tech" }]}
         utility={{
-          items: ["Fictional money only"],
+          message: "Zap delivery in about 10 minutes on eligible products",
           links: [{ label: "How it works", href: "/#how-it-works" }],
         }}
       />,
     );
     expect(screen.getByRole("button", { name: "Categories" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Saved" })).toHaveAttribute("href", "/account/saved");
-    expect(screen.getByText("Fictional money only")).toBeInTheDocument();
+    expect(screen.getByText("Zap delivery in about 10 minutes on eligible products")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "How it works" })).toBeInTheDocument();
   });
   it("hands cart and account to the tab bar below 768px when one is used", () => {

@@ -93,4 +93,45 @@ describe("ProductCard", () => {
     render(<ProductCard {...base} />);
     expect(screen.queryByText(/delivery/i)).not.toBeInTheDocument();
   });
+  it("puts a tag on the picture's top-left only for real states: a stock state first, else Zap", () => {
+    const { rerender } = render(<ProductCard {...base} stock={{ state: "in-stock" }} />);
+    expect(document.querySelector(".top-2.left-2")).toBeNull();
+    rerender(<ProductCard {...base} stock={{ state: "in-stock" }} zapEligible />);
+    expect(document.querySelector(".top-2.left-2")).toHaveTextContent("Zap");
+    rerender(<ProductCard {...base} stock={{ state: "low", count: 2 }} zapEligible />);
+    expect(document.querySelector(".top-2.left-2")).toHaveTextContent("Only 2 left");
+    rerender(<ProductCard {...base} stock={{ state: "edition", number: 3, of: 10 }} />);
+    expect(document.querySelector(".top-2.left-2")).toHaveTextContent("#3 of 10");
+  });
+  it("shows an overlay control on the picture's top-right, reachable on its own and not inside the link", async () => {
+    const onSave = vi.fn();
+    render(
+      <ProductCard
+        {...base}
+        overlay={
+          <button type="button" aria-label="Save Monsoon in a Jar" onClick={onSave}>
+            heart
+          </button>
+        }
+        actions={<button type="button">Add to cart</button>}
+      />,
+    );
+    const save = screen.getByRole("button", { name: "Save Monsoon in a Jar" });
+    expect(save.parentElement).toHaveClass("top-1", "right-1", "z-10");
+    expect(screen.getByRole("link", { name: "Monsoon in a Jar" })).not.toContainElement(save);
+    // tab order follows the picture top to bottom: the heart, the name link, then Add to cart
+    await userEvent.tab();
+    expect(save).toHaveFocus();
+    await userEvent.tab();
+    expect(screen.getByRole("link", { name: "Monsoon in a Jar" })).toHaveFocus();
+    await userEvent.tab();
+    expect(screen.getByRole("button", { name: "Add to cart" })).toHaveFocus();
+    await userEvent.click(save);
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+  it("gives the action its own full-width row under the price", () => {
+    render(<ProductCard {...base} actions={<button type="button">Add to cart</button>} />);
+    const row = screen.getByRole("button", { name: "Add to cart" }).parentElement;
+    expect(row).toHaveClass("flex-col");
+  });
 });

@@ -15,6 +15,12 @@ describe("CategoryThumbs", () => {
     expect(nav).toHaveAttribute("id", "categories");
     expect(within(nav).getAllByRole("link")).toHaveLength(2);
   });
+  it("has a centred visible heading that names the navigation", () => {
+    render(<CategoryThumbs categories={categories} />);
+    const heading = screen.getByRole("heading", { level: 2, name: "Shop by category" });
+    expect(heading).toHaveClass("text-center");
+    expect(screen.getByRole("navigation")).toHaveAccessibleName("Shop by category");
+  });
   it("lets the keyboard walk the categories in order", async () => {
     render(<CategoryThumbs categories={categories} />);
     await userEvent.tab();
