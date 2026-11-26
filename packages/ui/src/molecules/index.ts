@@ -20,6 +20,7 @@ export * from "./ProductCardSkeleton";
 export * from "./SearchBar";
 export * from "./SectionHeading";
 export * from "./SourceBadge";
+export * from "./StarRatingInput";
 export * from "./Stat";
 export * from "./StepCard";
 export * from "./StepIndicator";
