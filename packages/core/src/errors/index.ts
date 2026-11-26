@@ -82,6 +82,9 @@ export const ERROR_CODES = [
   "REVIEW_NOT_ALLOWED",
   "REVIEW_NOT_FOUND",
   "REVIEW_INVALID",
+  // sale price (PRD R6.2, US-43): the seller asked to show a reference price and the earlier price
+  // was not the published price for the required continuous hours
+  "REFERENCE_PRICE_INELIGIBLE",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

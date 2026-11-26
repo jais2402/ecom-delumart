@@ -318,3 +318,4 @@ export function price(q: Quote): Priced {
 }
 
 export * from "./reference-price";
+export * from "./sale-price";
