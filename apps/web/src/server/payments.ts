@@ -15,8 +15,8 @@ import type {
 } from "@delulu/db/runtime";
 import { z } from "zod";
 import { clientAddress } from "./client-address";
-import { enforceRate, RATE_RULES } from "./rate-limit";
 import { env } from "./env";
+import { enforceRate, RATE_RULES } from "./rate-limit";
 
 /**
  * DeluluPay request schemas and response shapes (PRD R4, R10). Each view copies named fields only.
@@ -36,7 +36,11 @@ export const delulupayIdSchema = z
 
 export const attemptBody = z.discriminatedUnion("method", [
   z.strictObject({ method: z.literal("BALANCE"), scenario: z.enum(PAYMENT_SCENARIOS).optional() }),
-  z.strictObject({ method: z.literal("CARD"), cardId: z.uuid(), scenario: z.enum(PAYMENT_SCENARIOS).optional() }),
+  z.strictObject({
+    method: z.literal("CARD"),
+    cardId: z.uuid(),
+    scenario: z.enum(PAYMENT_SCENARIOS).optional(),
+  }),
   z.strictObject({ method: z.literal("NET_BANKING"), scenario: z.enum(PAYMENT_SCENARIOS).optional() }),
   z.strictObject({
     method: z.literal("DELULUPAY_ID"),

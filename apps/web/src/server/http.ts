@@ -76,6 +76,12 @@ const STATUS: Record<ErrorCode, number> = {
   PIN_NOT_SET: 409,
   PIN_LOCKED: 409,
   CHALLENGE_LOCKED: 409,
+  // DeluluPay (PRD R4, R10): a wrong code can be retried (422, with the tries left); the rest ended
+  // the payment (409). Each message says that no fictional money moved.
+  CHALLENGE_FAILED: 422,
+  CHALLENGE_EXPIRED: 409,
+  METHOD_LIMIT_EXCEEDED: 422,
+  BANK_UNAVAILABLE: 503,
   ONBOARDING_REQUIRED: 403,
   CREATOR_LOCKED: 403,
   COMPANY_EXISTS: 409,
@@ -119,6 +125,7 @@ const RETRYABLE: ReadonlySet<ApiErrorCode> = new Set([
   "BUSY",
   "RATE_LIMITED",
   "PAYMENT_PENDING",
+  "BANK_UNAVAILABLE",
   "MAINTENANCE",
   "PUBLICATION_PAUSED",
   "REPORT_LIMIT",
