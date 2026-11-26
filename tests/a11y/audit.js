@@ -38,6 +38,7 @@ const pages = [
   { path: '/studio/appeals', as: 'owner', operator: true },
   { path: '/console/moderation', as: 'admin', operator: true },
   { path: '/console/reports', as: 'admin', operator: true },
+  { path: '/console/reviews', as: 'admin', operator: true },
   // analytics screens: the admin API is answered by fixtures (no Super Admin needed, see mockAnalytics)
   { path: '/console/analytics', as: 'mocked', operator: true },
   { path: '/console/analytics/places', as: 'mocked', operator: true },
