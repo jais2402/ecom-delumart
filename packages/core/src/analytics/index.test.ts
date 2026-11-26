@@ -36,6 +36,9 @@ describe("analytics event names", () => {
         // ratings and reviews (decisions.md #14): recorded by the server, never by a browser
         "review_submitted",
         "review_hidden",
+        // Super Admin configuration changes (decisions.md #15): written by the database when a
+        // delayed action runs; no props, no user id, no values
+        "console_config_changed",
       ].sort(),
     );
   });

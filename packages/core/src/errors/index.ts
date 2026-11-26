@@ -82,6 +82,13 @@ export const ERROR_CODES = [
   "REVIEW_NOT_ALLOWED",
   "REVIEW_NOT_FOUND",
   "REVIEW_INVALID",
+  // Super Admin delayed actions and versioned configuration (decisions.md #15): an action kind that
+  // is not on the allow-list; the queue already holds its maximum of waiting proposals; a
+  // configuration key that is not on the allow-list; a value outside the key's bounds
+  "ADMIN_ACTION_UNKNOWN",
+  "ADMIN_ACTION_LIMIT",
+  "CONFIG_KEY_UNKNOWN",
+  "CONFIG_VALUE_INVALID",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
