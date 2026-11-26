@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { setSalePrice } from "../../../packages/db/src/listing";
 import {
   checkout as dbCheckout,
   merchantCoupon,
@@ -13,6 +14,7 @@ import {
   standard,
   user,
 } from "../../../packages/db/tests/checkout-fixtures";
+import { creator, ensureCategories, publishListing } from "../../../packages/db/tests/listing-fixtures";
 import * as cartLineRoute from "../src/app/api/v1/cart/lines/[productId]/route";
 import * as cartLines from "../src/app/api/v1/cart/lines/route";
 import * as cartMerge from "../src/app/api/v1/cart/merge/route";
@@ -27,6 +29,8 @@ let app: TestApp;
 let s: Seller;
 /** The user seller's products (stocked, plenty of units), some offering Express. */
 let sellerProducts: ProductFixture[];
+/** A second shop's listings that are ON SALE (set through the sale-price command), one with free Standard delivery. */
+let saleProducts: { id: string; salePaise: bigint }[];
 let percentCoupon: string;
 const FLAT_MIN_SPEND_CODE = "BIGSPENDER";
 
@@ -48,6 +52,26 @@ beforeAll(async () => {
         freeStd: i >= 2, // the ₹450 one alone cannot fund ₹1,000 Standard delivery
       }),
     );
+  }
+  // listings on sale (R6.2): the sale price is the price every cart, preview and checkout uses
+  await ensureCategories(pool);
+  const saleShop = await creator(pool, app.products as unknown as ProductFixture[]);
+  saleProducts = [];
+  for (const [list, sale, free] of [
+    [5_000n, 4_000n, true],
+    [2_000n, 1_500n, false],
+  ] as const) {
+    const l = await publishListing(pool, saleShop, {
+      pricePaise: list * RUPEE,
+      quantity: 20,
+      freeStandardDelivery: free,
+    });
+    await setSalePrice(pool, {
+      authSessionId: saleShop.u.authSessionId,
+      productId: l.productId,
+      salePricePaise: sale * RUPEE,
+    });
+    saleProducts.push({ id: l.productId, salePaise: sale * RUPEE });
   }
   percentCoupon = (await merchantCoupon(pool, s, { percent: 15 })).code;
   // a FLAT ₹300 coupon from ₹3,000 of this seller's items: below that it does not apply
@@ -288,10 +312,31 @@ describe("cart routes", () => {
   });
 });
 
+describe("sale prices in the cart (R6.2, R6.5, US-43)", () => {
+  it("US-43 R6.5: a listing on sale is priced at its sale price; free Standard delivery on it costs the buyer nothing", async () => {
+    const { b } = await player({ pin: false });
+    const [free, paid] = saleProducts as [(typeof saleProducts)[number], (typeof saleProducts)[number]];
+    await addLine(b, free.id);
+    const only = await getCart(b);
+    expect(arr(arr(only.json.groups)[0]?.lines)[0]).toMatchObject({
+      pricePaise: free.salePaise.toString(),
+      freeStandardDelivery: true,
+    });
+    expect(only.json.preview?.totalPaise).toBe(free.salePaise.toString()); // no delivery fee
+    await addLine(b, paid.id);
+    const both = await getCart(b);
+    // the other listing does not offer it: the buyer pays the ₹1,000 Standard fee for the order
+    expect(both.json.preview?.totalPaise).toBe((free.salePaise + paid.salePaise + 1_000n * RUPEE).toString());
+    const session = await checkoutCart(b);
+    expect(session.status).toBe(201);
+    expect(session.json.totalPaise).toBe(both.json.preview?.totalPaise);
+  });
+});
+
 describe("preview and checkout agree", () => {
   it("R2.2 US-33: for 50 random carts the preview total equals the checkout session's total", async () => {
     const { b } = await player({ pin: false });
-    const pool = [...seedIds(), ...sellerProducts.map((p) => p.id)];
+    const pool = [...seedIds(), ...sellerProducts.map((p) => p.id), ...saleProducts.map((p) => p.id)];
     let withCoupon = 0;
     let couponErrors = 0;
     let refusals = 0;
