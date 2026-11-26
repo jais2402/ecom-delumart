@@ -39,7 +39,7 @@ export function WelcomePanel({
       </div>
       <VirtualCard holderName={holderName} number={cardNumber} alias="Your Delulu Card" />
       <Text muted>Your card number is hidden by default. You need your game PIN to pay with it.</Text>
-      <Button asChild size="lg">
+      <Button asChild variant="cta" size="lg">
         <a href={shopHref}>Start shopping</a>
       </Button>
     </div>

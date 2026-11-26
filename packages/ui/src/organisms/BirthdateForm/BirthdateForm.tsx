@@ -180,7 +180,7 @@ export function BirthdateForm({
             {fieldError}
           </p>
         ) : null}
-        <Button type="submit" size="lg" loading={pending}>
+        <Button type="submit" variant="cta" size="lg" loading={pending}>
           Continue
         </Button>
       </form>

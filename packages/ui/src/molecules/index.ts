@@ -3,6 +3,7 @@ export * from "./BalancePill";
 export * from "./Breadcrumbs";
 export * from "./CardNumber";
 export * from "./CategoryThumb";
+export * from "./CollapsibleBlock";
 export * from "./CouponInput";
 export * from "./DateRangePicker";
 export * from "./DeliveryOption";

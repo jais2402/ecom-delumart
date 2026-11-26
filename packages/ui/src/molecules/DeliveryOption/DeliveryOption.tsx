@@ -14,7 +14,7 @@ export function DeliveryOption({ speedName, arrival, feePaise, className, ...pro
   return (
     <label
       className={cn(
-        "flex min-h-touch cursor-pointer items-start gap-3 rounded-lg border border-border bg-surface p-3 font-body has-[:checked]:border-action has-[:checked]:bg-action-soft has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50",
+        "flex min-h-touch cursor-pointer items-start gap-3 rounded-lg border border-border bg-surface p-4 font-body has-[:checked]:border-action has-[:checked]:bg-action-soft has-[:checked]:ring-1 has-[:checked]:ring-action has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-focus has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50",
         className,
       )}
     >

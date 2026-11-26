@@ -22,7 +22,7 @@ function Row({ label, children, strong }: { label: string; children: ReactNode; 
   return (
     <div className={cn("flex items-baseline justify-between gap-3", strong && "border-t border-border pt-2")}>
       <dt className={cn("text-fg", strong ? "font-bold" : "text-fg-muted")}>{label}</dt>
-      <dd className={strong ? "text-lg" : undefined}>{children}</dd>
+      <dd className={strong ? "text-lg font-bold" : undefined}>{children}</dd>
     </div>
   );
 }
@@ -42,10 +42,7 @@ export function OrderSummary({
     <section
       aria-label="Order summary"
       aria-busy={loading || undefined}
-      className={cn(
-        "flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 font-body",
-        className,
-      )}
+      className={cn("flex flex-col gap-3 rounded-lg bg-surface p-4 font-body", className)}
       {...props}
     >
       <Heading level={2} size="sm">

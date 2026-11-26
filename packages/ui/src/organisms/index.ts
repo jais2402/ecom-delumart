@@ -32,6 +32,7 @@ export * from "./ModerationReviewCard";
 export * from "./OnboardingProgress";
 export * from "./OrderEquation";
 export * from "./OrderGroupReview";
+export * from "./OrderItemsList";
 export * from "./OrderSummary";
 export * from "./OverflowMenu";
 export * from "./PassportQuiz";

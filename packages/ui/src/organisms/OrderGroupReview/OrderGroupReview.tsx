@@ -31,7 +31,7 @@ export function OrderGroupReview({ groups, totalPaise, className, ...props }: Or
         <section
           key={group.sellerId}
           aria-labelledby={`review-${group.sellerId}`}
-          className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4"
+          className="flex flex-col gap-2 rounded-lg bg-surface p-4"
         >
           <Heading level={3} size="sm" id={`review-${group.sellerId}`} className="break-words">
             Sold by {group.sellerName}
@@ -67,7 +67,7 @@ export function OrderGroupReview({ groups, totalPaise, className, ...props }: Or
           </dl>
         </section>
       ))}
-      <p className="flex items-baseline justify-between gap-3 rounded-lg border border-border-strong bg-surface p-4 text-lg font-bold text-fg">
+      <p className="flex items-baseline justify-between gap-3 rounded-lg bg-surface p-4 text-lg font-bold text-fg">
         <span>Order total</span>
         <Price amountPaise={totalPaise} display="exact" />
       </p>

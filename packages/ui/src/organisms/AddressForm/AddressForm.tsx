@@ -244,7 +244,7 @@ export function AddressForm({
             Cancel
           </Button>
         ) : null}
-        <Button type="submit" loading={pending}>
+        <Button type="submit" variant="cta" loading={pending}>
           {submitLabel}
         </Button>
       </div>

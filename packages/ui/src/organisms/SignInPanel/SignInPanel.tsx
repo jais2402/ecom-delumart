@@ -137,7 +137,7 @@ export function SignInPanel({
             />
           )}
         </FormField>
-        <Button type="submit" size="lg" loading={pending}>
+        <Button type="submit" variant="cta" size="lg" loading={pending}>
           {devMode ? "Sign in locally" : "Email me a sign-in link"}
         </Button>
       </form>

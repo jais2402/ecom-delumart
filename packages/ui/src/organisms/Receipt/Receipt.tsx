@@ -2,9 +2,19 @@ import type { ComponentPropsWithRef } from "react";
 import { FictionLabel } from "../../atoms/FictionLabel";
 import { Heading } from "../../atoms/Heading";
 import { Price } from "../../atoms/Price";
+import { ProductPicture } from "../../atoms/ProductPicture";
 import { cn } from "../../lib/cn";
 
-export type ReceiptLine = { id: string; name: string; quantity: number; totalPaise: bigint };
+export type ReceiptLine = {
+  id: string;
+  name: string;
+  quantity: number;
+  totalPaise: bigint;
+  /** Base hue of the generated art; a small picture is drawn beside the line when this is given. */
+  hue?: number;
+  /** A photo from our own origin; generated art is drawn when absent. */
+  imageSrc?: string | undefined;
+};
 
 export type ReceiptProps = Omit<ComponentPropsWithRef<"section">, "children"> & {
   reference: string;
@@ -33,10 +43,7 @@ export function Receipt({
   return (
     <section
       aria-label={`Receipt for order ${reference}`}
-      className={cn(
-        "flex flex-col gap-3 rounded-lg border border-border-strong bg-surface p-4 font-body",
-        className,
-      )}
+      className={cn("flex flex-col gap-3 rounded-lg bg-surface p-4 font-body md:p-6", className)}
       {...props}
     >
       <header>
@@ -54,8 +61,17 @@ export function Receipt({
       </header>
       <ul className="divide-y divide-border border-y border-border">
         {lines.map((line) => (
-          <li key={line.id} className="flex items-baseline justify-between gap-3 py-2 text-base">
-            <span className="min-w-0 text-fg">
+          <li key={line.id} className="flex items-center gap-3 py-3 text-base">
+            {line.hue === undefined ? null : (
+              <ProductPicture
+                imageSrc={line.imageSrc}
+                hue={line.hue}
+                seed={line.name}
+                alt=""
+                className="size-14 shrink-0"
+              />
+            )}
+            <span className="min-w-0 flex-1 break-words text-fg">
               {line.name} <span className="text-fg-muted">× {line.quantity}</span>
             </span>
             <Price amountPaise={line.totalPaise} display="exact" />

@@ -1,8 +1,8 @@
-import { Trash2 } from "lucide-react";
+import { ShoppingCart, Trash2 } from "lucide-react";
 import type { ComponentPropsWithRef, ReactNode } from "react";
+import { Button } from "../../atoms/Button";
 import { Heading } from "../../atoms/Heading";
 import { Icon } from "../../atoms/Icon";
-import { IconButton } from "../../atoms/IconButton";
 import { Price } from "../../atoms/Price";
 import { ProductPicture } from "../../atoms/ProductPicture";
 import { cn } from "../../lib/cn";
@@ -46,6 +46,7 @@ export function CartLines({ groups, onRemove, emptyAction, className, ...props }
     return (
       <div className={className} {...props}>
         <EmptyState
+          icon={<Icon icon={ShoppingCart} size={32} />}
           title="Your cart is empty"
           description="Add something impossible to get started."
           {...(emptyAction ? { action: emptyAction } : {})}
@@ -54,13 +55,22 @@ export function CartLines({ groups, onRemove, emptyAction, className, ...props }
     );
   }
   return (
-    <div className={cn("flex flex-col gap-6 font-body", className)} {...props}>
+    <div className={cn("flex flex-col gap-4 font-body", className)} {...props}>
       {nonEmpty.map((group) => (
-        <section key={group.sellerId} aria-labelledby={`seller-${group.sellerId}`}>
-          <Heading level={2} size="sm" id={`seller-${group.sellerId}`} className="mb-2 break-words">
+        <section
+          key={group.sellerId}
+          aria-labelledby={`seller-${group.sellerId}`}
+          className="overflow-hidden rounded-lg bg-surface"
+        >
+          <Heading
+            level={2}
+            size="sm"
+            id={`seller-${group.sellerId}`}
+            className="break-words border-b border-border px-4 py-3"
+          >
             Sold by {group.sellerName}
           </Heading>
-          <ul className="divide-y divide-border rounded-lg border border-border bg-surface">
+          <ul className="divide-y divide-border">
             {group.lines.map((line) => {
               const issueId = `issue-${line.id}`;
               return (
@@ -68,7 +78,7 @@ export function CartLines({ groups, onRemove, emptyAction, className, ...props }
                   key={line.id}
                   data-issue={line.issue ? "true" : undefined}
                   className={cn(
-                    "flex items-start gap-3 p-3 first:rounded-t-lg last:rounded-b-lg",
+                    "flex items-start gap-3 p-4 sm:gap-4",
                     line.issue && "border-l-4 border-l-danger bg-danger-soft",
                   )}
                 >
@@ -77,14 +87,14 @@ export function CartLines({ groups, onRemove, emptyAction, className, ...props }
                     hue={line.hue}
                     seed={line.name}
                     alt={line.imageAlt ?? ""}
-                    className={cn("size-16 shrink-0", line.issue && "opacity-60")}
+                    className={cn("size-20 shrink-0 sm:size-28", line.issue && "opacity-60")}
                   />
-                  <div className="min-w-0 flex-1">
-                    <p className="break-words font-medium text-fg">
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <p className="break-words font-normal text-fg">
                       {line.href ? (
                         <a
                           href={line.href}
-                          className="inline-flex min-h-touch items-center underline underline-offset-2"
+                          className="inline-flex min-h-touch items-center hover:text-action hover:underline"
                         >
                           {line.name}
                         </a>
@@ -92,6 +102,11 @@ export function CartLines({ groups, onRemove, emptyAction, className, ...props }
                         line.name
                       )}
                     </p>
+                    <Price
+                      amountPaise={line.unitPricePaise * BigInt(line.quantity)}
+                      display="exact"
+                      className={cn("text-lg font-bold", line.issue && "line-through")}
+                    />
                     {line.quantity > 1 ? (
                       <p className="text-sm text-fg-muted">
                         Quantity {line.quantity} ×{" "}
@@ -102,29 +117,28 @@ export function CartLines({ groups, onRemove, emptyAction, className, ...props }
                         />
                       </p>
                     ) : null}
-                    <Price
-                      amountPaise={line.unitPricePaise * BigInt(line.quantity)}
-                      display="exact"
-                      className={cn(line.issue && "line-through")}
-                    />
                     {line.issue ? (
-                      <p id={issueId} className="mt-1 text-sm font-medium text-danger">
+                      <p id={issueId} className="text-sm font-medium text-danger">
                         {line.issue}
                       </p>
                     ) : null}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="mt-1 self-start"
+                      aria-label={`Remove ${line.name} from cart`}
+                      {...(line.issue ? { "aria-describedby": issueId } : {})}
+                      onClick={() => onRemove(line.id)}
+                    >
+                      <Icon icon={Trash2} size={16} />
+                      Remove
+                    </Button>
                   </div>
-                  <IconButton
-                    aria-label={`Remove ${line.name} from cart`}
-                    {...(line.issue ? { "aria-describedby": issueId } : {})}
-                    onClick={() => onRemove(line.id)}
-                  >
-                    <Icon icon={Trash2} />
-                  </IconButton>
                 </li>
               );
             })}
           </ul>
-          {group.footer ? <div className="mt-3">{group.footer}</div> : null}
+          {group.footer ? <div className="border-t border-border bg-surface p-4">{group.footer}</div> : null}
         </section>
       ))}
     </div>

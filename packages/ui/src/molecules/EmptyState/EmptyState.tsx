@@ -23,12 +23,16 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface p-6 text-center",
+        "flex flex-col items-center gap-3 rounded-lg border border-border bg-surface px-4 py-8 text-center",
         className,
       )}
       {...props}
     >
-      {icon ? <div className="text-fg-muted">{icon}</div> : null}
+      {icon ? (
+        <div className="flex size-16 items-center justify-center rounded-pill bg-action-soft text-action">
+          {icon}
+        </div>
+      ) : null}
       <Heading level={headingLevel} size="sm">
         {title}
       </Heading>
@@ -37,7 +41,7 @@ export function EmptyState({
           {description}
         </Text>
       ) : null}
-      {action}
+      {action ? <div className="mt-1">{action}</div> : null}
     </div>
   );
 }

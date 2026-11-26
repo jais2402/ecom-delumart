@@ -124,7 +124,7 @@ export function CodeForm({
             </p>
           ) : null}
         </div>
-        <Button type="submit" size="lg" loading={pending}>
+        <Button type="submit" variant="cta" size="lg" loading={pending}>
           Verify code
         </Button>
       </form>

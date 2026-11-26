@@ -55,10 +55,7 @@ export function BankChallenge({
     <form
       aria-labelledby={titleId}
       onSubmit={submit}
-      className={cn(
-        "flex flex-col gap-4 rounded-lg border border-border-strong bg-surface p-4 font-body shadow-raised",
-        className,
-      )}
+      className={cn("flex flex-col gap-4 rounded-lg bg-surface p-4 font-body md:p-6", className)}
       {...props}
     >
       <div className="flex items-center gap-2 text-action">
@@ -67,7 +64,7 @@ export function BankChallenge({
           Delulu Bank SecureCheck
         </Heading>
       </div>
-      <dl className="flex flex-col gap-2 rounded-md bg-action-soft p-3 text-base">
+      <dl className="flex flex-col gap-2 rounded-lg bg-surface-raised p-3 text-base">
         <div className="flex items-baseline justify-between gap-3">
           <dt className="text-fg-muted">Pay {merchantName}</dt>
           <dd>
@@ -103,7 +100,13 @@ export function BankChallenge({
         </div>
       )}
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" disabled={!ready} loading={Boolean(loading)} className="flex-1">
+        <Button
+          type="submit"
+          variant="ctaStrong"
+          disabled={!ready}
+          loading={Boolean(loading)}
+          className="flex-1"
+        >
           Pay
         </Button>
         <Button type="button" variant="secondary" onClick={onCancel} className="flex-1">

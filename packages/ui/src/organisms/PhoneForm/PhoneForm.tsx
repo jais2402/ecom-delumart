@@ -95,7 +95,7 @@ export function PhoneForm({
             </p>
           ) : null}
         </div>
-        <Button type="submit" size="lg" loading={pending}>
+        <Button type="submit" variant="cta" size="lg" loading={pending}>
           Send verification code
         </Button>
       </form>

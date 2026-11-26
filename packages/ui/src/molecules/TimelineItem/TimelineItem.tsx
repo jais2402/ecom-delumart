@@ -28,15 +28,20 @@ export function TimelineItem({
   return (
     <li
       aria-current={state === "current" ? "step" : undefined}
-      className={cn("flex gap-3 font-body", state === "upcoming" ? "text-fg-muted" : "text-fg", className)}
+      className={cn(
+        "relative flex gap-3 font-body before:absolute before:top-[1.375rem] before:bottom-0 before:left-[7px] before:w-0.5 last:before:hidden",
+        state === "done" ? "before:bg-action" : "before:bg-border",
+        state === "upcoming" ? "text-fg-muted" : "text-fg",
+        className,
+      )}
       {...props}
     >
       <span
         aria-hidden="true"
         className={cn(
-          "mt-1.5 size-3 shrink-0 rounded-pill border-2",
+          "mt-1.5 size-4 shrink-0 rounded-pill border-2",
           state === "done" && "border-action bg-action",
-          state === "current" && "border-action bg-highlight",
+          state === "current" && "border-action bg-surface ring-4 ring-action-soft",
           state === "upcoming" && "border-border-strong bg-surface",
         )}
       />

@@ -129,7 +129,7 @@ export function PinSetupForm({
             </li>
           ))}
         </ul>
-        <Button type="submit" size="lg" loading={pending}>
+        <Button type="submit" variant="cta" size="lg" loading={pending}>
           {submitLabel}
         </Button>
       </form>

@@ -43,7 +43,7 @@ export function DestinationChoice({
       {options.map((option) => (
         <label
           key={option.value}
-          className="flex min-h-touch cursor-pointer items-start gap-3 rounded-lg border border-border bg-surface p-3 has-[:checked]:border-action has-[:checked]:bg-action-soft has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-focus"
+          className="flex min-h-touch cursor-pointer items-start gap-3 rounded-lg border border-border bg-surface p-4 has-[:checked]:border-action has-[:checked]:bg-action-soft has-[:checked]:ring-1 has-[:checked]:ring-action has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-focus"
         >
           <input
             type="radio"
