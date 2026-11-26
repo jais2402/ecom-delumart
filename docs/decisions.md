@@ -19,6 +19,24 @@ On 20 November 2026 the owner asked for open decisions to be made for them. Each
 | 11 | Card-number prefix | `042000` | Begins with 0, a range no payment network issues in | Change one configuration value before any card is issued |
 | 12 | Raw analytics retention on the free database | 30 days, then archive | Keeps the database under its size limit | Raise it on a paid plan |
 | 13 | Tonight's build order | Foundation that can be proven without external accounts: design system, domain logic, database schema and tests, storefront pages on seed data | Everything else needs accounts only the owner can create | — |
+| 14 | Ratings and reviews (not in the PRD; the owner asked for big-marketplace features and delegated product decisions, 26 November 2026) | Owners of a product review it; details below | The most visible missing marketplace feature; kept small and private by default | Hide the product page section and revoke the review functions; the tables can stay |
+
+### 14. Ratings and reviews
+
+| Rule | Choice |
+|---|---|
+| Who may review | Only a player who owns the product (an active ownership row, created by the purchase). Never an owner of the selling company. No job, seed or NPC path writes reviews. |
+| How many | One review per player and product. Saving again edits it: a new version is kept and the review shows "Edited". The author can delete it; the text and versions are deleted for real. |
+| What | Rating 1 to 5 (required); title up to 80 characters and review up to 1,000 (optional; configuration `review_title_max_chars`, `review_body_max_chars`). |
+| Text screening | The listing and store text rules (`packages/core/src/screening`). Anything not screened OK is refused with per-field reasons, because there is no human review queue for reviews; brand-like or shouted text is refused too. No submitted text is echoed. The database refuses links, email addresses and digit runs of ten or more as a backstop. |
+| Limits | 10 review writes an hour per account (web rate limit, `core.rate_hit`). |
+| Public display | Average to one decimal from integer sum and count (sent as `averageTenths`, never a float), count, five distribution bars, newest reviews ten per page. Each shows stars, title, text, the author's public handle if they set one, a "Verified owner" badge and the day (store reporting time zone). Never a user id, order, purchase time or review id. |
+| Timing | A review is public only once the minute of the purchase behind it has ended, like the seller's order views (migration 0060), so it cannot time a sale more precisely than the seller can already. |
+| Cards and rails | A separate public endpoint returns summaries for up to 100 product ids; the catalogue response is unchanged. |
+| Moderation | The Super Admin hides a review with a reason and can restore it (audited). Hidden reviews leave the list and the average; the author still sees theirs as hidden, with the reason. Deleting and writing again does not undo a hide. |
+| Analytics | `review_submitted` and `review_hidden` server events, with no props, user id or text. |
+| Known consequence | A review under a public handle tells everyone that this player owns the product, which is the purpose of a review. The seller already sees each order at minute resolution with no buyer; a handle plus a review day can narrow which order was whose when a product sells rarely. |
+| Not in this round | Reporting a review (use the console for now), helpfulness votes, photos, seller replies. |
 
 ## Cannot be decided for you
 
