@@ -336,6 +336,9 @@ export async function cartWithPreview(pool: Pool, input: CartPreviewInput): Prom
     const productIds = purchasable.map((l) => l.productId);
     let couponCode = input.couponCode ?? null;
     let couponError: ErrorCode | null = null;
+    // checkout validates the coupon before it prices delivery, so when the cart cannot be priced
+    // even without the coupon, the refusal shown is the coupon's, exactly as checkout would give it
+    let couponRefusal: Refusal | null = null;
     for (;;) {
       const resolved = await resolve(c, { productIds, speedBySeller: speeds, couponCode });
       let refused: Refusal;
@@ -398,10 +401,11 @@ export async function cartWithPreview(pool: Pool, input: CartPreviewInput): Prom
       }
       if (couponCode !== null && isCouponRefusal(refused.code)) {
         couponError = codeOf(String(refused.code));
+        couponRefusal = refused;
         couponCode = null;
         continue;
       }
-      return { refused, cart };
+      return { refused: couponRefusal ?? refused, cart };
     }
   });
   if ("refused" in outcome) {

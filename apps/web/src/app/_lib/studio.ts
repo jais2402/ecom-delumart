@@ -68,6 +68,26 @@ export interface Listing {
   stock: { available: number; issued: number; retired: number };
   edition: { supply: number; issued: number } | null;
   nextAction: NextAction;
+  /** The sale state (migration 0081); money fields are decimal strings. */
+  sale: {
+    active: boolean;
+    listPaise: string | null;
+    salePaise: string | null;
+    startedAt: string | null;
+    referencePaise: string | null;
+    referenceCeilingPaise: string | null;
+    canShowReference: boolean;
+    rules: {
+      referenceMinHours: number;
+      referenceLookbackDays: number;
+      priceChangesPerDay: number;
+      priceChangeWindowHours: number;
+      changesRemaining: number;
+      priceMinPaise: string;
+      priceMaxPaise: string;
+      freeDeliveryMinPaise: string | null;
+    };
+  };
 }
 
 export interface ListingDetail extends Listing {
@@ -263,6 +283,8 @@ const STUDIO_ERRORS: Record<string, string> = {
   CAPACITY_EXCEEDED:
     "Your warehouse does not have that much free space. Lower the quantity or free up space.",
   NOT_EDITABLE: "This listing cannot be changed in its current state.",
+  FREE_DELIVERY_UNFUNDED:
+    "Free Standard delivery needs a higher price: the delivery fee comes out of your proceeds.",
   SUBMISSION_LIMIT: "Your shop has used today's submissions. Try again tomorrow.",
   PUBLICATION_PAUSED: "Publishing is paused for now. Nothing was lost. Try again later.",
   COMPANY_FEE_REQUIRED: "Your shop's setup fee has not been paid yet.",

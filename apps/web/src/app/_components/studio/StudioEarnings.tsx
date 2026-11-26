@@ -66,6 +66,10 @@ function Body({ e }: { e: Earnings }) {
         <Heading level={2} size="sm" id="er-summary">
           Last {e.periodDays} days compared with the {e.periodDays} before
         </Heading>
+        <Text size="sm" muted>
+          Gross sales are the selling prices after the discounts you gave. Net earnings are gross sales minus
+          marketplace fees and the delivery you paid for free Standard delivery. Each figure is counted once.
+        </Text>
         <StatGrid
           aria-label={`Last ${e.periodDays} days`}
           data-testid="earnings-stats"
@@ -81,12 +85,17 @@ function Body({ e }: { e: Earnings }) {
               change: changeText(parsePaise(c.grossPaise), parsePaise(p.grossPaise), e.periodDays),
             },
             {
+              label: "Discounts you gave",
+              value: money(c.discountPaise),
+              change: changeText(parsePaise(c.discountPaise), parsePaise(p.discountPaise), e.periodDays),
+            },
+            {
               label: "Marketplace fees",
               value: money(c.feesPaise),
               change: changeText(parsePaise(c.feesPaise), parsePaise(p.feesPaise), e.periodDays),
             },
             {
-              label: "Delivery you paid",
+              label: "Delivery you paid (free Standard delivery)",
               value: money(c.merchantDeliveryPaise),
               change: changeText(
                 parsePaise(c.merchantDeliveryPaise),

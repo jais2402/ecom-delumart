@@ -55,6 +55,7 @@ export interface EarningsTotals {
   orders: number;
   grossPaise: string;
   feesPaise: string;
+  discountPaise: string;
   merchantDeliveryPaise: string;
   netPaise: string;
   distinctBuyers: number;

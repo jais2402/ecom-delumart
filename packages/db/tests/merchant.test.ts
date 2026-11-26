@@ -602,15 +602,26 @@ describe("the merchant side", () => {
       expect(await ref(l.productId)).toBeNull();
     });
 
-    it("US-43: a listing hidden while the earlier price was live was not continuously published", async () => {
+    it("US-43: hidden time counts as no price: a short hide changes nothing, a long one leaves under 24 published hours", async () => {
       const c = await store();
       const l = await publishListing(pool, c, { pricePaise: 1_000n * RUPEE });
       await hideListing(pool, { ...as(admin), productId: l.productId, reason: REASON });
       await restoreListing(pool, { ...as(admin), productId: l.productId, reason: REASON });
       await setProductPrice(pool, { ...as(c.u), productId: l.productId, pricePaise: 800n * RUPEE });
       await backdate(l.productId, "48 hours");
+      // the hide lasted seconds: 48 published hours remain (lowest-prior-price rule, migration 0083)
+      expect(await ref(l.productId)).toBe(1_000n * RUPEE);
+      // hidden for 30 of those 48 hours: 18 published hours remain, under the 24 required
+      await plant(pool, (x) =>
+        x.query(
+          `UPDATE core.listing_hide SET
+             hidden_at = (SELECT min(changed_at) FROM core.price_history WHERE product_id = $1) + interval '1 hour',
+             lifted_at = (SELECT min(changed_at) FROM core.price_history WHERE product_id = $1) + interval '31 hours'
+           WHERE product_id = $1`,
+          [l.productId],
+        ),
+      );
       expect(await ref(l.productId)).toBeNull();
-      // the same history without the hide would show it
       await plant(pool, (x) => x.query("DELETE FROM core.listing_hide WHERE product_id = $1", [l.productId]));
       expect(await ref(l.productId)).toBe(1_000n * RUPEE);
     });

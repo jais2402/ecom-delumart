@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { PASSPORT_V1 } from "@delulu/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { plant } from "../../../packages/db/tests/helpers";
 import * as jobsRoute from "../src/app/api/internal/jobs/run/route";
 import * as decision from "../src/app/api/v1/admin/listings/[id]/decision/route";
 import * as hide from "../src/app/api/v1/admin/listings/[id]/hide/route";
@@ -20,6 +21,7 @@ import * as archive from "../src/app/api/v1/studio/products/[id]/archive/route";
 import * as price from "../src/app/api/v1/studio/products/[id]/price/route";
 import * as revise from "../src/app/api/v1/studio/products/[id]/revise/route";
 import * as studioProduct from "../src/app/api/v1/studio/products/[id]/route";
+import * as salePrice from "../src/app/api/v1/studio/products/[id]/sale-price/route";
 import * as shipping from "../src/app/api/v1/studio/products/[id]/shipping/route";
 import * as stock from "../src/app/api/v1/studio/products/[id]/stock/route";
 import * as submit from "../src/app/api/v1/studio/products/[id]/submit/route";
@@ -74,6 +76,13 @@ const stockCall = (b: Browser, id: string, body: Record<string, unknown>) =>
   b.call(stock.POST, "POST", `/api/v1/studio/products/${id}/stock`, { ...p(id), body });
 const setPrice = (b: Browser, id: string, priceRupees: number) =>
   b.call(price.POST, "POST", `/api/v1/studio/products/${id}/price`, { ...p(id), body: { priceRupees } });
+const setSale = (b: Browser, id: string, salePriceRupees: number, requireReference?: boolean) =>
+  b.call(salePrice.PUT, "PUT", `/api/v1/studio/products/${id}/sale-price`, {
+    ...p(id),
+    body: { salePriceRupees, ...(requireReference === undefined ? {} : { requireReference }) },
+  });
+const endSaleCall = (b: Browser, id: string) =>
+  b.call(salePrice.DELETE, "DELETE", `/api/v1/studio/products/${id}/sale-price`, p(id));
 const reviseCall = (b: Browser, id: string, body: Record<string, unknown>) =>
   b.call(revise.POST, "POST", `/api/v1/studio/products/${id}/revise`, { ...p(id), body });
 const shippingCall = (b: Browser, id: string, body: Record<string, unknown>) =>
@@ -234,6 +243,8 @@ describe("access guards", () => {
     ["POST submit", (b) => submitDraft(b, id)],
     ["POST revise", (b) => reviseCall(b, id, { name: "Other" })],
     ["POST price", (b) => setPrice(b, id, 500)],
+    ["PUT sale-price", (b) => setSale(b, id, 500)],
+    ["DELETE sale-price", (b) => endSaleCall(b, id)],
     ["POST stock", (b) => stockCall(b, id, { action: "RESTOCK", quantity: 1 })],
     ["POST shipping", (b) => shippingCall(b, id, { offersExpress: true })],
     ["POST archive", (b) => archiveCall(b, id)],
@@ -344,6 +355,8 @@ describe("the studio routes", () => {
       ["restock", (id) => stockCall(bOwner.b, id, { action: "RESTOCK", quantity: 1 })],
       ["retire", (id) => stockCall(bOwner.b, id, { action: "RETIRE", quantity: 1 })],
       ["price", (id) => setPrice(bOwner.b, id, 100)],
+      ["sale", (id) => setSale(bOwner.b, id, 100)],
+      ["end sale", (id) => endSaleCall(bOwner.b, id)],
       ["archive", (id) => archiveCall(bOwner.b, id)],
     ];
     for (const [name, call] of tries) {
@@ -393,6 +406,183 @@ describe("the studio routes", () => {
     const archived = await archiveCall(s.b, id);
     expect(archived.json.product).toMatchObject({ status: "ARCHIVED", stock: { available: 0 } });
     expect((await productPage(id)).json).toEqual({ id, status: "UNAVAILABLE" });
+  });
+});
+
+describe("sale price routes (R6.2, US-43)", () => {
+  let s: Awaited<ReturnType<typeof seller>>;
+  beforeAll(async () => {
+    s = await seller();
+  });
+  /** The listing has had its price for `interval` longer (price history never changes: moved as the owner, triggers off). */
+  const ageHistory = (id: string, interval: string) =>
+    plant(app.db.pool, (c) =>
+      c.query("UPDATE core.price_history SET changed_at = changed_at - $2::interval WHERE product_id = $1", [
+        id,
+        interval,
+      ]),
+    );
+
+  it("US-43: PUT puts a live listing on sale at once; the studio sees the sale and the history, the shop only the new price", async () => {
+    const id = await publishedListing(s.b, { priceRupees: 1_000, quantity: 3 });
+    const res = await setSale(s.b, id, 800);
+    expect(res.status).toBe(200);
+    expectPrivate(res);
+    expect(res.json.product).toMatchObject({
+      live: { pricePaise: "80000" },
+      sale: {
+        active: true,
+        listPaise: "100000",
+        salePaise: "80000",
+        referencePaise: null,
+        canShowReference: false,
+      },
+    });
+    expect(arr(res.json.product?.priceHistory).map((h) => [h.reason, h.pricePaise])).toEqual([
+      ["SALE_START", "80000"],
+      ["PUBLISHED", "100000"],
+    ]);
+    const page = await productPage(id);
+    expect(page.json).toMatchObject({ pricePaise: "80000", referencePricePaise: null });
+    for (const word of ["listPaise", "salePaise", "priceHistory", "canShowReference", "SALE_START"]) {
+      expect(page.text, word).not.toContain(word);
+    }
+  });
+
+  it("US-43: the shop shows the struck-through previous price only when it was the published price for 24 hours", async () => {
+    const id = await publishedListing(s.b, { priceRupees: 1_000, quantity: 3 });
+    await ageHistory(id, "25 hours");
+    expect((await setSale(s.b, id, 750, true)).status).toBe(200);
+    expect((await productPage(id)).json).toMatchObject({
+      pricePaise: "75000",
+      referencePricePaise: "100000",
+    });
+    const inCatalog = (await catalogAll()).find((x) => str(x.id) === id);
+    expect(inCatalog).toMatchObject({ pricePaise: "75000", referencePricePaise: "100000" });
+    expect(arr((await storeList(s.handle)).json.items).find((x) => str(x.id) === id)).toMatchObject({
+      pricePaise: "75000",
+      referencePricePaise: "100000",
+    });
+    // ending the sale restores the list price and removes the reference everywhere
+    const ended = await endSaleCall(s.b, id);
+    expect(ended.status).toBe(200);
+    expectPrivate(ended);
+    expect(ended.json.product).toMatchObject({ live: { pricePaise: "100000" }, sale: { active: false } });
+    expect((await productPage(id)).json).toMatchObject({ pricePaise: "100000", referencePricePaise: null });
+  });
+
+  it("US-43: REFERENCE_PRICE_INELIGIBLE (422) when a reference was asked for and does not qualify; nothing changes", async () => {
+    const id = await publishedListing(s.b, { priceRupees: 1_000, quantity: 3 });
+    const refused = await setSale(s.b, id, 800, true);
+    expect(refused.status).toBe(422);
+    expect(refused.json.error).toMatchObject({ code: "REFERENCE_PRICE_INELIGIBLE", retryable: false });
+    expectPrivate(refused);
+    expect((await productPage(id)).json.pricePaise).toBe("100000");
+    expect((await getDraft(s.b, id)).json.product).toMatchObject({ sale: { active: false } });
+    // without the explicit request the sale simply shows the current price
+    expect((await setSale(s.b, id, 800, false)).status).toBe(200);
+    expect((await productPage(id)).json).toMatchObject({ pricePaise: "80000", referencePricePaise: null });
+  });
+
+  it("US-43: refuses a sale price that is not a lower whole-rupee price in range, and a body with other fields", async () => {
+    const id = await publishedListing(s.b, { priceRupees: 1_000, quantity: 3 });
+    for (const rupees of [1_000, 1_200, 99, 0, -5]) {
+      const res = await setSale(s.b, id, rupees);
+      expect(res.status, String(rupees)).toBe(422);
+      expect(res.json.error?.code, String(rupees)).toBe("VALIDATION_FAILED");
+    }
+    const bad = await s.b.call(salePrice.PUT, "PUT", `/api/v1/studio/products/${id}/sale-price`, {
+      ...p(id),
+      body: { salePriceRupees: 800.5 },
+    });
+    expect(bad.status).toBe(400); // a malformed shape is a request error
+    const extra = await s.b.call(salePrice.PUT, "PUT", `/api/v1/studio/products/${id}/sale-price`, {
+      ...p(id),
+      body: { salePriceRupees: 800, listPaise: "1" },
+    });
+    expect(extra.status).toBeGreaterThanOrEqual(400);
+    expect((await productPage(id)).json.pricePaise).toBe("100000");
+    expect((await endSaleCall(s.b, id)).json.error?.code).toBe("NOT_EDITABLE"); // nothing to end
+  });
+
+  it("US-45 R8: a signed-in player without a shop or creator access is refused; another owner gets 404; a missing CSRF token or a foreign Origin is refused and nothing changes", async () => {
+    const id = await publishedListing(s.b, { priceRupees: 1_000, quantity: 3 });
+    const { b: stranger } = await player({ pin: false });
+    const locked = await setSale(stranger, id, 800);
+    expect(locked.status).toBe(403);
+    expect(locked.json.error?.code).toBe("CREATOR_LOCKED");
+    expect((await endSaleCall(stranger, id)).status).toBe(403);
+    const other = await seller();
+    const notMine = await setSale(other.b, id, 800);
+    expect(notMine.status).toBe(404);
+    expect(notMine.json).toEqual((await setSale(other.b, randomUUID(), 800)).json);
+    const token = s.b.csrfToken;
+    s.b.csrfToken = null;
+    expect((await setSale(s.b, id, 800)).status).toBe(403);
+    expect((await endSaleCall(s.b, id)).status).toBe(403);
+    s.b.csrfToken = token;
+    const foreign = await s.b.call(salePrice.PUT, "PUT", `/api/v1/studio/products/${id}/sale-price`, {
+      ...p(id),
+      body: { salePriceRupees: 800 },
+      origin: "https://evil.example",
+    });
+    expect(foreign.status).toBe(403);
+    const foreignEnd = await s.b.call(
+      salePrice.DELETE,
+      "DELETE",
+      `/api/v1/studio/products/${id}/sale-price`,
+      {
+        ...p(id),
+        origin: "https://evil.example",
+      },
+    );
+    expect(foreignEnd.status).toBe(403);
+    expect((await productPage(id)).json.pricePaise).toBe("100000");
+    expect((await getDraft(s.b, id)).json.product).toMatchObject({ sale: { active: false } });
+  });
+
+  it("R6.5: FREE_DELIVERY_UNFUNDED (422) when a sale price or free delivery could not fund the Standard fee; the owner's view carries the configured rules", async () => {
+    const id = await publishedListing(s.b, { priceRupees: 1_000, quantity: 3 });
+    const view = (await getDraft(s.b, id)).json.product;
+    expect(view?.sale).toMatchObject({
+      rules: {
+        referenceMinHours: 24,
+        referenceLookbackDays: 30,
+        priceChangesPerDay: 20,
+        priceChangeWindowHours: 24,
+        changesRemaining: 20,
+        priceMinPaise: "10000",
+        freeDeliveryMinPaise: "105300",
+      },
+    });
+    const refused = await shippingCall(s.b, id, { freeStandardDelivery: true });
+    expect(refused.status).toBe(422);
+    expect(refused.json.error?.code).toBe("FREE_DELIVERY_UNFUNDED");
+    expect(refused.json.error?.message).toContain("1053");
+    expect((await getDraft(s.b, id)).json.product?.freeStandardDelivery).toBe(false);
+    const rich = await publishedListing(s.b, { priceRupees: 5_000, quantity: 3, freeStandardDelivery: true });
+    const sale = await setSale(s.b, rich, 1_000);
+    expect(sale.status).toBe(422);
+    expect(sale.json.error?.code).toBe("FREE_DELIVERY_UNFUNDED");
+    expect((await setSale(s.b, rich, 1_053)).status).toBe(200);
+  });
+
+  it("US-43 (review major 1): raising the price first and cutting later shows no reference through the routes", async () => {
+    const id = await publishedListing(s.b, { priceRupees: 1_000, quantity: 3 });
+    await ageHistory(id, "26 hours");
+    expect((await setPrice(s.b, id, 100_000)).status).toBe(200);
+    await ageHistory(id, "25 hours");
+    expect((await setSale(s.b, id, 50_000)).status).toBe(200);
+    expect((await productPage(id)).json).toMatchObject({ pricePaise: "5000000", referencePricePaise: null });
+    expect((await setSale(s.b, id, 40_000, true)).json.error?.code).toBe("REFERENCE_PRICE_INELIGIBLE");
+  });
+
+  it("US-08: the list price cannot be changed during a sale (end the sale first)", async () => {
+    const id = await publishedListing(s.b, { priceRupees: 1_000, quantity: 3 });
+    await setSale(s.b, id, 800);
+    const res = await setPrice(s.b, id, 1_200);
+    expect(res.status).toBe(409);
+    expect(res.json.error?.code).toBe("NOT_EDITABLE");
   });
 });
 

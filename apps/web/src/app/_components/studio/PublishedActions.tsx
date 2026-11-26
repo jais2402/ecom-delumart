@@ -155,7 +155,21 @@ export function PublishedActions({
             />
           )}
         </FormField>
-        <Button variant="secondary" className="self-start" disabled={busy} onClick={askPrice}>
+        {listing.sale.active ? (
+          <Text size="sm">
+            This listing is on sale. End the sale on the{" "}
+            <a href="/studio/pricing" className="inline-flex min-h-touch items-center text-action underline">
+              Pricing page
+            </a>{" "}
+            before changing its list price.
+          </Text>
+        ) : null}
+        <Button
+          variant="secondary"
+          className="self-start"
+          disabled={busy || listing.sale.active}
+          onClick={askPrice}
+        >
           Change price
         </Button>
       </Section>

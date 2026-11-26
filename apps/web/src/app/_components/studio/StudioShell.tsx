@@ -8,7 +8,16 @@ import { useApiGet } from "../../_lib/use-api";
 import { useRequireAccount } from "../../_lib/use-require-account";
 import { ErrorBlock, LoadingBlock } from "../LoadState";
 
-const SECTIONS = ["overview", "orders", "earnings", "inventory", "coupons", "appeals"] as const;
+const SECTIONS = [
+  "overview",
+  "orders",
+  "earnings",
+  "inventory",
+  "pricing",
+  "shipping",
+  "coupons",
+  "appeals",
+] as const;
 
 /** The sidebar entry for a path; the listing editor (/studio/new, /studio/<id>) belongs to Products. */
 export function currentHref(pathname: string): string {
@@ -52,6 +61,8 @@ export function StudioShell({ children }: { children: ReactNode }) {
         { label: "Orders", href: "/studio/orders" },
         { label: "Earnings", href: "/studio/earnings" },
         { label: "Inventory", href: "/studio/inventory" },
+        { label: "Pricing", href: "/studio/pricing" },
+        { label: "Shipping", href: "/studio/shipping" },
         { label: "Coupons", href: "/studio/coupons" },
         { label: "Appeals", href: "/studio/appeals" },
         { label: "Back to the shop", href: "/" },

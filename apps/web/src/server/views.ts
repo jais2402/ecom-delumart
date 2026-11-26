@@ -466,6 +466,27 @@ export function listingView(l: Listing) {
     stock: { available: l.stock.available, issued: l.stock.issued, retired: l.stock.retired },
     edition: l.edition && { supply: l.edition.supply, issued: l.edition.issued },
     nextAction: l.nextAction,
+    sale: {
+      active: l.sale.active,
+      listPaise: l.sale.listPaise === null ? null : paise(l.sale.listPaise),
+      salePaise: l.sale.salePaise === null ? null : paise(l.sale.salePaise),
+      startedAt: isoOrNull(l.sale.startedAt),
+      referencePaise: l.sale.referencePaise === null ? null : paise(l.sale.referencePaise),
+      referenceCeilingPaise:
+        l.sale.referenceCeilingPaise === null ? null : paise(l.sale.referenceCeilingPaise),
+      canShowReference: l.sale.canShowReference,
+      rules: {
+        referenceMinHours: l.sale.rules.referenceMinHours,
+        referenceLookbackDays: l.sale.rules.referenceLookbackDays,
+        priceChangesPerDay: l.sale.rules.priceChangesPerDay,
+        priceChangeWindowHours: l.sale.rules.priceChangeWindowHours,
+        changesRemaining: l.sale.rules.changesRemaining,
+        priceMinPaise: paise(l.sale.rules.priceMinPaise),
+        priceMaxPaise: paise(l.sale.rules.priceMaxPaise),
+        freeDeliveryMinPaise:
+          l.sale.rules.freeDeliveryMinPaise === null ? null : paise(l.sale.rules.freeDeliveryMinPaise),
+      },
+    },
   };
 }
 
@@ -709,6 +730,7 @@ function earningsTotalsView(t: EarningsTotals) {
     orders: t.orders,
     grossPaise: paise(t.grossPaise),
     feesPaise: paise(t.feesPaise),
+    discountPaise: paise(t.discountPaise),
     merchantDeliveryPaise: paise(t.merchantDeliveryPaise),
     netPaise: paise(t.netPaise),
     distinctBuyers: t.distinctBuyers,

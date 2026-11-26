@@ -199,6 +199,29 @@ function deliveryFee(speed: Speed, isMember: boolean, cfg: PricingConfig): Paise
   return speed === "ZAP" ? base / 2n : 0n;
 }
 
+/**
+ * The lowest whole-rupee price at which a single item with merchant-funded free Standard delivery
+ * still leaves the seller a non-negative credit, i.e. smallest L with L - floor(L * fee% / 100) >= S
+ * (S the Standard fee), never below the configured minimum price (`minPricePaise`, the
+ * `price_min_paise` configuration; the seed ₹100 by default, as the database reads it). Null when no price can fund it
+ * (a 100% fee). A listing priced below this is unbuyable with free delivery: every quote is
+ * refused with DELIVERY_UNAVAILABLE. Coupons can lower a seller's credit further; those are
+ * refused at quote time.
+ */
+export function minPriceForFreeDelivery(
+  cfg: PricingConfig,
+  minPricePaise: Paise = MIN_PRICE_PAISE,
+): Paise | null {
+  validateConfig(cfg);
+  const feePct = BigInt(cfg.feePercent);
+  const s = cfg.deliveryFeePaise.STANDARD;
+  if (s === 0n) return minPricePaise;
+  if (feePct >= 100n) return null;
+  const raw = (100n * (s - 1n)) / (100n - feePct) + 1n;
+  const rounded = ((raw + PAISE_PER_RUPEE - 1n) / PAISE_PER_RUPEE) * PAISE_PER_RUPEE;
+  return rounded < minPricePaise ? minPricePaise : rounded;
+}
+
 export function price(q: Quote): Priced {
   validateConfig(q.cfg);
   validateLines(q.lines);
@@ -318,3 +341,4 @@ export function price(q: Quote): Priced {
 }
 
 export * from "./reference-price";
+export * from "./sale-price";
