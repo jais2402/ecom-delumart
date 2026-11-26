@@ -99,6 +99,10 @@ export function BankChallenge({
           {error ? <p className="text-sm font-medium text-danger">{error}</p> : null}
         </div>
       )}
+      <p className="flex flex-wrap items-center gap-x-2 text-sm text-fg-muted">
+        <span>In-game payment · fictional money</span>
+        <FictionLabel>No real card details</FictionLabel>
+      </p>
       <div className="flex flex-wrap gap-2">
         <Button
           type="submit"
@@ -113,10 +117,6 @@ export function BankChallenge({
           Cancel
         </Button>
       </div>
-      <p className="flex flex-wrap items-center gap-x-2 text-sm text-fg-muted">
-        <span>In-game payment · fictional money</span>
-        <FictionLabel>No real card details</FictionLabel>
-      </p>
     </form>
   );
 }

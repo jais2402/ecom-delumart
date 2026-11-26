@@ -54,7 +54,7 @@ const control =
 /** Two lines of text beside an icon, from 1024px: a small line over a bold one. Hidden from assistive technology; the link carries the name. */
 function Lines({ top, bottom }: { top: string; bottom: string }): ReactNode {
   return (
-    <span aria-hidden="true" className="hidden flex-col text-left leading-tight lg:flex">
+    <span aria-hidden="true" className="hidden flex-col text-left leading-tight xl:flex">
       <span className="text-xs">{top}</span>
       <span className="text-sm font-bold">{bottom}</span>
     </span>
@@ -110,7 +110,6 @@ export function SiteHeader({
             <LogoMark tone="onBand" />
             <span className="sr-only min-[380px]:not-sr-only">DeluluMart</span>
           </a>
-          {delivery ? <DeliveryPill {...delivery} className="max-lg:hidden" /> : null}
           <SearchBar
             variant="pill"
             onSearch={onSearch}
@@ -123,7 +122,7 @@ export function SiteHeader({
           />
           <div className="ml-auto flex min-w-0 items-center gap-1 md:ml-0 md:gap-2">
             {balancePaise !== null ? (
-              <BalancePill balancePaise={balancePaise} tone="band" />
+              <BalancePill balancePaise={balancePaise} tone="band" condense />
             ) : balanceLoading ? (
               <Skeleton className="h-11 w-36 max-w-full bg-band-hover" />
             ) : null}
@@ -161,7 +160,9 @@ export function SiteHeader({
               {onSignOut ? (
                 <button type="button" onClick={onSignOut} className={control}>
                   <Icon icon={LogOut} />
-                  <span className="sr-only md:not-sr-only">Sign out</span>
+                  <span className="sr-only min-[1440px]:not-sr-only min-[1440px]:whitespace-nowrap">
+                    Sign out
+                  </span>
                 </button>
               ) : null}
             </nav>
@@ -171,21 +172,19 @@ export function SiteHeader({
       {hasSubNav ? (
         <div className="border-b border-border bg-surface">
           <div className="mx-auto flex max-w-content items-center gap-2 overflow-x-auto px-4 py-2 md:overflow-visible [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {delivery ? (
-              <DeliveryPill {...delivery} tone="plain" className="shrink-0 max-md:hidden lg:hidden" />
-            ) : null}
+            {delivery ? <DeliveryPill {...delivery} tone="plain" className="shrink-0 max-md:hidden" /> : null}
             {categories && categories.length > 0 ? <CategoryMenu categories={categories} /> : null}
             {services && services.length > 0 ? (
               <LinkMenu label="Services" panelLabel="All services" links={services} />
             ) : null}
             {quickLinks && quickLinks.length > 0 ? (
-              <nav aria-label="Popular departments" className="hidden lg:block">
+              <nav aria-label="Popular departments" className="hidden xl:block">
                 <ul className="flex items-center gap-1">
                   {quickLinks.map((link) => (
                     <li key={link.href}>
                       <a
                         href={link.href}
-                        className="inline-flex min-h-touch items-center rounded-pill px-3 font-body text-sm text-fg hover:bg-action-soft hover:underline"
+                        className="inline-flex min-h-touch items-center whitespace-nowrap rounded-pill px-3 font-body text-sm text-fg hover:bg-action-soft hover:underline"
                       >
                         {link.name}
                       </a>
