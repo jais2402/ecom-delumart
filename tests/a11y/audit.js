@@ -271,9 +271,9 @@ async function addToServerCart(page, productId) {
 }
 
 // A captured balance payment, and a net banking attempt waiting on its code, so the Payments list and the
-// bank inbox have rows to audit. Uses the third product (the first two are in the audit's cart).
-async function makePayments(page, productId) {
-  await page.evaluate(async (id) => {
+// bank inbox have rows to audit. Uses two platform products that no other page of the audit buys.
+async function makePayments(page, bought, waiting) {
+  await page.evaluate(async ({ bought: b, waiting: w }) => {
     const call = async (method, path, body, extra = {}) => {
       const token = (await (await fetch('/api/v1/auth/csrf', { credentials: 'same-origin' })).json()).csrfToken;
       const r = await fetch(path, { method, credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf-token': token, ...extra }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -281,14 +281,14 @@ async function makePayments(page, productId) {
       if (!r.ok) throw new Error(path + ' ' + r.status + ' ' + JSON.stringify(json).slice(0, 160));
       return json;
     };
-    const session = async () => call('POST', '/api/v1/checkout-sessions', { lines: [{ productId: id }], speedBySeller: { SEED: 'STANDARD' } }, { 'idempotency-key': crypto.randomUUID() });
-    const q1 = await session();
+    const session = async (p) => call('POST', '/api/v1/checkout-sessions', { lines: [{ productId: p.id }], speedBySeller: { [p.seller]: 'STANDARD' } }, { 'idempotency-key': crypto.randomUUID() });
+    const q1 = await session(b);
     const a1 = await call('POST', '/api/v1/checkout-sessions/' + q1.id + '/attempts', { method: 'BALANCE' });
     await call('POST', '/api/v1/checkout-sessions/' + q1.id + '/pay', { attemptId: a1.id }, { 'idempotency-key': crypto.randomUUID() });
-    const q2 = await session();
+    const q2 = await session(w);
     await call('POST', '/api/v1/checkout-sessions/' + q2.id + '/attempts', { method: 'NET_BANKING' });
     await call('POST', '/api/v1/checkout-sessions/' + q2.id + '/challenge');
-  }, productId);
+  }, { bought: { id: bought.id, seller: bought.sellerKey }, waiting: { id: waiting.id, seller: waiting.sellerKey } });
 }
 
 // Opens checkout for the product and goes to the bank step of the method, leaving it open for the audit.
@@ -313,6 +313,9 @@ async function toBankStep(page, method) {
 
 (async () => {
   const products = await discoverProducts();
+  // platform products have unlimited stock: the DeluluPay pages are audited with those, so repeated runs never sell out
+  const seed = products.filter((p) => p.sellerKey === 'SEED');
+  if (seed.length < 6) throw new Error('the audit needs six unlimited platform products (run pnpm dev:setup)');
   const browser = await chromium.launch();
   const handle = `audit-${rand()}`;
   const ownerEmail = `audit-owner-${rand()}@example.com`;
@@ -356,8 +359,8 @@ async function toBankStep(page, method) {
       }
       for (const entry of list) {
         if (role === 'mocked') { await page.unroute('**/api/v1/admin/analytics/**').catch(() => {}); await mockAnalytics(page, entry.mockMode || 'data'); }
-        const p = entry.path.replace('{product}', (entry.flow === 'netBanking' ? products[2] : entry.flow === 'approval' ? products[3] : products[0]).id).replace('{handle}', handle).replace('{listing}', ids.live).replace('{draft}', ids.draft);
-        if (entry.payments && !paymentsMade) { await makePayments(page, products[4].id); paymentsMade = true; }
+        const p = entry.path.replace('{product}', (entry.flow === 'netBanking' ? seed[2] : entry.flow === 'approval' ? seed[3] : products[0]).id).replace('{handle}', handle).replace('{listing}', ids.live).replace('{draft}', ids.draft);
+        if (entry.payments && !paymentsMade) { await makePayments(page, seed[4], seed[5]); paymentsMade = true; }
         await page.goto(BASE + p, { waitUntil: 'networkidle' });
         // client screens fill in after the first paint: wait for a heading and for loading to settle
         await page.getByRole('heading', { level: 1 }).first().waitFor();
@@ -372,6 +375,7 @@ async function toBankStep(page, method) {
         const r = await page.evaluate(pageFn);
         const focus = [];
         // screens that move focus to their heading on arrival start tabbing after it, not at the skip link
+        if (entry.flow) await page.evaluate(() => { const b = document.body; b.tabIndex = -1; b.focus(); b.blur(); b.removeAttribute('tabindex'); window.scrollTo(0, 0); });
         const startedOnHeading = await page.evaluate(() => !!document.activeElement && /^H[1-6]$/.test(document.activeElement.tagName));
         await page.evaluate(() => document.activeElement && document.activeElement.blur());
         for (let i = 0; i < 15; i++) {

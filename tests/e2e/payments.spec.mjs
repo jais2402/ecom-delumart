@@ -146,7 +146,9 @@ try {
     const order = ["Delulu Card", "DeluluPay ID", "Net banking", "Bank balance"];
     const methods = names.filter((n) => order.some((label) => n.includes(label)));
     assert.equal(methods.length, 4, "four payment methods expected");
-    order.forEach((label, i) => assert.ok(methods[i]?.includes(label), `${label} should be method ${i + 1}`));
+    for (const [i, label] of order.entries()) {
+      assert.ok(methods[i]?.includes(label), `${label} should be method ${i + 1}`);
+    }
     await page
       .getByText("Fictional money", { exact: false })
       .first()
@@ -219,7 +221,7 @@ try {
       await page.getByRole("button", { name: "Send me a code" }).click();
       const code = await openCode(page);
       await page.getByTestId("inbox-code").waitFor();
-      assert.equal(await page.getByTestId("inbox-code").innerText(), code);
+      assert.equal(await page.getByTestId("inbox-code").textContent(), code);
       const wrong = code === "000000" ? "111111" : "000000";
       await page.getByLabel(/SecureCheck code/).fill(wrong);
       await page.getByRole("button", { name: "Pay", exact: true }).click();
@@ -285,7 +287,7 @@ try {
     assert.equal(await page.getByRole("heading", { level: 1 }).count(), 1, "needs exactly one h1");
     const table = page.getByRole("table", { name: "Payments, newest first" });
     await table.waitFor();
-    const text = await table.innerText();
+    const text = await table.textContent();
     assert.equal((text.match(/Captured/g) ?? []).length, 2, "two captured payments expected");
     assert.equal((text.match(/Failed/g) ?? []).length, 2, "two failed payments expected");
     assert.ok(
