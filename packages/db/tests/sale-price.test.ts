@@ -1,3 +1,11 @@
+import {
+  DEFAULT_PRICING_CONFIG,
+  minPriceForFreeDelivery,
+  type PricePoint,
+  referenceCeiling,
+  referencePrice,
+} from "@delulu/core";
+import fc from "fast-check";
 import type pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { catalogProduct, catalogProducts, storeProducts } from "../src/catalog";
@@ -102,6 +110,7 @@ describe("sale price and merchant-funded delivery (migrations 0080-0082)", () =>
         listPaise: 1_000n * RUPEE,
         salePaise: 800n * RUPEE,
         referencePaise: null, // the list price was live for seconds only
+        referenceCeilingPaise: null,
         canShowReference: false,
       });
       expect((await catalogProduct(pool, l.productId))?.pricePaise).toBe(800n * RUPEE);
@@ -195,23 +204,32 @@ describe("sale price and merchant-funded delivery (migrations 0080-0082)", () =>
       expect(ok.sale.referencePaise).toBe(1_000n * RUPEE);
     });
 
-    it("US-43: canShowReference says exactly what asking for a reference would do (24 hours, a hide breaks it)", async () => {
+    it("US-43: canShowReference and the ceiling say what asking for a reference would do (24 published hours; hidden time does not count)", async () => {
       const c = await store();
       const l = await publishListing(pool, c, { pricePaise: 1_000n * RUPEE });
-      expect((await live(c, l.productId)).sale.canShowReference).toBe(false);
-      await ageHistory(l.productId, "24 hours");
-      expect((await live(c, l.productId)).sale.canShowReference).toBe(true);
-      // a listing hidden while the price was live was not continuously published
+      expect((await live(c, l.productId)).sale).toMatchObject({
+        canShowReference: false,
+        referenceCeilingPaise: null,
+      });
+      await ageHistory(l.productId, "30 hours");
+      expect((await live(c, l.productId)).sale).toMatchObject({
+        canShowReference: true,
+        referenceCeilingPaise: 1_000n * RUPEE,
+      });
+      // hidden for 10 of the 30 hours: 20 published hours remain, under the 24 required
       await hideListing(pool, { ...as(admin), productId: l.productId, reason: REASON });
       await restoreListing(pool, { ...as(admin), productId: l.productId, reason: REASON });
       await plant(pool, (x) =>
         x.query(
-          `UPDATE core.listing_hide SET hidden_at = hidden_at - interval '10 hours',
-                  lifted_at = lifted_at - interval '10 hours' WHERE product_id = $1`,
+          `UPDATE core.listing_hide SET hidden_at = now() - interval '25 hours', lifted_at = now() - interval '15 hours'
+            WHERE product_id = $1`,
           [l.productId],
         ),
       );
-      expect((await live(c, l.productId)).sale.canShowReference).toBe(false);
+      expect((await live(c, l.productId)).sale).toMatchObject({
+        canShowReference: false,
+        referenceCeilingPaise: null,
+      });
       expect(
         await codeOf(
           setSalePrice(pool, {
@@ -222,6 +240,15 @@ describe("sale price and merchant-funded delivery (migrations 0080-0082)", () =>
           }),
         ),
       ).toBe("REFERENCE_PRICE_INELIGIBLE");
+      // a hide of an hour leaves 29 published hours: the reference shows
+      await plant(pool, (x) =>
+        x.query(
+          `UPDATE core.listing_hide SET hidden_at = now() - interval '25 hours', lifted_at = now() - interval '24 hours'
+            WHERE product_id = $1`,
+          [l.productId],
+        ),
+      );
+      expect((await live(c, l.productId)).sale.canShowReference).toBe(true);
     });
 
     it("US-43: ending a sale restores the list price and removes the reference", async () => {
@@ -323,11 +350,11 @@ describe("sale price and merchant-funded delivery (migrations 0080-0082)", () =>
       expect(await versions(l.productId)).toBe(n);
     });
 
-    it("US-08: price changes per listing per day are limited from configuration (RATE_LIMITED), counting sales and price changes", async () => {
+    it("US-08: price changes per listing per day are limited from configuration (RATE_LIMITED); ending a sale is never blocked or counted", async () => {
       await inTx(pool, async (x) => {
         await x.query(
           `INSERT INTO core.config_version (values, effective_from, note)
-           SELECT values || '{"price_changes_per_product_per_day": 4}'::jsonb, now(), 'price change cap test'
+           SELECT values || '{"price_changes_per_product_per_day": 3}'::jsonb, now(), 'price change cap test'
              FROM core.config_version ORDER BY id DESC LIMIT 1`,
         );
       });
@@ -336,28 +363,40 @@ describe("sale price and merchant-funded delivery (migrations 0080-0082)", () =>
         const l = await publishListing(pool, c, { pricePaise: 1_000n * RUPEE });
         const go = (p: bigint) =>
           setSalePrice(pool, { ...as(c.u), productId: l.productId, salePricePaise: p });
+        expect((await live(c, l.productId)).sale.rules).toMatchObject({
+          priceChangesPerDay: 3,
+          changesRemaining: 3,
+        });
         await go(900n * RUPEE); // 1
         await go(800n * RUPEE); // 2
-        await endSale(pool, { ...as(c.u), productId: l.productId }); // 3
-        await setProductPrice(pool, { ...as(c.u), productId: l.productId, pricePaise: 1_100n * RUPEE }); // 4
+        await go(700n * RUPEE); // 3: at the cap
+        expect((await live(c, l.productId)).sale.rules.changesRemaining).toBe(0);
+        expect(await codeOf(go(600n * RUPEE))).toBe("RATE_LIMITED");
+        // fixing a mistake: ending the sale still works at the cap, and writes its history row
+        const ended = await endSale(pool, { ...as(c.u), productId: l.productId });
+        expect(ended.live?.pricePaise).toBe(1_000n * RUPEE);
+        expect(ended.priceHistory[0]?.reason).toBe("SALE_END");
+        // starting a sale and changing the list price stay capped
         expect(await codeOf(go(900n * RUPEE))).toBe("RATE_LIMITED");
         expect(
           await codeOf(
             setProductPrice(pool, { ...as(c.u), productId: l.productId, pricePaise: 1_200n * RUPEE }),
           ),
         ).toBe("RATE_LIMITED");
-        // another listing has its own allowance
+        // the end did not use up an allowance (another listing has its own, and an end counts for none)
         const other = await publishListing(pool, c, { pricePaise: 1_000n * RUPEE });
         expect(
           await codeOf(
             setSalePrice(pool, { ...as(c.u), productId: other.productId, salePricePaise: 900n * RUPEE }),
           ),
         ).toBe("ok");
+        expect(await codeOf(endSale(pool, { ...as(c.u), productId: other.productId }))).toBe("ok");
+        expect((await live(c, other.productId)).sale.rules.changesRemaining).toBe(2);
       } finally {
         await inTx(pool, async (x) => {
           await x.query(
             `INSERT INTO core.config_version (values, effective_from, note)
-             SELECT values - 'price_changes_per_product_per_day', now(), 'price change cap test: restore'
+             SELECT values || '{"price_changes_per_product_per_day": 20}'::jsonb, now(), 'price change cap test: restore'
                FROM core.config_version ORDER BY id DESC LIMIT 1`,
           );
         });
@@ -401,8 +440,8 @@ describe("sale price and merchant-funded delivery (migrations 0080-0082)", () =>
            FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace,
                 unnest(ARRAY['app_web','app_pay','app_jobs','npc_worker','research_ro','anon','authenticated']) r
           WHERE n.nspname = 'core' AND p.proname IN
-                ('product_set_sale_price', 'product_end_sale', 'reference_price', 'reference_price_possible',
-                 'price_change_check')
+                ('product_set_sale_price', 'product_end_sale', 'reference_price', 'reference_ceiling', 'published_low',
+                 'price_change_check', 'min_free_delivery_price', 'free_delivery_check')
             AND has_function_privilege(r, p.oid, 'EXECUTE')
           ORDER BY 1, 2`,
       );
@@ -573,26 +612,102 @@ describe("sale price and merchant-funded delivery (migrations 0080-0082)", () =>
       expect((await checkout(pool, buyer, [p], std(c))).totalPaise).toBe(5_000n * RUPEE + STANDARD_DELIVERY);
     });
 
-    it("R6.5: free delivery that the sale price cannot fund (fee above the seller's proceeds) is refused at quote time with DELIVERY_UNAVAILABLE", async () => {
+    it("R6.5 (review minor 2): a sale price that cannot fund free Standard delivery is refused with FREE_DELIVERY_UNFUNDED, naming the minimum price", async () => {
       const c = await store();
       const l = await publishListing(pool, c, {
         pricePaise: 5_000n * RUPEE,
         quantity: 3,
         freeStandardDelivery: true,
       });
-      await setSalePrice(pool, { ...as(c.u), productId: l.productId, salePricePaise: 500n * RUPEE });
+      const min = minPriceForFreeDelivery(DEFAULT_PRICING_CONFIG) as bigint;
+      expect((await live(c, l.productId)).sale.rules.freeDeliveryMinPaise).toBe(min);
+      const err = await setSalePrice(pool, {
+        ...as(c.u),
+        productId: l.productId,
+        salePricePaise: min - RUPEE,
+      }).then(
+        () => null,
+        (e: unknown) => e as { code: string; message: string },
+      );
+      expect(err?.code).toBe("FREE_DELIVERY_UNFUNDED");
+      expect(err?.message).toContain((min / RUPEE).toString());
+      expect((await live(c, l.productId)).live?.pricePaise).toBe(5_000n * RUPEE);
+      // at the minimum it is buyable: the seller's credit is not negative
+      await setSalePrice(pool, { ...as(c.u), productId: l.productId, salePricePaise: min });
       const buyer = await user(pool);
-      // ₹500 sale: fee ₹25, proceeds ₹475, merchant-funded delivery ₹1,000
+      const co = await checkout(pool, buyer, [asFixture(await live(c, l.productId))], std(c));
+      expect(co.totalPaise).toBe(min);
+      await payFor(pool, buyer, co);
+    });
+
+    it("R6.5 (review minor 2): turning free Standard delivery on, or lowering the price under it, is refused when the live price cannot fund it", async () => {
+      const c = await store();
+      const l = await publishListing(pool, c, { pricePaise: 1_000n * RUPEE, quantity: 3 });
+      const min = minPriceForFreeDelivery(DEFAULT_PRICING_CONFIG) as bigint;
+      expect(min).toBe(1_053n * RUPEE);
       expect(
         await codeOf(
-          createCheckoutSession(pool, {
-            authSessionId: buyer.authSessionId,
-            lines: [{ productId: l.productId }],
-            speedBySeller: std(c),
-            idempotencyKey: key(),
-          }),
+          setProductShipping(pool, { ...as(c.u), productId: l.productId, freeStandardDelivery: true }),
         ),
-      ).toBe("DELIVERY_UNAVAILABLE");
+      ).toBe("FREE_DELIVERY_UNFUNDED");
+      // an unrelated shipping change and turning it off are fine
+      expect(
+        await codeOf(setProductShipping(pool, { ...as(c.u), productId: l.productId, offersExpress: true })),
+      ).toBe("ok");
+      expect(
+        await codeOf(
+          setProductShipping(pool, { ...as(c.u), productId: l.productId, freeStandardDelivery: false }),
+        ),
+      ).toBe("ok");
+      await setProductPrice(pool, { ...as(c.u), productId: l.productId, pricePaise: min });
+      expect(
+        await codeOf(
+          setProductShipping(pool, { ...as(c.u), productId: l.productId, freeStandardDelivery: true }),
+        ),
+      ).toBe("ok");
+      // with free delivery on, a price under the minimum is refused (a sale, or a plain price change)
+      expect(
+        await codeOf(setProductPrice(pool, { ...as(c.u), productId: l.productId, pricePaise: min - RUPEE })),
+      ).toBe("FREE_DELIVERY_UNFUNDED");
+      // during a sale the live (sale) price counts
+      const s = await publishListing(pool, c, { pricePaise: 5_000n * RUPEE, quantity: 3 });
+      await setSalePrice(pool, { ...as(c.u), productId: s.productId, salePricePaise: 1_000n * RUPEE });
+      expect(
+        await codeOf(
+          setProductShipping(pool, { ...as(c.u), productId: s.productId, freeStandardDelivery: true }),
+        ),
+      ).toBe("FREE_DELIVERY_UNFUNDED");
+    });
+
+    it("R6.5: the minimum price for free delivery follows the configuration and equals the pricing function's", async () => {
+      await inTx(pool, async (x) => {
+        await x.query(
+          `INSERT INTO core.config_version (values, effective_from, note)
+           SELECT values || '{"fee_percent": 10, "delivery_fee_paise": {"STANDARD": "250000", "EXPRESS": "1000000", "ZAP": "5000000"}}'::jsonb,
+                  now(), 'free delivery minimum test'
+             FROM core.config_version ORDER BY id DESC LIMIT 1`,
+        );
+      });
+      try {
+        const c = await store();
+        const l = await publishListing(pool, c, { pricePaise: 5_000n * RUPEE, quantity: 3 });
+        const cfg = {
+          ...DEFAULT_PRICING_CONFIG,
+          feePercent: 10,
+          deliveryFeePaise: { ...DEFAULT_PRICING_CONFIG.deliveryFeePaise, STANDARD: 250_000n },
+        };
+        const expected = minPriceForFreeDelivery(cfg) as bigint;
+        expect(expected).not.toBe(minPriceForFreeDelivery(DEFAULT_PRICING_CONFIG));
+        expect((await live(c, l.productId)).sale.rules.freeDeliveryMinPaise).toBe(expected);
+      } finally {
+        await inTx(pool, async (x) => {
+          await x.query(
+            `INSERT INTO core.config_version (values, effective_from, note)
+             SELECT values - 'fee_percent' - 'delivery_fee_paise', now(), 'free delivery minimum test: restore'
+               FROM core.config_version ORDER BY id DESC LIMIT 1`,
+          );
+        });
+      }
     });
   });
 
@@ -659,6 +774,251 @@ describe("sale price and merchant-funded delivery (migrations 0080-0082)", () =>
       // the history says nothing about buyers or sales
       const text = JSON.stringify(r, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
       expect(text).not.toMatch(/buyer|orderRef|sold/i);
+    });
+  });
+
+  // ------------------------------------------------------------------ the lowest-prior-price rule
+  describe("the reference is the lowest price of the last 30 days (review major 1)", () => {
+    it("US-43 (attack 1): raising the price first, waiting 25 hours and cutting shows no reference above the 30-day low", async () => {
+      const c = await store();
+      const l = await publishListing(pool, c, { pricePaise: 1_000n * RUPEE });
+      await ageHistory(l.productId, "26 hours");
+      await setProductPrice(pool, { ...as(c.u), productId: l.productId, pricePaise: 100_000n * RUPEE });
+      await ageHistory(l.productId, "25 hours");
+      const r = await setSalePrice(pool, {
+        ...as(c.u),
+        productId: l.productId,
+        salePricePaise: 50_000n * RUPEE,
+      });
+      expect(await ref(l.productId)).toBeNull();
+      expect(r.sale.referencePaise).toBeNull();
+      // asking for a reference is refused, and nothing is above the low of 1,000 anyway
+      expect(
+        await codeOf(
+          setSalePrice(pool, {
+            ...as(c.u),
+            productId: l.productId,
+            salePricePaise: 40_000n * RUPEE,
+            requireReference: true,
+          }),
+        ),
+      ).toBe("REFERENCE_PRICE_INELIGIBLE");
+      // the only price that could show is the 30-day low, and only below it: nothing here is
+      expect((await live(c, l.productId)).sale.referenceCeilingPaise).toBe(1_000n * RUPEE);
+    });
+
+    it("US-43 (attack 2): inside a sale, raising the sale price for 25 hours and dropping it back shows no reference above the 30-day low", async () => {
+      const c = await store();
+      const l = await publishListing(pool, c, { pricePaise: 1_000n * RUPEE });
+      await ageHistory(l.productId, "48 hours");
+      await setSalePrice(pool, { ...as(c.u), productId: l.productId, salePricePaise: 600n * RUPEE });
+      await ageHistory(l.productId, "1 hour");
+      await setSalePrice(pool, { ...as(c.u), productId: l.productId, salePricePaise: 900n * RUPEE });
+      await ageHistory(l.productId, "25 hours");
+      await setSalePrice(pool, { ...as(c.u), productId: l.productId, salePricePaise: 650n * RUPEE });
+      expect(await ref(l.productId)).toBeNull(); // the 30-day low is 600
+      // below the low it does show the low (never the raised 900 or the list 1,000)
+      await ageHistory(l.productId, "25 hours");
+      await setSalePrice(pool, { ...as(c.u), productId: l.productId, salePricePaise: 500n * RUPEE });
+      expect(await ref(l.productId)).toBe(600n * RUPEE);
+    });
+
+    it("US-43: a low price older than 30 days is forgotten", async () => {
+      const c = await store();
+      const l = await publishListing(pool, c, { pricePaise: 500n * RUPEE });
+      await setProductPrice(pool, { ...as(c.u), productId: l.productId, pricePaise: 1_000n * RUPEE });
+      await ageHistory(l.productId, "10 days"); // the 500 run ended 10 days ago and began longer ago
+      await plant(pool, (x) =>
+        x.query(
+          `UPDATE core.price_history SET changed_at = changed_at - interval '40 days'
+            WHERE product_id = $1 AND price_paise = 50000`,
+          [l.productId],
+        ),
+      );
+      await setSalePrice(pool, { ...as(c.u), productId: l.productId, salePricePaise: 800n * RUPEE });
+      // the sale took effect now: the 500 run (40 to 10 days ago) is inside the 30 days before it
+      expect(await ref(l.productId)).toBeNull();
+      // the earlier prices move 31 days further back: the 500 run is now outside the 30 days
+      await plant(pool, (x) =>
+        x.query(
+          "UPDATE core.price_history SET changed_at = changed_at - interval '31 days' WHERE product_id = $1 AND price_paise <> 80000",
+          [l.productId],
+        ),
+      );
+      expect(await ref(l.productId)).toBe(1_000n * RUPEE);
+    });
+  });
+
+  describe("the database and the TypeScript rule agree (property)", () => {
+    const priceArb = fc.integer({ min: 100, max: 5_000 });
+    const gapArb = fc.integer({ min: 0, max: 400 });
+    const opArb = fc.oneof(
+      fc.record({ kind: fc.constant("LIST" as const), rupees: priceArb, gap: gapArb }),
+      fc.record({ kind: fc.constant("SALE" as const), cut: fc.integer({ min: 1, max: 90 }), gap: gapArb }),
+      fc.record({ kind: fc.constant("END" as const), gap: gapArb }),
+      fc.record({ kind: fc.constant("HIDE" as const), gap: gapArb, hours: fc.integer({ min: 0, max: 200 }) }),
+    );
+
+    it("US-43: for random publish, price, sale and hide histories the catalogue's reference equals referencePrice(), the ceiling equals referenceCeiling(), and a sale asking for a reference succeeds exactly when TypeScript says", async () => {
+      let shown = 0;
+      let refused = 0;
+      await fc.assert(
+        fc.asyncProperty(
+          priceArb,
+          fc.array(opArb, { minLength: 1, maxLength: 8 }),
+          fc.integer({ min: 0, max: 120 }),
+          fc.integer({ min: 100, max: 5_000 }),
+          async (first, ops, idle, candidate) => {
+            const c = await store();
+            const l = await publishListing(pool, c, { pricePaise: BigInt(first) * RUPEE });
+            const pid = l.productId;
+            const count = async (table: string) =>
+              Number(
+                (
+                  await pool.query<{ n: string }>(
+                    `SELECT count(*) AS n FROM ${table} WHERE product_id = $1`,
+                    [pid],
+                  )
+                ).rows[0]?.n,
+              );
+            // hours (from the start of the timeline) of each price row and each hide, in recorded order
+            const priceAt: number[] = [0];
+            const hideAt: [number, number][] = [];
+            let t = 0;
+            let live = l;
+            for (const op of ops) {
+              const before = await count("core.price_history");
+              if (op.kind === "HIDE") {
+                await hideListing(pool, { ...as(admin), productId: pid, reason: REASON });
+                await restoreListing(pool, { ...as(admin), productId: pid, reason: REASON });
+                hideAt.push([t + op.gap, t + op.gap + op.hours]);
+                t += op.gap + op.hours;
+                continue;
+              }
+              const list = live.sale.active
+                ? (live.sale.listPaise as bigint)
+                : (live.live?.pricePaise as bigint);
+              if (op.kind === "LIST") {
+                await codeOf(
+                  setProductPrice(pool, {
+                    ...as(c.u),
+                    productId: pid,
+                    pricePaise: BigInt(op.rupees) * RUPEE,
+                  }),
+                );
+              } else if (op.kind === "SALE") {
+                const target = ((list * BigInt(100 - op.cut)) / 100n / RUPEE) * RUPEE;
+                await codeOf(setSalePrice(pool, { ...as(c.u), productId: pid, salePricePaise: target }));
+              } else {
+                await codeOf(endSale(pool, { ...as(c.u), productId: pid }));
+              }
+              live = await myProduct(pool, { ...as(c.u), productId: pid });
+              if ((await count("core.price_history")) > before) {
+                t += op.gap;
+                priceAt.push(t);
+              }
+            }
+            // give the recorded rows these synthetic times, the last event `idle` hours ago
+            const base = Date.now() - (t + idle) * 3_600_000;
+            const at = (h: number) => new Date(base + h * 3_600_000);
+            await plant(pool, async (x) => {
+              const rows = await x.query<{ id: string }>(
+                "SELECT id FROM core.price_history WHERE product_id = $1 ORDER BY id",
+                [pid],
+              );
+              for (const [i, r] of rows.rows.entries()) {
+                await x.query("UPDATE core.price_history SET changed_at = $2 WHERE id = $1", [
+                  r.id,
+                  at(priceAt[i] ?? 0),
+                ]);
+              }
+              const hides = await x.query<{ id: string }>(
+                "SELECT id FROM core.listing_hide WHERE product_id = $1 ORDER BY hidden_at, id",
+                [pid],
+              );
+              for (const [i, r] of hides.rows.entries()) {
+                const [from, to] = hideAt[i] ?? [0, 0];
+                await x.query("UPDATE core.listing_hide SET hidden_at = $2, lifted_at = $3 WHERE id = $1", [
+                  r.id,
+                  at(from),
+                  at(to),
+                ]);
+              }
+            });
+            const history: PricePoint[] = (
+              await pool.query<{ p: string; at: Date }>(
+                "SELECT price_paise::text AS p, changed_at AS at FROM core.price_history WHERE product_id = $1 ORDER BY id",
+                [pid],
+              )
+            ).rows.map((r) => ({ pricePaise: BigInt(r.p), at: r.at }));
+            const offSale = (
+              await pool.query<{ a: Date; b: Date | null }>(
+                "SELECT hidden_at AS a, lifted_at AS b FROM core.listing_hide WHERE product_id = $1",
+                [pid],
+              )
+            ).rows.map((r) => ({ from: r.a, to: r.b }));
+            // the catalogue (public) answer against the TypeScript rule
+            expect(await ref(pid)).toBe(referencePrice(history, { offSale }));
+            // the owner's ceiling against the TypeScript rule, at the database's own clock
+            const now = (await pool.query<{ n: Date }>("SELECT clock_timestamp() AS n")).rows[0]?.n as Date;
+            const view = await myProduct(pool, { ...as(c.u), productId: pid });
+            const ceiling = referenceCeiling(history, now, { offSale });
+            expect(view.sale.referenceCeilingPaise).toBe(ceiling);
+            expect(view.sale.canShowReference).toBe(ceiling !== null && ceiling > 100n * RUPEE);
+            // a sale price below the list price, asked to carry a reference
+            const liveNow = view.live?.pricePaise as bigint;
+            const listNow = view.sale.active ? (view.sale.listPaise as bigint) : liveNow;
+            const cand = BigInt(candidate) * RUPEE;
+            if (cand >= listNow || cand === liveNow) return;
+            const outcome = await codeOf(
+              setSalePrice(pool, {
+                ...as(c.u),
+                productId: pid,
+                salePricePaise: cand,
+                requireReference: true,
+              }),
+            );
+            if (ceiling !== null && cand < ceiling) {
+              shown += 1;
+              expect(outcome).toBe("ok");
+              expect(await ref(pid)).toBe(ceiling);
+            } else {
+              refused += 1;
+              expect(outcome).toBe("REFERENCE_PRICE_INELIGIBLE");
+            }
+          },
+        ),
+        { numRuns: 40, seed: 20261126 },
+      );
+      expect(shown).toBeGreaterThan(0);
+      expect(refused).toBeGreaterThan(0);
+    }, 300_000);
+  });
+
+  describe("configuration is visible (review minor 5)", () => {
+    it("the reference, allowance and window keys are in the configuration with their defaults, and the owner's view reads them", async () => {
+      const { rows } = await pool.query<{ v: Record<string, unknown> }>(
+        "SELECT values AS v FROM core.config_version ORDER BY id DESC LIMIT 1",
+      );
+      expect(rows[0]?.v).toMatchObject({
+        price_changes_per_product_per_day: 20,
+        price_change_window_hours: 24,
+        reference_price_min_hours: 24,
+        reference_price_lookback_days: 30,
+      });
+      const c = await store();
+      const l = await publishListing(pool, c, { pricePaise: 1_000n * RUPEE });
+      expect((await live(c, l.productId)).sale.rules).toEqual({
+        referenceMinHours: 24,
+        referenceLookbackDays: 30,
+        priceChangesPerDay: 20,
+        priceChangeWindowHours: 24,
+        changesRemaining: 20,
+        priceMinPaise: 100n * RUPEE,
+        priceMaxPaise: 100_000_000_000n,
+        freeDeliveryMinPaise: 1_053n * RUPEE,
+      });
+      expect((await myProducts(pool, as(c.u))).items[0]?.sale.rules.referenceMinHours).toBe(24);
     });
   });
 

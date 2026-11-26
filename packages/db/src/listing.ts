@@ -118,7 +118,23 @@ export interface SaleView {
   salePaise: bigint | null;
   startedAt: Date | null;
   referencePaise: bigint | null;
+  /** A price set now below this shows it as the "was" price; null when none could show yet. */
+  referenceCeilingPaise: bigint | null;
   canShowReference: boolean;
+  /** The configuration in force (migration 0083), so screens never hold constants of their own. */
+  rules: SaleRules;
+}
+
+export interface SaleRules {
+  referenceMinHours: number;
+  referenceLookbackDays: number;
+  priceChangesPerDay: number;
+  priceChangeWindowHours: number;
+  changesRemaining: number;
+  priceMinPaise: bigint;
+  priceMaxPaise: bigint;
+  /** The lowest price that funds free Standard delivery; null when none can. */
+  freeDeliveryMinPaise: bigint | null;
 }
 
 export type PriceChangeReason =
@@ -260,6 +276,7 @@ function listingOf(raw: unknown): Listing {
 
 function saleOf(raw: unknown): SaleView {
   const j = (raw ?? {}) as Json;
+  const r = (j.rules ?? {}) as Json;
   const money = (v: unknown): bigint | null => (v === null || v === undefined ? null : BigInt(String(v)));
   return {
     active: j.active === true,
@@ -267,7 +284,18 @@ function saleOf(raw: unknown): SaleView {
     salePaise: money(j.salePaise),
     startedAt: dateOrNull(j.startedAt),
     referencePaise: money(j.referencePaise),
+    referenceCeilingPaise: money(j.referenceCeilingPaise),
     canShowReference: j.canShowReference === true,
+    rules: {
+      referenceMinHours: Number(r.referenceMinHours),
+      referenceLookbackDays: Number(r.referenceLookbackDays),
+      priceChangesPerDay: Number(r.priceChangesPerDay),
+      priceChangeWindowHours: Number(r.priceChangeWindowHours),
+      changesRemaining: Number(r.changesRemaining),
+      priceMinPaise: money(r.priceMinPaise) ?? 0n,
+      priceMaxPaise: money(r.priceMaxPaise) ?? 0n,
+      freeDeliveryMinPaise: money(r.freeDeliveryMinPaise),
+    },
   };
 }
 

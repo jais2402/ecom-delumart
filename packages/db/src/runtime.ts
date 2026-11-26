@@ -187,6 +187,7 @@ export {
   restoreListing,
   retireUnits,
   reviseProduct,
+  type SaleRules,
   type SaleView,
   setProductPrice,
   setProductShipping,

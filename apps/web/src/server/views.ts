@@ -472,7 +472,20 @@ export function listingView(l: Listing) {
       salePaise: l.sale.salePaise === null ? null : paise(l.sale.salePaise),
       startedAt: isoOrNull(l.sale.startedAt),
       referencePaise: l.sale.referencePaise === null ? null : paise(l.sale.referencePaise),
+      referenceCeilingPaise:
+        l.sale.referenceCeilingPaise === null ? null : paise(l.sale.referenceCeilingPaise),
       canShowReference: l.sale.canShowReference,
+      rules: {
+        referenceMinHours: l.sale.rules.referenceMinHours,
+        referenceLookbackDays: l.sale.rules.referenceLookbackDays,
+        priceChangesPerDay: l.sale.rules.priceChangesPerDay,
+        priceChangeWindowHours: l.sale.rules.priceChangeWindowHours,
+        changesRemaining: l.sale.rules.changesRemaining,
+        priceMinPaise: paise(l.sale.rules.priceMinPaise),
+        priceMaxPaise: paise(l.sale.rules.priceMaxPaise),
+        freeDeliveryMinPaise:
+          l.sale.rules.freeDeliveryMinPaise === null ? null : paise(l.sale.rules.freeDeliveryMinPaise),
+      },
     },
   };
 }
