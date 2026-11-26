@@ -35,6 +35,20 @@ export {
   updateAddress,
 } from "./address";
 export {
+  type AdminActionOutcome,
+  type AdminActionPage,
+  type AdminActionScope,
+  type AdminActionView,
+  type Announcement,
+  adminActions,
+  adminConfigOverview,
+  type ConfigKeyView,
+  type ConfigOverview,
+  cancelAdminAction,
+  proposeConfigChange,
+  publicAnnouncements,
+} from "./admin-actions";
+export {
   type AnalyticsFunnel,
   type AnalyticsOverview,
   type AnalyticsPlaces,
@@ -137,9 +151,11 @@ export {
   registerAppSession,
 } from "./deployment";
 export {
+  type AdminActionsRun,
   type AnalyticsRollupDay,
   acceptJobsRequest,
   applyScreening,
+  executeDueAdminActions,
   moderationSafetyNet,
   type PendingScreening,
   pendingScreenings,

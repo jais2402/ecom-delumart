@@ -95,7 +95,9 @@ describe("R7 Economy: the configuration allow-list", () => {
         bad,
       ).toBe("CONFIG_VALUE_INVALID");
     const fee = spec("fee_percent");
-    expect(codeOf(() => validateConfigValue("fee_percent", String(fee.max + 1n)))).toBe("CONFIG_VALUE_INVALID");
+    expect(codeOf(() => validateConfigValue("fee_percent", String(fee.max + 1n)))).toBe(
+      "CONFIG_VALUE_INVALID",
+    );
     expect(codeOf(() => validateConfigValue("fee_percent", String(fee.max)))).toBe("none");
     expect(codeOf(() => validateConfigValue("fee_percent", "0"))).toBe("none");
   });
