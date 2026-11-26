@@ -39,7 +39,7 @@ describe("US-60: the delayed-action rules (R16.6)", () => {
   });
 
   it("only known kinds exist; a platform coupon, minting or reversal is not one yet", () => {
-    expect([...ADMIN_ACTION_KINDS]).toEqual(["config.set"]);
+    expect([...ADMIN_ACTION_KINDS]).toEqual(["config.set", "payment_method.set"]);
   });
 
   it("stable error codes for the queue exist", () => {

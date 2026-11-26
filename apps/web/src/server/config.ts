@@ -82,6 +82,21 @@ export const SERVER_CONFIG = {
     checkoutActor: { scope: "checkout.create.actor", by: "actor", limit: 10, windowSeconds: 60 },
     /** Pay calls per account (LLD: purchase attempts 10 / minute / account). */
     payActor: { scope: "checkout.pay.actor", by: "actor", limit: 10, windowSeconds: 60 },
+    /**
+     * The authentication step (LLD §11.2; migration 0101): codes and approval requests asked for, and
+     * codes or decisions sent, per account. The database also caps codes at 5 an hour per account and
+     * wrong tries at 3 per payment, so these are the outer ring.
+     */
+    challengeIssueActor: { scope: "payment.challenge.issue.actor", by: "actor", limit: 20, windowSeconds: 3_600 },
+    challengeVerifyActor: { scope: "payment.challenge.verify.actor", by: "actor", limit: 30, windowSeconds: 60 },
+    /**
+     * The same, per client address, counted ONLY for requests that already carry a live sign-in session
+     * (route() would otherwise count an address before authentication, and a stranger could use up the
+     * allowance of everyone behind one shared address). Generous: many players share a carrier address.
+     */
+    challengeAddress: { scope: "payment.challenge.address", by: "address", limit: 600, windowSeconds: 3_600 },
+    /** Reads of the bank inbox and the Payments list per account (polling while a bank step waits). */
+    paymentReadActor: { scope: "payment.read.actor", by: "actor", limit: 120, windowSeconds: 60 },
     /** Saves and unsaves per account. */
     saveWriteActor: { scope: "saves.write.actor", by: "actor", limit: 60, windowSeconds: 60 },
     /** Passport quiz answers and concept submissions per account. */

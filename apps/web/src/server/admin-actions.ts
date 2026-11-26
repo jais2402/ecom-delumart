@@ -33,6 +33,7 @@ export function actionView(a: AdminActionView) {
     kind: a.kind,
     key: a.key,
     value: a.value,
+    ...(a.details === undefined ? {} : { details: a.details }),
     reason: a.reason,
     state: a.state,
     proposedAt: a.proposedAt,

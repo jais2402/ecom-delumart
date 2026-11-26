@@ -39,6 +39,11 @@ describe("analytics event names", () => {
         // Super Admin configuration changes (decisions.md #16): written by the database when a
         // delayed action runs; no props, no user id, no values
         "console_config_changed",
+        // DeluluPay (migration 0103): server events with one `method` prop
+        "payment_method_selected",
+        "payment_challenge_issued",
+        "payment_challenge_passed",
+        "payment_challenge_failed",
       ].sort(),
     );
   });
