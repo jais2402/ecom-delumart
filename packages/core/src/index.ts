@@ -9,6 +9,7 @@ export * from "./identity/index";
 export * from "./listing/index";
 export * from "./money/index";
 export * from "./passport/index";
+export * from "./pay/index";
 export * from "./pin/index";
 export * from "./policy/index";
 export * from "./pricing/index";

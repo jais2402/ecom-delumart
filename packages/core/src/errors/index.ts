@@ -95,6 +95,13 @@ export const ERROR_CODES = [
   "ADMIN_ACTION_LIMIT",
   "CONFIG_KEY_UNKNOWN",
   "CONFIG_VALUE_INVALID",
+  // DeluluPay simulator (PRD R4, R10; migrations 0100-0103): the method is over its per-attempt or
+  // per-day limit; the code was wrong or ran out of time; the bank (a test scenario or a switch)
+  // could not be reached
+  "METHOD_LIMIT_EXCEEDED",
+  "CHALLENGE_FAILED",
+  "CHALLENGE_EXPIRED",
+  "BANK_UNAVAILABLE",
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
