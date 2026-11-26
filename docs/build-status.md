@@ -82,7 +82,7 @@ node tests/a11y/audit.js
 | Delivery addresses | Up to 5 per player, encrypted on the web server, chosen at checkout with the fictional spot pre-selected, copied onto the order, never shown to sellers, never affecting price; deleting one wipes it from past orders | Address suites; address journey |
 | Jobs | Signed, replay-protected jobs endpoint; the jobs database role has no direct table access and works only through seven narrow functions; watchdog with a 5-second floor | Generated privilege test over every application table |
 | Web server | Typed configuration with server-only secrets, separate database pools per role, opaque session cookie, session-bound CSRF token and origin check, uniform error envelope, database-backed rate limits, content security policy with per-request nonce, private pages uncacheable | 462 web tests against PostgreSQL; production build checked for secrets in browser code |
-| Ratings and reviews | Owners review what they bought (migration 0078, decisions.md #14): one per product, versions on edit, delete, screening, public average and bars from integer sums, visible only after the purchase minute, Super Admin hide and restore; product page section and console page | `reviews` suites in db and web; `tests/e2e/reviews.spec.mjs` |
+| Ratings and reviews | Owners review what they bought (migrations 0078-0079, decisions.md #14): one per product, versions on edit, delete, screening, public average and bars from integer sums, public from the next reporting day, Super Admin hide and restore; product page section and console page | `reviews` suites in db and web; `tests/e2e/reviews.spec.mjs` |
 | Screens | Storefront, sign-in and onboarding, cart, checkout, receipt and tracking, account, selling hub, passport, shop registration, public shop page, studio (products, orders, earnings, inventory, coupons, appeals), console (moderation, reports, analytics) | Seven browser journeys (21, 19, 15, 17, 15, 10 and 9 steps) |
 | Process | Standards, test catalogue, review mechanism, project agents with model tiers | `docs/engineering-standards.md`, `CLAUDE.md`, `.claude/agents/` |
 
@@ -140,3 +140,6 @@ Nine independent adversarial reviews, each followed by a fix round with tests th
 - **One browser journey (`selling.spec`) timed out once** in a round 7 run and passed on every re-run; treated as flaky, cause not found.
 - **Design document drift.** `system-design/low-level-design.md` predates much of the code; the migrations and tests are the source of truth.
 - **Product art** is generated illustration, a placeholder.
+- **Reviews and account deletion.** Reviews reference the author's profile; the future account-deletion path must delete them (text and versions) before the profile goes.
+- **Reviews and reversals.** Any future refund or reversal that revokes an ownership must also hide or detach that buyer's review (today a revoked ownership only drops it from the public list), so a review cannot identify a reversed purchase.
+- **Hidden reviews in caches.** Public review answers are cached for up to 30 seconds, so a hidden review can show for up to a minute.
