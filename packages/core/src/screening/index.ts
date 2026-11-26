@@ -47,7 +47,10 @@ export type ScreenCode =
   | "OFFICIAL"
   | "BRAND"
   | "CAPS"
-  | "WATCH";
+  | "WATCH"
+  // format or separator characters that hide text (zero-width, bidi controls, BOM, line and
+  // paragraph separators); review round 1, M1
+  | "INVISIBLE";
 
 export interface ScreenReason {
   field: string;
@@ -59,7 +62,14 @@ export interface ScreenResult {
   reasons: ScreenReason[];
 }
 
-const REJECT_CODES: ReadonlySet<ScreenCode> = new Set(["LINK", "EMAIL", "PHONE", "PAYMENT", "BLOCKED_TERM"]);
+const REJECT_CODES: ReadonlySet<ScreenCode> = new Set([
+  "INVISIBLE",
+  "LINK",
+  "EMAIL",
+  "PHONE",
+  "PAYMENT",
+  "BLOCKED_TERM",
+]);
 
 /** Tunables of the screening rules (CLAUDE.md invariant 10). */
 export const SCREENING_CONFIG = {
@@ -134,9 +144,43 @@ function mapChars(s: string, table: Readonly<Record<string, string>>): string {
   return out;
 }
 
-/** Compatibility forms, lower case, no accents, Latin look-alikes. Repeats kept. */
+/**
+ * Every decimal digit of any script (Devanagari ९, Bengali ৯, Arabic-Indic ٩, ...) as its ASCII
+ * digit (review round 1, M1: NFKC folds fullwidth digits but not these). Unicode keeps each
+ * script's digits as one run of ten code points from 0 to 9.
+ */
+export function asciiDigits(text: string): string {
+  return text.replace(/\p{Nd}/gu, (ch) => {
+    let cp = ch.codePointAt(0) ?? 0;
+    let value = 0;
+    while (value < 9 && /\p{Nd}/u.test(String.fromCodePoint(cp - 1))) {
+      cp -= 1;
+      value += 1;
+    }
+    return String(value);
+  });
+}
+
+/** Indic scripts (U+0900-U+0DFF) use ZWJ and ZWNJ inside words (half-forms, chillus). */
+const INDIC = /[\u0900-\u0DFF]/u;
+
+/**
+ * Text that hides characters: any format character (\p{Cf}: zero-width spaces and joiners, bidi
+ * controls, BOM, soft hyphen, word joiner) or line or paragraph separator, except a ZWJ or ZWNJ
+ * written right after an Indic letter or sign.
+ */
+export function hasInvisible(text: string): boolean {
+  const chars = [...text];
+  return chars.some((ch, i) => {
+    if (!/[\p{Cf}\p{Zl}\p{Zp}]/u.test(ch)) return false;
+    if ((ch === "\u200C" || ch === "\u200D") && i > 0 && INDIC.test(chars[i - 1] ?? "")) return false;
+    return true;
+  });
+}
+
+/** Compatibility forms, ASCII digits, lower case, no accents, Latin look-alikes. Repeats kept. */
 function baseForm(text: string): string {
-  const lower = text.normalize("NFKC").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  const lower = asciiDigits(text.normalize("NFKC")).toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
   return mapChars(lower, LOOKALIKES);
 }
 
@@ -234,6 +278,12 @@ const LINK_PATTERNS: readonly RegExp[] = [
   /\bwww\s*\./u,
   new RegExp(`[a-z0-9-]+\\.${TLD}\\b`, "u"),
   new RegExp(`[a-z0-9-]+\\s*(?:\\(dot\\)|\\[dot\\]|\\{dot\\}|\\sdot\\s)\\s*${TLD}\\b`, "u"),
+  // review round 1, M1: any dotted domain-like word ("evil.ru"), whatever its ending: two or more
+  // characters, a dot, two or more letters. A full stop followed by a space ("fine. great") is
+  // prose, and so is a one-letter abbreviation ("H.No.", "S.No.", "e.g.", common in addresses)
+  /\p{L}[\p{L}\p{N}-]+\.\p{L}{2,}/u,
+  // a spelled-out address with a path: "evil dot ru slash x"
+  /\bdot\s+\p{L}{2,3}\s+slash\b/u,
 ];
 
 const EMAIL_PATTERNS: readonly RegExp[] = [
@@ -278,6 +328,7 @@ function screenOne(text: string): ScreenCode[] {
   const base = baseForm(text);
   const t = tokens(text);
   const codes: ScreenCode[] = [];
+  if (hasInvisible(text)) codes.push("INVISIBLE");
   if (LINK_PATTERNS.some((r) => r.test(base))) codes.push("LINK");
   if (EMAIL_PATTERNS.some((r) => r.test(base))) codes.push("EMAIL");
   if (phoneLike(base)) codes.push("PHONE");

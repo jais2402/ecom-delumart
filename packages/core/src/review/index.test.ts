@@ -1,6 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { DomainError } from "../errors/index";
+import { BYPASS_ATTACKS, NOT_A_CARD_NUMBER } from "../screening/attack-cases";
 import {
   averageTenths,
   checkReview,
@@ -62,7 +63,7 @@ describe("review input (ratings and reviews, decisions.md #14)", () => {
       [{ body: "see www.example.com for more" }, "body:LINK"],
       [{ title: "write to moon@example.com" }, "title:EMAIL"],
       [{ body: "call 98765 43210 now" }, "body:PHONE"],
-      [{ body: "my card 4111 1111 1111 1111" }, "body:PHONE"],
+      [{ body: `my card ${NOT_A_CARD_NUMBER}` }, "body:PHONE"],
     ];
     for (const [fields, expected] of cases) {
       const result = checkReview({ rating: 2, ...fields });
@@ -70,9 +71,24 @@ describe("review input (ratings and reviews, decisions.md #14)", () => {
       if (!result.ok) {
         expect(result.problems.map((p) => `${p.field}:${p.code}`)).toContain(expected);
         expect(JSON.stringify(result.problems)).not.toContain("example");
-        expect(JSON.stringify(result.problems)).not.toContain("4111");
+        expect(JSON.stringify(result.problems)).not.toContain("1234");
       }
     }
+  });
+
+  it("M1: every reported screening bypass is refused in a title and in a body", () => {
+    for (const [text, code] of BYPASS_ATTACKS) {
+      expect(codes({ rating: 3, body: text }), text).toContain(`body:${code}`);
+      expect(codes({ rating: 3, title: text }), text).toContain(`title:${code}`);
+    }
+  });
+
+  it("minor 1: a title is one line: line and paragraph separators and hidden format characters are refused in title and body", () => {
+    expect(codes({ rating: 3, title: "one\u2028two" })).toContain("title:INVISIBLE");
+    expect(codes({ rating: 3, title: "one\u2029two" })).toContain("title:INVISIBLE");
+    expect(codes({ rating: 3, body: "one\u2029two" })).toContain("body:INVISIBLE");
+    expect(codes({ rating: 3, body: "nice\u200Blamp" })).toContain("body:INVISIBLE");
+    expect(codes({ rating: 3, body: "first line\nsecond line" })).toEqual([]);
   });
 
   it("REV-2: text the screening would send to a person (not OK) is refused too: there is no review queue", () => {

@@ -11,7 +11,11 @@
 import { DomainError } from "../errors/index";
 import { screenText } from "../screening/index";
 
-/** Tunables (CLAUDE.md invariant 10). The database reads the same keys from configuration. */
+/**
+ * Tunables (CLAUDE.md invariant 10). THE one source of the review limits: the database's
+ * core.review_limit (migration 0079) defaults to these same numbers under the configuration keys
+ * named here, clamped to its column and page ceilings, and a database test checks they agree.
+ */
 export const REVIEW_RULES = {
   rating: { min: 1, max: 5 },
   /** `review_title_max_chars` */
@@ -20,6 +24,10 @@ export const REVIEW_RULES = {
   bodyMaxChars: 1000,
   /** Reviews per public page (`review_page_size`). */
   pageSize: 10,
+  /** Reviews per console page (`review_admin_page_size`). */
+  adminPageSize: 20,
+  /** Product ids one summaries call takes (`review_summary_max`). */
+  summaryMax: 100,
 } as const;
 
 export type ReviewField = "rating" | "title" | "body";
