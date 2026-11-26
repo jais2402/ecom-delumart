@@ -77,6 +77,9 @@ try {
   );
 
   const body = "{}";
+  // The jobs endpoint refuses a repeated signature as a replay, and the signature covers only the
+  // second and the body; wait for a fresh second so two runs in a row are both accepted.
+  await new Promise((resolveWait) => setTimeout(resolveWait, 1_100 - (Date.now() % 1_000)));
   const timestamp = String(Math.floor(Date.now() / 1000));
   const signature = createHmac("sha256", jobsKey()).update(`${timestamp}.${body}`).digest("hex");
   const response = await fetch(`${BASE_URL}/api/internal/jobs/run`, {
