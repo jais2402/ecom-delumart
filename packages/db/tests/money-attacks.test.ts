@@ -2533,6 +2533,9 @@ describe("money attacks (security review)", () => {
       "core.coupon_lookup_failure",
       "core.creator_entitlement",
       "core.inventory_unit",
+      // ratings and reviews (0078): written only by the owner-run review commands
+      "core.product_review",
+      "core.product_review_version",
     ];
     const COUNTERS: [string, string][] = [
       ["core.product", "available_units"],
@@ -3128,6 +3131,10 @@ describe("money attacks (security review)", () => {
         "core.admin_moderation_queue(uuid,integer)",
         "core.admin_report_resolve(uuid,text,text)",
         "core.admin_reports(uuid,integer)",
+        // 0078: Super Admin review moderation (each refuses anyone but the Super Admin; no money moves)
+        "core.admin_review_hide(uuid,text)",
+        "core.admin_review_restore(uuid,text)",
+        "core.admin_reviews(text,integer)",
         "core.admin_set_switch(text,boolean,text)",
         // sixth review (0046): the console's status (Super Admin only)
         "core.admin_status()",
@@ -3173,6 +3180,8 @@ describe("money attacks (security review)", () => {
         "core.my_product(uuid)",
         "core.my_products(text,uuid,integer)",
         "core.my_reports()",
+        // 0078: the actor's own review of a product and whether they may write one
+        "core.my_review(uuid)",
         "core.my_saves(uuid,integer)",
         "core.my_seller_order(text)",
         "core.my_seller_orders(text,integer)",
@@ -3192,6 +3201,9 @@ describe("money attacks (security review)", () => {
         "core.product_archive(uuid)",
         "core.product_restock(uuid,integer)",
         "core.product_retire_units(uuid,integer)",
+        // 0078: public ratings and reviews (no user id, order or time finer than a day)
+        "core.product_review_summaries(uuid[])",
+        "core.product_reviews(uuid,integer)",
         "core.product_revise(uuid,text,text,text,text,integer)",
         "core.product_set_price(uuid,bigint)",
         "core.product_set_shipping(uuid,boolean,boolean)",
@@ -3207,6 +3219,9 @@ describe("money attacks (security review)", () => {
         // 0033: the actor's own relief status
         "core.relief_status()",
         "core.reveal_card_number(uuid)",
+        // 0078: the actor's own review of a product they own (no money moves)
+        "core.review_delete(uuid)",
+        "core.review_save(uuid,integer,text,text)",
         "core.save_product(uuid)",
         "core.set_coupon_status(uuid,text)",
         "core.store_by_handle(text)",

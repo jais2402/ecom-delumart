@@ -265,6 +265,28 @@ export {
 export { type RateHitInput, rateHit } from "./rate";
 export { claimRelief, type ReliefClaim, type ReliefReason, type ReliefStatus, reliefStatus } from "./relief";
 export {
+  type AdminReview,
+  type AdminReviewFilter,
+  type AdminReviewPage,
+  adminReviews,
+  deleteReview,
+  hideReview,
+  type MyReview,
+  myReview,
+  type OwnReview,
+  type ProductReviews,
+  type PublicReview,
+  productReviews,
+  REVIEW_PAGE_MAX,
+  REVIEW_SUMMARY_MAX,
+  type ReviewIneligibility,
+  type ReviewSummary,
+  restoreReview,
+  reviewSummaries,
+  type SavedReview,
+  saveReview,
+} from "./review";
+export {
   type AppealResolution,
   adminReports,
   blockStore,
