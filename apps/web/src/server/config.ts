@@ -84,7 +84,8 @@ export const SERVER_CONFIG = {
     payActor: { scope: "checkout.pay.actor", by: "actor", limit: 10, windowSeconds: 60 },
     /**
      * The authentication step (LLD §11.2; migration 0101): codes and approval requests asked for, and
-     * codes or decisions sent, per account. The database also caps codes at 5 an hour per account and
+     * codes or decisions sent, per account only: an address-keyed counter would let one free account lock
+     * out everyone behind a shared address (decisions.md #17). The database also caps codes at 10 an hour per account and
      * wrong tries at 3 per payment, so these are the outer ring.
      */
     challengeIssueActor: {
@@ -99,12 +100,6 @@ export const SERVER_CONFIG = {
       limit: 30,
       windowSeconds: 60,
     },
-    /**
-     * The same, per client address, counted ONLY for requests that already carry a live sign-in session
-     * (route() would otherwise count an address before authentication, and a stranger could use up the
-     * allowance of everyone behind one shared address). Generous: many players share a carrier address.
-     */
-    challengeAddress: { scope: "payment.challenge.address", by: "address", limit: 600, windowSeconds: 3_600 },
     /** Reads of the bank inbox and the Payments list per account (polling while a bank step waits). */
     paymentReadActor: { scope: "payment.read.actor", by: "actor", limit: 120, windowSeconds: 60 },
     /** Saves and unsaves per account. */

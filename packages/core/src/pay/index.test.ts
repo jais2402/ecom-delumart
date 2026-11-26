@@ -27,6 +27,7 @@ describe("PRD R4.3 decline reasons", () => {
     "METHOD_LIMIT_EXCEEDED",
     "BANK_UNAVAILABLE",
     "CHECKOUT_EXPIRED",
+    "TEST_INSUFFICIENT_FUNDS",
   ] as const;
 
   it("US-34: every PRD decline reason has wording that says no fictional money moved", () => {
@@ -91,7 +92,7 @@ describe("PRD R4.4 challenge rules", () => {
     expect(CHALLENGE_RULES.tries).toBe(3);
     expect(CHALLENGE_RULES.resendSeconds).toBe(30);
     expect(CHALLENGE_RULES.codeLength).toBe(6);
-    expect(CHALLENGE_RULES.codesPerHour).toBe(5);
+    expect(CHALLENGE_RULES.codesPerHour).toBe(10);
   });
 });
 
@@ -121,6 +122,23 @@ describe("PRD R4.5 and R4.2: DeluluPay IDs and real payment data", () => {
       "password hunter2",
     ];
     for (const text of real) expect(looksLikeRealPaymentData(text), text).toBe(true);
+  });
+
+  it("US-37: a dated coupon code is not mistaken for an expiry, while card-like runs and real patterns still are", () => {
+    for (const ok of ["SAVE-10-25", "SAVE1025", "FLAT-12-24", "WINTER 10-25"]) {
+      expect(looksLikeRealPaymentData(ok), ok).toBe(false);
+    }
+    for (const bad of [
+      "12-27",
+      "08-2029",
+      "12/27",
+      "SAVE 12/27",
+      "4111-1111-1111-1111",
+      "cvv123",
+      "PIN 1234",
+    ]) {
+      expect(looksLikeRealPaymentData(bad), bad).toBe(true);
+    }
   });
 
   it("US-37: ordinary codes and a DeluluPay ID are not flagged", () => {

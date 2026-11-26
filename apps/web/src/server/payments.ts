@@ -14,9 +14,6 @@ import type {
   PaymentRow,
 } from "@delulu/db/runtime";
 import { z } from "zod";
-import { clientAddress } from "./client-address";
-import { env } from "./env";
-import { enforceRate, RATE_RULES } from "./rate-limit";
 
 /**
  * DeluluPay request schemas and response shapes (PRD R4, R10). Each view copies named fields only.
@@ -67,14 +64,6 @@ export const paymentsQuery = z.object({
     .pipe(z.number().int().min(1).max(50))
     .optional(),
 });
-
-/**
- * Counts the request against the per-address allowance of the authentication step. Called only once the
- * route has a live session, so an unauthenticated stranger cannot use up anyone's allowance.
- */
-export async function enforceChallengeAddress(request: Request): Promise<void> {
-  await enforceRate(RATE_RULES.challengeAddress, clientAddress(request, env().trustedProxyHops));
-}
 
 export function attemptView(a: PaymentAttemptView) {
   const reason = a.failureCode === null ? null : describeFailure(a.failureCode);

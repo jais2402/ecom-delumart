@@ -120,7 +120,11 @@ export async function cancelPaymentAttempt(
 
 /** A stored failure code as the DomainError the API answers with; the wording says no money moved. */
 function failureOf(code: string, method: PaymentMethod): DomainError {
-  const known = domainErrorOf({ code, message: describeFailure(code).message });
+  // a forced test decline is answered as the error it imitates, with its own marked wording
+  const known = domainErrorOf({
+    code: code === "TEST_INSUFFICIENT_FUNDS" ? "INSUFFICIENT_FUNDS" : code,
+    message: describeFailure(code).message,
+  });
   return new DomainError(known.code, describeFailure(code).message, { method });
 }
 

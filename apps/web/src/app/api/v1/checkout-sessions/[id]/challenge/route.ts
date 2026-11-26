@@ -3,7 +3,6 @@ import { issuePaymentChallenge } from "@delulu/db/runtime";
 import { trackAfter } from "@/server/analytics";
 import { payPool } from "@/server/db";
 import { pathId, route } from "@/server/http";
-import { enforceChallengeAddress } from "@/server/payments";
 import { RATE_RULES } from "@/server/rate-limit";
 
 /**
@@ -16,7 +15,6 @@ import { RATE_RULES } from "@/server/rate-limit";
 export const POST = route(
   { auth: "session", rateLimits: [{ rule: RATE_RULES.challengeIssueActor }] },
   async ({ request, session, params }) => {
-    await enforceChallengeAddress(request);
     const analytics = { surface: "checkout", authSessionId: session.id } as const;
     try {
       const issued = await issuePaymentChallenge(payPool(), {

@@ -6,13 +6,14 @@ import { api, describeError } from "../../_lib/api";
 import { parsePaise } from "../../_lib/money";
 import { formatWhen } from "../../_lib/orders";
 import type { InboxMessage } from "../../_lib/payments";
+import { PAYMENT_UI_CONFIG } from "../../_lib/payments-config";
 
 /**
  * The player's in-app Delulu Bank inbox (PRD R4.4): the only place a one-time code is ever shown.
  * Read from the server (private, no-store) and kept in memory only; nothing is written to storage, the
  * URL or the console. No SMS, email or push message carries a code.
  */
-export function useBankInbox(active: boolean, intervalMs = 2500) {
+export function useBankInbox(active: boolean, intervalMs: number = PAYMENT_UI_CONFIG.inboxPollMs) {
   const [messages, setMessages] = useState<InboxMessage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);

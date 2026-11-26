@@ -44,8 +44,8 @@ export const CHALLENGE_RULES = {
   tries: 3,
   /** A new code may be asked for this long after the last one. */
   resendSeconds: 30,
-  /** Codes and approval requests issued per account per hour. */
-  codesPerHour: 5,
+  /** Codes and approval requests issued per account per hour (counted together). */
+  codesPerHour: 10,
   /** The SLOW_BANK test scenario answers this long after the request. */
   slowBankSeconds: 8,
 } as const;
@@ -166,6 +166,11 @@ export const DECLINE_REASONS: Readonly<Record<string, DeclineReason>> = {
     title: "Session expired",
     message: `The checkout session ran out of time. ${NO_MONEY}`,
   },
+  // a decline forced by a test scenario (PRD R4.6) is marked, so it never reads as a real reason
+  TEST_INSUFFICIENT_FUNDS: {
+    title: "Test scenario: insufficient funds",
+    message: `This decline was forced by a test scenario, not by your balance. ${NO_MONEY}`,
+  },
   PIN_LOCKED: { title: "Card locked", message: `The card is locked after wrong PINs. ${NO_MONEY}` },
   CART_CHANGED: { title: "Cart changed", message: `Something in the cart changed. ${NO_MONEY}` },
   PRICE_CHANGED: { title: "Price changed", message: `A price changed. ${NO_MONEY}` },
@@ -217,9 +222,12 @@ export function looksLikeRealPaymentData(text: string): boolean {
   for (const handle of s.match(/[^\s@]+@[^\s@]+/g) ?? []) {
     if (!/@delulu$/i.test(handle)) return true;
   }
-  // an expiry date
-  if (/(?:^|\D)(?:0[1-9]|1[0-2])\s*[/-]\s*(?:\d{2}|\d{4})(?:\D|$)/.test(s)) return true;
+  // an expiry date: MM/YY or MM/YYYY anywhere; MM-YY or MM-YYYY only as the whole text (so a code such as
+  // SAVE-10-25 is not mistaken for one)
+  if (/(?:^|\D)(?:0[1-9]|1[0-2])\s*\/\s*(?:\d{2}|\d{4})(?:\D|$)/.test(s)) return true;
+  if (/^\s*(?:0[1-9]|1[0-2])\s*-\s*(?:\d{2}|\d{4})\s*$/.test(s)) return true;
   // words that introduce a secret, followed by anything
-  if (/\b(?:cvv|cvc|cid|expiry|exp(?:ires?)?|pin|otp|passcode|password|passwd|pwd)\b/i.test(s)) return true;
+  if (/(?<![a-z])(?:cvv|cvc|cid|expiry|exp(?:ires?)?|pin|otp|passcode|password|passwd|pwd)(?![a-z])/i.test(s))
+    return true;
   return false;
 }

@@ -8,6 +8,7 @@ import * as challengeRoute from "../src/app/api/v1/checkout-sessions/[id]/challe
 import * as verifyRoute from "../src/app/api/v1/checkout-sessions/[id]/challenge/verify/route";
 import * as methodsRoute from "../src/app/api/v1/payment-methods/route";
 import { settleTracking } from "../src/server/analytics";
+import { RATE_RULES } from "../src/server/rate-limit";
 import { startTestApp, type TestApp } from "./helpers/app";
 import { arr, type Browser, type CallResult, str } from "./helpers/browser";
 import { checkout, player, R } from "./helpers/flows";
@@ -241,6 +242,40 @@ describe("net banking and DeluluPay ID through the routes", () => {
   });
 });
 
+describe("the bank step is limited per account, never per address (review major 1)", () => {
+  it("US-36: one account using up its own limits does not affect a second account on the same address, nor one with an unknown address", async () => {
+    // nothing of the authentication step is keyed by address
+    for (const [name, rule] of Object.entries(RATE_RULES)) {
+      if (/challenge/i.test(name)) expect(rule.by, name).toBe("actor");
+    }
+    const one = (await player({ pin: false })).b;
+    const two = (await player({ pin: false })).b;
+    two.peer = one.peer; // the same client address
+    const sessionId = str((await checkout(two, product(0).id)).json.id);
+    let limited = 0;
+    for (let i = 0; i < 40; i++) {
+      const res = await verify(one, sessionId, { code: "123456" });
+      if (res.status === 429) limited++;
+    }
+    expect(limited, "the first account should reach its own limit").toBeGreaterThan(0);
+    const mine = await attempt(two, sessionId, { method: "NET_BANKING" });
+    expect(mine.status).toBe(201);
+    expect((await challenge(two, sessionId)).status).toBe(201);
+    expect((await verify(two, sessionId, { code: "123456" })).status).not.toBe(429);
+
+    // no connection address known at all ("unknown"): accounts still do not share a counter
+    const three = (await player({ pin: false })).b;
+    const four = (await player({ pin: false })).b;
+    three.peer = null;
+    four.peer = null;
+    for (let i = 0; i < 40; i++) await verify(three, sessionId, { code: "123456" });
+    const sid = str((await checkout(four, product(1).id)).json.id);
+    await attempt(four, sid, { method: "NET_BANKING" });
+    expect((await challenge(four, sid)).status).toBe(201);
+    expect((await verify(four, sid, { code: "000000" })).status).not.toBe(429);
+  });
+});
+
 describe("no real payment data anywhere (PRD R4.5; US-37)", () => {
   it("US-37: no payment route reads a card number, expiry, CVV, UPI PIN or password; pasting one is refused", async () => {
     const { b } = await player({ pin: false });
@@ -300,6 +335,14 @@ describe("no real payment data anywhere (PRD R4.5; US-37)", () => {
       expect(res.json.error?.code, couponCode).toBe("VALIDATION_FAILED");
       expect(res.text).not.toContain("4111");
       expect(res.text).not.toContain("okaxis");
+    }
+    // a dated code is not mistaken for an expiry date: it reaches the lookup
+    for (const couponCode of ["SAVE-10-25", "SAVE1025"]) {
+      const dated = await b.call(R.checkoutSessions.POST, "POST", "/api/v1/checkout-sessions", {
+        body: { lines: [{ productId: product(0).id }], speedBySeller: { SEED: "STANDARD" }, couponCode },
+        idempotencyKey: true,
+      });
+      expect(dated.json.error?.code, couponCode).toBe("COUPON_INVALID");
     }
     // an ordinary (unknown) code reaches the coupon lookup as before
     const ok = await b.call(R.checkoutSessions.POST, "POST", "/api/v1/checkout-sessions", {

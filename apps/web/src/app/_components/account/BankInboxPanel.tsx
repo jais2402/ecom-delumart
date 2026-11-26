@@ -1,6 +1,7 @@
 "use client";
 
 import { Text } from "@delulu/ui";
+import { PAYMENT_UI_CONFIG } from "../../_lib/payments-config";
 import { PageHeading } from "../PageHeading";
 import { BankInbox, useBankInbox } from "../payments/BankInbox";
 
@@ -10,7 +11,7 @@ import { BankInbox, useBankInbox } from "../payments/BankInbox";
  * Approval requests are answered on the checkout page.
  */
 export function BankInboxPanel() {
-  const inbox = useBankInbox(true, 4000);
+  const inbox = useBankInbox(true, PAYMENT_UI_CONFIG.accountInboxPollMs);
   return (
     <div className="flex flex-col gap-6">
       <PageHeading>Bank inbox</PageHeading>

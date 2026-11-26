@@ -421,11 +421,15 @@ describe("DeluluPay methods, challenge and configuration", () => {
     it("US-36: the hourly allowance is the payer's own: a stranger cannot use it up", async () => {
       const a = await newBuyer();
       const stranger = await newBuyer();
-      for (let i = 0; i < CHALLENGE_RULES.codesPerHour + 2; i++) {
-        const q = await quote(stranger);
-        await attempt(stranger, q.sessionId, "NET_BANKING");
-        await issue(stranger, q.sessionId).catch(() => undefined);
+      const sq = await quote(stranger);
+      const sat = await attempt(stranger, sq.sessionId, "NET_BANKING");
+      await issue(stranger, sq.sessionId);
+      for (let i = 1; i < CHALLENGE_RULES.codesPerHour; i++) {
+        await backdateChallenge(sat.attemptId, CHALLENGE_RULES.resendSeconds + 1);
+        await issue(stranger, sq.sessionId);
       }
+      await backdateChallenge(sat.attemptId, CHALLENGE_RULES.resendSeconds + 1);
+      expect(await codeOf(issue(stranger, sq.sessionId))).toBe("RATE_LIMITED");
       const q = await quote(a);
       await attempt(a, q.sessionId, "NET_BANKING");
       expect((await issue(a, q.sessionId)).kind).toBe("CODE");
@@ -654,7 +658,7 @@ describe("DeluluPay methods, challenge and configuration", () => {
         });
         expect(await stateRow(at.attemptId)).toMatchObject({
           state: "FAILED",
-          failure_code: "INSUFFICIENT_FUNDS",
+          failure_code: "TEST_INSUFFICIENT_FUNDS",
         });
         expect(await wallet(pool, staff.ledgerAccountId)).toBe(before);
       });

@@ -4,6 +4,7 @@ import { Alert, BankChallenge, Button, FictionLabel, Heading, Text } from "@delu
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api, describeError } from "../../_lib/api";
 import { clock, type InboxMessage, secondsUntil, wrongCodeText } from "../../_lib/payments";
+import { PAYMENT_UI_CONFIG } from "../../_lib/payments-config";
 import { BankInbox, useBankInbox } from "./BankInbox";
 
 interface Props {
@@ -53,7 +54,7 @@ export function DeluluPayStep({
   const inbox = useBankInbox(true);
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const timer = setInterval(() => setNow(Date.now()), PAYMENT_UI_CONFIG.tickMs);
     return () => clearInterval(timer);
   }, []);
 
@@ -114,7 +115,9 @@ export function DeluluPayStep({
         return;
       }
       // WAITING: a slow bank
-      setError(`Delulu Bank is slow to answer. Try again in ${res.retryAfterSeconds ?? 5} seconds.`);
+      setError(
+        `Delulu Bank is slow to answer. Try again in ${res.retryAfterSeconds ?? PAYMENT_UI_CONFIG.slowBankRetrySeconds} seconds.`,
+      );
     } catch (err) {
       if (err instanceof ApiError && err.code === "CHALLENGE_FAILED") {
         setError(wrongCodeText(err));

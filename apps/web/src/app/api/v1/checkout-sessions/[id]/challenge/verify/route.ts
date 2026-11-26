@@ -3,7 +3,7 @@ import { verifyPaymentChallenge } from "@delulu/db/runtime";
 import { trackAfter } from "@/server/analytics";
 import { payPool } from "@/server/db";
 import { pathId, route } from "@/server/http";
-import { enforceChallengeAddress, verifyBody } from "@/server/payments";
+import { verifyBody } from "@/server/payments";
 import { RATE_RULES } from "@/server/rate-limit";
 
 /**
@@ -16,7 +16,6 @@ import { RATE_RULES } from "@/server/rate-limit";
 export const POST = route(
   { auth: "session", body: verifyBody, rateLimits: [{ rule: RATE_RULES.challengeVerifyActor }] },
   async ({ request, body, session, params }) => {
-    await enforceChallengeAddress(request);
     const analytics = { surface: "checkout", authSessionId: session.id } as const;
     const input = "code" in body ? { code: body.code } : { decision: body.decision };
     try {

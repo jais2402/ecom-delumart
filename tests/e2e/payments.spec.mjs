@@ -341,7 +341,7 @@ try {
     for (const url of visited)
       assert.ok(!/[?&](pin|code|otp|cvv)=/i.test(url), `a secret parameter is in the URL ${url}`);
   });
-} catch (error) {
+} catch {
   console.log(`\nStopped at: ${current}`);
   process.exitCode = 1;
 } finally {

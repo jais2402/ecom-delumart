@@ -6,6 +6,7 @@ import { api, describeError } from "../../_lib/api";
 import { parsePaise } from "../../_lib/money";
 import { formatWhen } from "../../_lib/orders";
 import { methodLabel, type PaymentRowResponse, statusTone } from "../../_lib/payments";
+import { PAYMENT_UI_CONFIG } from "../../_lib/payments-config";
 import { ErrorBlock, LoadingBlock } from "../LoadState";
 import { PageHeading } from "../PageHeading";
 
@@ -14,7 +15,7 @@ interface Page {
   nextCursor: string | null;
 }
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = PAYMENT_UI_CONFIG.paymentsPageSize;
 
 const STATUS_NAME: Record<PaymentRowResponse["status"], string> = {
   CREATED: "Created",
