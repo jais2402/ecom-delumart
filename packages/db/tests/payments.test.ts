@@ -8,6 +8,7 @@ import {
   PAYMENT_SCENARIOS,
   TEST_DELULUPAY_IDS,
 } from "@delulu/core";
+import fc from "fast-check";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { myOrders, myStatement } from "../src/account";
@@ -355,6 +356,37 @@ describe("DeluluPay methods, challenge and configuration", () => {
       // another player cannot use it either
       const b = await newBuyer();
       expect(await codeOf(verify(b, q1.sessionId, { code: code1 }))).toBe("NOT_FOUND");
+    });
+
+    it("US-36: a code that ran out of time unused is scrubbed from the database by the daily purge, and by the player's next request", async () => {
+      const a = await newBuyer();
+      const q = await quote(a);
+      const at = await attempt(a, q.sessionId, "NET_BANKING");
+      await issue(a, q.sessionId);
+      const stored = () =>
+        pool.query<{ code: string | null }>(
+          "SELECT code FROM core.bank_inbox_message WHERE attempt_id = $1",
+          [at.attemptId],
+        );
+      expect((await stored()).rows[0]?.code).toMatch(/^\d{6}$/);
+      await backdateChallenge(at.attemptId, CHALLENGE_RULES.ttlSeconds + 1);
+      // expired but not yet scrubbed: the inbox already hides it
+      expect((await inbox(a))[0]?.code).toBeUndefined();
+      await pool.query("SELECT core.purge_idempotency_records()");
+      expect((await stored()).rows[0]?.code).toBeNull();
+
+      const b = await newBuyer();
+      const q2 = await quote(b);
+      const at2 = await attempt(b, q2.sessionId, "NET_BANKING");
+      await issue(b, q2.sessionId);
+      await backdateChallenge(at2.attemptId, CHALLENGE_RULES.ttlSeconds + 1);
+      // the next code asked for by the same player scrubs the old one first
+      await issue(b, q2.sessionId);
+      const codes = await pool.query<{ code: string | null }>(
+        "SELECT code FROM core.bank_inbox_message WHERE attempt_id = $1 ORDER BY created_at",
+        [at2.attemptId],
+      );
+      expect(codes.rows.map((r) => r.code !== null)).toEqual([false, true]);
     });
 
     it("US-36: a code is asked for again only after 30 seconds, replaces the old one, and at most five a hour", async () => {
@@ -1041,6 +1073,101 @@ describe("DeluluPay methods, challenge and configuration", () => {
         await changeMethod("BALANCE", { displayOrder: 4 });
       }
     });
+  });
+
+  describe("invariants over random sequences of bank-step operations (property)", () => {
+    type Op =
+      | "issue"
+      | "wrong"
+      | "right"
+      | "approve"
+      | "decline"
+      | "cancel"
+      | "pay"
+      | "resendWindow"
+      | "expire";
+    const OPS: Op[] = [
+      "issue",
+      "wrong",
+      "right",
+      "approve",
+      "decline",
+      "cancel",
+      "pay",
+      "resendWindow",
+      "expire",
+    ];
+
+    it("US-35 US-36: whatever the order of calls, money moves only after authentication, only once, and never on a failed attempt", async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.constantFrom("NET_BANKING", "DELULUPAY_ID"),
+          fc.array(fc.constantFrom(...OPS), { minLength: 1, maxLength: 12 }),
+          async (method, ops) => {
+            const buyer = await newBuyer();
+            const before = await wallet(pool, buyer.ledgerAccountId);
+            const q = await quote(buyer, await fresh());
+            const at = await attempt(
+              buyer,
+              q.sessionId,
+              method,
+              method === "DELULUPAY_ID" ? { delulupayId: await idOf(buyer) } : {},
+            );
+            let paid = false;
+            for (const op of ops) {
+              try {
+                if (op === "issue") await issue(buyer, q.sessionId);
+                else if (op === "wrong") {
+                  const open = (await inbox(buyer)).find((m) => m.code !== undefined)?.code;
+                  await verify(buyer, q.sessionId, { code: open === "000000" ? "111111" : "000000" });
+                } else if (op === "right") {
+                  const open = (await inbox(buyer)).find((m) => m.code !== undefined)?.code;
+                  if (open) await verify(buyer, q.sessionId, { code: open });
+                } else if (op === "approve") await verify(buyer, q.sessionId, { decision: "APPROVE" });
+                else if (op === "decline") await verify(buyer, q.sessionId, { decision: "DECLINE" });
+                else if (op === "cancel")
+                  await cancelPaymentAttempt(pool, {
+                    authSessionId: buyer.authSessionId,
+                    attemptId: at.attemptId,
+                  });
+                else if (op === "pay") {
+                  await payWith(buyer, q.sessionId, at.attemptId);
+                  paid = true;
+                } else if (op === "resendWindow")
+                  await backdateChallenge(at.attemptId, CHALLENGE_RULES.resendSeconds + 1);
+                else if (op === "expire")
+                  await backdateChallenge(at.attemptId, CHALLENGE_RULES.ttlSeconds + 1);
+              } catch (error) {
+                // refusals are expected; only an unexpected fault fails the property
+                const code = error instanceof DomainError ? error.code : (error as { code?: string }).code;
+                expect(typeof code, String(error)).toBe("string");
+                expect(code, String(error)).not.toBe("XX000");
+              }
+            }
+            const row = await stateRow(at.attemptId);
+            const after = await wallet(pool, buyer.ledgerAccountId);
+            const used = await count(
+              pool,
+              "SELECT COALESCE(max(attempts_used), 0) AS n FROM core.payment_challenge WHERE attempt_id = $1",
+              [at.attemptId],
+            );
+            // money moves exactly when the attempt succeeded, by exactly the quoted total
+            expect(before - after).toBe(row?.state === "SUCCEEDED" ? q.totalPaise : 0n);
+            expect(paid || row?.state !== "SUCCEEDED").toBe(true);
+            if (row?.state === "SUCCEEDED") expect(row.authenticated_at).not.toBeNull();
+            if (row?.state === "FAILED") expect(row.failure_code).not.toBeNull();
+            if (row?.state === "PENDING" && row.authenticated_at === null) expect(after).toBe(before);
+            expect(used).toBeLessThanOrEqual(CHALLENGE_RULES.tries);
+            // an open code exists only while the attempt is pending and unauthenticated
+            const stillOpen = (await inbox(buyer)).filter((m) => m.code !== undefined);
+            if (row?.state !== "PENDING" || row.authenticated_at !== null) expect(stillOpen).toEqual([]);
+            expect(stillOpen.length).toBeLessThanOrEqual(1);
+          },
+        ),
+        { numRuns: 40 },
+      );
+      expect(await reconcile(pool)).toEqual(CLEAN);
+    }, 120_000);
   });
 
   describe("agreement with @delulu/core", () => {

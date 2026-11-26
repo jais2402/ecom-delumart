@@ -183,6 +183,24 @@ BEGIN
       FROM core.payment_methods_now() m), '[]'::jsonb));
 END $$;
 
+-- ---------------------------------------------------------------- codes do not outlive their time
+-- A code that expired without its challenge ending (an abandoned bank step) is scrubbed by the daily
+-- purge job (core.purge_idempotency_records of 0018, otherwise unchanged) and, for an active player, by
+-- core.issue_payment_challenge (0101) before it issues another. The inbox already hides it once expired.
+CREATE OR REPLACE FUNCTION core.purge_idempotency_records() RETURNS bigint
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
+DECLARE
+  n bigint;
+BEGIN
+  DELETE FROM core.idempotency_record r
+   WHERE r.created_at < now() - make_interval(
+           hours => core.config_int(core.current_config_id(), ARRAY['idempotency_retention_hours'], 24)::int);
+  GET DIAGNOSTICS n = ROW_COUNT;
+  UPDATE core.bank_inbox_message m SET code = NULL, cleared_at = clock_timestamp()
+   WHERE m.cleared_at IS NULL AND m.expires_at <= clock_timestamp();
+  RETURN n;
+END $$;
+
 -- ---------------------------------------------------------------- analytics allow-lists (0061, 0090)
 CREATE OR REPLACE FUNCTION analytics.event_names() RETURNS text[]
 LANGUAGE sql IMMUTABLE SET search_path = pg_catalog, pg_temp AS $$

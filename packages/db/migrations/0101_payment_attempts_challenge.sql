@@ -367,6 +367,9 @@ BEGIN
   END IF;
   -- codes and requests issued per account per hour; the count is the actor's own, so no one else can use it up
   PERFORM core.lock_actor('core.bank_inbox_message', actor);
+  -- the actor's codes that ran out of time are scrubbed (the daily purge does it for everyone, 0103)
+  UPDATE core.bank_inbox_message m SET code = NULL, cleared_at = v_now
+   WHERE m.user_id = actor AND m.cleared_at IS NULL AND m.expires_at <= v_now;
   IF (SELECT count(*) FROM core.bank_inbox_message m
        WHERE m.user_id = actor AND m.created_at > v_now - interval '1 hour')
      >= core.payment_setting('challenge_codes_per_hour') THEN
