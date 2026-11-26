@@ -24,4 +24,10 @@ describe("SidebarNav", () => {
     const { container } = render(<SidebarNav label="Account" items={items} />);
     expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   });
+  it("pills layout keeps the named navigation and scrolls inside its own list", () => {
+    render(<SidebarNav label="Account" items={items} layout="pills" currentHref="/account" />);
+    expect(screen.getByRole("navigation", { name: "Account" })).toBeInTheDocument();
+    expect(screen.getByRole("list")).toHaveClass("overflow-x-auto");
+    expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
+  });
 });

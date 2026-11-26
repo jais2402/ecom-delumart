@@ -29,4 +29,20 @@ describe("CheckoutLayout", () => {
     expect(aside.parentElement).toHaveClass("lg:grid-cols-[minmax(0,1fr)_22rem]");
     expect(aside.parentElement).not.toHaveClass("grid-cols-2");
   });
+  it("offers the summary as a toggle named Order summary with the total beside it", () => {
+    render(
+      <CheckoutLayout
+        header={<header>H</header>}
+        footer={<footer>F</footer>}
+        steps={<p>Steps</p>}
+        summary={<p>Totals</p>}
+        summaryHint="₹10"
+      >
+        x
+      </CheckoutLayout>,
+    );
+    const toggle = screen.getByRole("button", { name: /Order summary/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveTextContent("₹10");
+  });
 });

@@ -34,4 +34,23 @@ describe("Receipt", () => {
     rerender(<Receipt {...props} paymentStatus="Paid" />);
     expect(screen.getByText("Paid")).toBeInTheDocument();
   });
+  it("draws a decorative picture beside a line that has one", () => {
+    const { container } = render(
+      <Receipt
+        {...props}
+        lines={[
+          {
+            id: "a",
+            name: "Pocket Comet",
+            quantity: 1,
+            totalPaise: 100n,
+            hue: 10,
+            imageSrc: "/products/x.webp",
+          },
+        ]}
+      />,
+    );
+    expect(container.querySelector("img")).toHaveAttribute("src", "/products/x.webp");
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
 });

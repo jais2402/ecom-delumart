@@ -19,4 +19,10 @@ describe("StepIndicator", () => {
     render(<StepIndicator steps={["Cart", "Delivery"]} current={1} />);
     expect(screen.getByText("(completed)")).toBeInTheDocument();
   });
+  it("shows numbers for upcoming steps and a ringed current step", () => {
+    render(<StepIndicator steps={["Cart", "Delivery", "Pay"]} current={1} />);
+    const items = screen.getAllByRole("listitem");
+    expect(items[2]).toHaveTextContent("3");
+    expect(items[1]?.querySelector("span[aria-hidden]:not(.absolute)")).toHaveClass("ring-4");
+  });
 });
