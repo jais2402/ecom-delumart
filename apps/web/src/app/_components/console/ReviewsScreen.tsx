@@ -76,8 +76,9 @@ export function ReviewsScreen() {
           }}
         />
         <Text size="sm" muted>
-          Newest first. Hiding takes a review out of the product page and its rating at once; the author still
-          sees it, with your reason.
+          Newest first. A hidden review disappears from the store, and from the product's rating, within a
+          minute; the author still sees it, with your reason. New reviews are visible to shoppers from the day
+          after they are written.
         </Text>
         {data.items.length === 0 ? (
           <EmptyState title="No reviews" description="Reviews players write appear here." headingLevel={2} />
@@ -128,8 +129,11 @@ function ReviewCard({ r, onDone }: { r: AdminReviewItem; onDone: (text: string) 
       className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <Heading level={3} size="sm" className="break-words">
-          <a className="text-action underline" href={`/p/${r.productId}`}>
+        <Heading level={2} size="sm" className="break-words">
+          <a
+            className="inline-flex min-h-touch items-center text-action underline"
+            href={`/p/${r.productId}`}
+          >
             {name}
           </a>
         </Heading>

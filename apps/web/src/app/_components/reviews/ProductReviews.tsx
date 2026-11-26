@@ -1,7 +1,7 @@
 "use client";
 
 import { Alert, Badge, Button, EmptyState, Heading, Pagination, StarRating, Text } from "@delulu/ui";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, describeError } from "../../_lib/api";
 import {
   formatReviewDay,
@@ -12,6 +12,7 @@ import {
 } from "../../_lib/reviews";
 import { useSession } from "../../_lib/session-store";
 import { ErrorBlock, LoadingBlock } from "../LoadState";
+import { ConfirmDialog } from "../studio/ConfirmDialog";
 import { ReviewForm } from "./ReviewForm";
 import { ReviewList } from "./ReviewList";
 import { ReviewSummary } from "./ReviewSummary";
@@ -32,6 +33,14 @@ export function ProductReviews({ productId }: { productId: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const deleteButton = useRef<HTMLButtonElement>(null);
+
+  /** Closing the confirmation without deleting puts focus back on "Delete your review". */
+  function closeConfirm(open: boolean) {
+    setConfirming(open);
+    if (!open) setTimeout(() => deleteButton.current?.focus(), 0);
+  }
 
   const loadPublic = useCallback(async () => {
     try {
@@ -69,7 +78,7 @@ export function ProductReviews({ productId }: { productId: string }) {
         ? "Thanks. Your review is posted."
         : review.hidden
           ? "Saved. Your review stays hidden by moderation."
-          : "Thanks. Your review will appear in a minute.",
+          : "Thanks. Your review is saved. It is visible to others from tomorrow.",
     );
     void loadPublic();
   }
@@ -79,6 +88,7 @@ export function ProductReviews({ productId }: { productId: string }) {
     setActionError(null);
     try {
       await api(`/api/v1/products/${productId}/review`, { method: "DELETE" });
+      setConfirming(false);
       setMine((m) => (m ? { ...m, review: null } : m));
       setNotice("Your review is deleted.");
       void loadPublic();
@@ -136,7 +146,9 @@ export function ProductReviews({ productId }: { productId: string }) {
                   Your review
                 </Heading>
                 {own.hidden ? <Badge tone="danger">Hidden by moderation</Badge> : null}
-                {!own.hidden && !own.public ? <Badge tone="info">Appears shortly</Badge> : null}
+                {!own.hidden && !own.public ? (
+                  <Badge tone="info">Visible to others from tomorrow</Badge>
+                ) : null}
               </div>
               <StarRating
                 averageTenths={own.rating * 10}
@@ -156,9 +168,25 @@ export function ProductReviews({ productId }: { productId: string }) {
                     Edit your review
                   </Button>
                 ) : null}
-                <Button variant="ghost" onClick={() => void remove()} loading={busy}>
+                <Button
+                  ref={deleteButton}
+                  variant="ghost"
+                  onClick={() => setConfirming(true)}
+                  disabled={busy}
+                >
                   Delete your review
                 </Button>
+                <ConfirmDialog
+                  open={confirming}
+                  onOpenChange={closeConfirm}
+                  title="Delete your review?"
+                  description="Your rating and words are deleted for good. You can write a new review later."
+                  confirmLabel="Yes, delete"
+                  cancelLabel="Keep it"
+                  danger
+                  busy={busy}
+                  onConfirm={() => void remove()}
+                />
               </div>
             </div>
           ) : (

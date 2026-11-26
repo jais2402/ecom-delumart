@@ -11,7 +11,7 @@ export function ReviewList({ items }: { items: readonly PublicReviewItem[] }) {
           <div className="flex flex-wrap items-center gap-2">
             <StarRating averageTenths={r.rating * 10} label={`Rated ${r.rating} out of 5`} size="sm" />
             {r.title ? (
-              <Heading level={4} size="sm" className="text-base break-words">
+              <Heading level={3} size="sm" className="text-base break-words">
                 {r.title}
               </Heading>
             ) : null}

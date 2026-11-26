@@ -3,12 +3,16 @@
 // Plain Node plus the globally installed `playwright` package; no test runner.
 // Signed out: the section and its empty or summary state, no "Write a review" -> sign in and
 // onboard -> buy a product from the balance -> "Write a review" -> a link in the text is refused
-// inline -> post -> public once the purchase minute has ended -> stars, Verified owner, the day ->
-// edit (Edited) -> keyboard rating -> delete -> no personal data in public answers, no overflow.
+// inline -> post: the author sees it at once, "Visible to others from tomorrow", the public list
+// does not -> tomorrow (the owner-only `pnpm dev:age-reviews`, same DEV_DB_NAME as the server) ->
+// stars, Verified owner, the day -> edit (Edited) -> keyboard rating -> delete after a confirmation
+// dialog -> no personal data in public answers, no overflow.
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
@@ -198,19 +202,33 @@ try {
     },
   );
 
-  await step("post the review; it appears once the purchase's minute has ended", async () => {
-    const form = page.getByRole("form", { name: "Write a review" });
-    await form.getByLabel("Your review (optional)").fill("Glows softly and naps well.");
-    await form.getByRole("button", { name: "Post review" }).click();
-    await section(page).getByRole("heading", { name: "Your review" }).waitFor();
-    const deadline = Date.now() + 75_000;
-    let found = false;
-    while (!found && Date.now() < deadline) {
+  await step(
+    "post the review: the author sees it at once, marked visible to others from tomorrow",
+    async () => {
+      const form = page.getByRole("form", { name: "Write a review" });
+      await form.getByLabel("Your review (optional)").fill("Glows softly and naps well.");
+      await form.getByRole("button", { name: "Post review" }).click();
+      await section(page).getByRole("heading", { name: "Your review" }).waitFor();
+      await section(page).getByText("Visible to others from tomorrow", { exact: true }).waitFor();
       const pub = await call(page, "GET", `/api/v1/products/${product.id}/reviews`);
-      found = pub.body.items.some((i) => i.title === TITLE);
-      if (!found) await page.waitForTimeout(3_000);
-    }
-    assert.ok(found, "the review never became public");
+      assert.ok(!pub.body.items.some((i) => i.title === TITLE), "a review written today is already public");
+      const mine = await call(page, "GET", `/api/v1/me/reviews/${product.id}`);
+      assert.equal(mine.body.review.public, false);
+    },
+  );
+
+  await step("tomorrow (owner-only dev script): the review is public", async () => {
+    // the owner login moves today's reviews back a day; the app has no route that can
+    execSync("pnpm dev:age-reviews", {
+      cwd: resolve(fileURLToPath(new URL(".", import.meta.url)), "../.."),
+      env: process.env,
+      stdio: "pipe",
+    });
+    const pub = await call(page, "GET", `/api/v1/products/${product.id}/reviews`);
+    assert.ok(
+      pub.body.items.some((i) => i.title === TITLE),
+      "the review is not public the next day",
+    );
   });
 
   await step(
@@ -273,14 +291,34 @@ try {
     },
   );
 
-  await step("delete the review: it leaves the page", async () => {
-    await page.getByRole("button", { name: "Delete your review" }).click();
-    await section(page).getByText("Your review is deleted.").first().waitFor();
-    const pub = await call(page, "GET", `/api/v1/products/${product.id}/reviews`);
-    assert.ok(!pub.body.items.some((i) => i.title === TITLE), "the deleted review is still public");
-    await page.getByRole("button", { name: "Write a review" }).waitFor();
-    await noOverflow(page, "after delete");
-  });
+  await step(
+    "delete asks first in a dialog (Keep it returns focus), then the review leaves the page",
+    async () => {
+      const trigger = page.getByRole("button", { name: "Delete your review" });
+      await trigger.click();
+      const dialog = page.getByRole("dialog", { name: "Delete your review?" });
+      await dialog.waitFor();
+      assert.ok(
+        await dialog.evaluate((d) => d.contains(document.activeElement)),
+        "focus is not in the dialog",
+      );
+      await dialog.getByRole("button", { name: "Keep it" }).click();
+      await dialog.waitFor({ state: "detached" });
+      assert.ok(await trigger.evaluate((b) => b === document.activeElement), "focus did not return");
+      const still = await call(page, "GET", `/api/v1/me/reviews/${product.id}`);
+      assert.ok(still.body.review, "Keep it deleted the review");
+      await trigger.click();
+      await page
+        .getByRole("dialog", { name: "Delete your review?" })
+        .getByRole("button", { name: "Yes, delete" })
+        .click();
+      await section(page).getByText("Your review is deleted.").first().waitFor();
+      const pub = await call(page, "GET", `/api/v1/products/${product.id}/reviews`);
+      assert.ok(!pub.body.items.some((i) => i.title === TITLE), "the deleted review is still public");
+      await page.getByRole("button", { name: "Write a review" }).waitFor();
+      await noOverflow(page, "after delete");
+    },
+  );
 } catch {
   console.log(`\nStopped at: ${current}`);
   process.exitCode = 1;
