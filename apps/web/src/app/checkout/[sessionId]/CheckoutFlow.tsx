@@ -12,6 +12,8 @@ import {
   FictionLabel,
   Heading,
   OrderGroupReview,
+  type OrderItem,
+  OrderItemsList,
   OrderSummary,
   PaymentMethodOption,
   Price,
@@ -43,9 +45,11 @@ import {
   saveCheckoutContext,
 } from "../../_lib/checkout-context";
 import { parsePaise } from "../../_lib/money";
+import { photoSrcOf } from "../../_lib/product-photos";
 import { refreshSession } from "../../_lib/session-store";
 import { requestQuote } from "../../_lib/start-checkout";
 import { useApiGet } from "../../_lib/use-api";
+import { useProducts } from "../../_lib/use-products";
 import { useRequireAccount } from "../../_lib/use-require-account";
 
 type Step = "speed" | "payment" | "review";
@@ -90,6 +94,8 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
   const stepHeading = useRef<HTMLHeadingElement>(null);
   const firstStep = useRef(true);
   const addresses = useApiGet<AddressesResponse>(ok ? "/api/v1/addresses" : null);
+  // the photo and art of a single product; a cart checkout carries its items' pictures in the context
+  const { products } = useProducts(ctx && !ctx.cart && ctx.productId ? [ctx.productId] : []);
 
   const update = useCallback(
     (next: CheckoutContext) => {
@@ -461,35 +467,57 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
     if (ctx) update({ ...ctx, speed });
   }
 
-  const summary = cartInfo ? (
-    <section
-      aria-label="Your items"
-      className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4"
-    >
-      <Heading level={2} size="sm">
-        Your items
-      </Heading>
-      <Text>
-        {cartInfo.groups.reduce((n, g) => n + g.itemNames.length, 0)} items from {cartInfo.groups.length}{" "}
-        {cartInfo.groups.length === 1 ? "seller" : "sellers"}
-      </Text>
-      <a className="inline-flex min-h-touch items-center text-action underline" href="/cart">
-        Change your cart
-      </a>
-    </section>
-  ) : (
-    <section
-      aria-label="Your item"
-      className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4"
-    >
-      <Heading level={2} size="sm">
-        Your item
-      </Heading>
-      <Text>{ctx.productName}</Text>
-      <Text size="sm" muted>
-        Sold by {ctx.sellerName ?? "DeluluMart Originals"} · {SPEED_COPY[ctx.speed].name} delivery
-      </Text>
-    </section>
+  const sum = (pick: (s: QuoteResponse["sellers"][number]) => string) =>
+    quote.sellers.reduce((n, s) => n + parsePaise(pick(s)), 0n);
+  const single = products.get(ctx.productId);
+  const items: OrderItem[] = cartInfo
+    ? cartInfo.groups.flatMap((g) =>
+        (
+          g.items ??
+          g.itemNames.map((name): { name: string; hue: number; imageSrc?: string } => ({ name, hue: 0 }))
+        ).map((item) => ({
+          id: `${g.sellerKey}:${item.name}`,
+          name: item.name,
+          hue: item.hue,
+          imageSrc:
+            item.imageSrc ??
+            photoSrcOf({
+              name: item.name,
+              sellerKey: g.sellerKey,
+              sellerName: g.sellerKey === "SEED" ? null : g.sellerName,
+            }),
+          note: `Sold by ${g.sellerName}`,
+        })),
+      )
+    : [
+        {
+          id: ctx.productId,
+          name: ctx.productName,
+          hue: single?.templateId ?? 0,
+          imageSrc: single ? photoSrcOf(single) : undefined,
+          note: `Sold by ${ctx.sellerName ?? "DeluluMart Originals"} · ${SPEED_COPY[ctx.speed].name} delivery`,
+        },
+      ];
+  const summary = (
+    <div className="flex flex-col gap-4">
+      <OrderItemsList
+        title={cartInfo ? "Your items" : "Your item"}
+        items={items}
+        footer={
+          cartInfo ? (
+            <a className="inline-flex min-h-touch items-center text-action underline" href="/cart">
+              Change your cart
+            </a>
+          ) : null
+        }
+      />
+      <OrderSummary
+        itemsTotalPaise={sum((s) => s.listPaise)}
+        discountPaise={sum((s) => s.sellerDiscountPaise) + sum((s) => s.platformDiscountPaise)}
+        deliveryFeePaise={sum((s) => s.deliveryFeePaise)}
+        totalPaise={total}
+      />
+    </div>
   );
 
   return (
@@ -505,16 +533,14 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
         </div>
       }
       summary={summary}
+      summaryHint={<Price amountPaise={total} display="exact" />}
     >
       <div className="flex flex-col gap-4">
         <p role="status" aria-live="polite" className="sr-only">
           {status}
         </p>
         {phase === "processing" ? (
-          <div
-            className="flex items-center gap-3 rounded-lg border border-border bg-surface p-4"
-            aria-busy="true"
-          >
+          <div className="flex items-center gap-3 rounded-lg bg-surface p-4" aria-busy="true">
             <Spinner />
             <Text>{status || "Working…"}</Text>
           </div>
@@ -558,7 +584,7 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
 
         {phase === "idle" && view === "speed" ? (
           <form
-            className="flex flex-col gap-3"
+            className="flex flex-col gap-4 rounded-lg bg-surface p-4 md:p-6"
             onSubmit={(event) => {
               event.preventDefault();
               setNotice(null);
@@ -592,7 +618,7 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
                 Express and Zap are only offered for some items.
               </Text>
             ) : null}
-            <Button type="submit" size="lg">
+            <Button type="submit" variant="cta" size="lg" className="self-stretch sm:self-start">
               Continue to payment
             </Button>
           </form>
@@ -600,7 +626,7 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
 
         {phase === "idle" && view === "payment" ? (
           <form
-            className="flex flex-col gap-3"
+            className="flex flex-col gap-4 rounded-lg bg-surface p-4 md:p-6"
             onSubmit={(event) => {
               event.preventDefault();
               setNotice(null);
@@ -649,7 +675,7 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
                   Back
                 </Button>
               )}
-              <Button type="submit" size="lg" className="flex-1">
+              <Button type="submit" variant="cta" size="lg" className="flex-1">
                 Review your order
               </Button>
             </div>
@@ -657,7 +683,7 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
         ) : null}
 
         {phase === "idle" && view === "review" ? (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 rounded-lg bg-surface p-4 md:p-6">
             <Heading level={2} size="md" tabIndex={-1} ref={stepHeading}>
               Review your order
             </Heading>
@@ -676,17 +702,8 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
                   };
                 })}
               />
-            ) : (
-              <OrderSummary
-                itemsTotalPaise={parsePaise(seller.listPaise)}
-                discountPaise={
-                  parsePaise(seller.sellerDiscountPaise) + parsePaise(seller.platformDiscountPaise)
-                }
-                deliveryFeePaise={parsePaise(seller.deliveryFeePaise)}
-                totalPaise={total}
-              />
-            )}
-            <dl className="flex flex-col gap-1 rounded-lg border border-border bg-surface p-4 text-base">
+            ) : null}
+            <dl className="flex flex-col gap-1 rounded-lg bg-surface-raised p-4 text-base">
               {cartInfo ? null : (
                 <>
                   <div className="flex justify-between gap-3">
@@ -771,7 +788,13 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
               <Button type="button" variant="secondary" onClick={() => setStep("payment")}>
                 Back
               </Button>
-              <Button type="button" size="lg" className="flex-1" onClick={() => void startPayment()}>
+              <Button
+                type="button"
+                variant="ctaStrong"
+                size="lg"
+                className="flex-1"
+                onClick={() => void startPayment()}
+              >
                 Pay now
               </Button>
             </div>

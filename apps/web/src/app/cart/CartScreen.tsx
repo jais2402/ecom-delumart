@@ -47,12 +47,20 @@ export function CartScreen() {
   const cart = useCart();
   const finished =
     session.status === "signedIn" && nextOnboardingPath(session.onboarding, false) === "/account";
+  const count = finished ? (cart.server?.lineCount ?? 0) : cart.ids.length;
 
   return (
     <div className="flex flex-col gap-4">
-      <Heading level={1} size="lg">
-        Your cart
-      </Heading>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-lg bg-surface px-4 py-3 md:px-6">
+        <Heading level={1} size="lg">
+          Your cart
+        </Heading>
+        {count > 0 ? (
+          <Text muted>
+            {count} {count === 1 ? "item" : "items"}
+          </Text>
+        ) : null}
+      </div>
       {cart.changed ? (
         <Alert tone="warning" title="Some items in your cart changed">
           <p>Nothing was charged. The items that cannot be bought are marked below.</p>
@@ -78,7 +86,7 @@ export function CartScreen() {
 }
 
 const shopLink = (
-  <Button asChild>
+  <Button asChild variant="cta" size="lg">
     <a href="/">Shop DeluluMart</a>
   </Button>
 );
@@ -147,10 +155,7 @@ function LocalCart({
           }}
         />
       </div>
-      <section
-        aria-label="Checkout"
-        className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4"
-      >
+      <section aria-label="Checkout" className="flex flex-col gap-3 rounded-lg bg-surface p-4">
         <Heading level={2} size="sm">
           Order summary
         </Heading>
@@ -159,7 +164,7 @@ function LocalCart({
             ? "Finish setting up your account and your totals will appear here."
             : "Totals appear after you sign in. Your cart stays on this device and moves into your account."}
         </Text>
-        <Button asChild size="lg" aria-disabled={blocked || undefined}>
+        <Button asChild variant="cta" size="lg" aria-disabled={blocked || undefined}>
           <a href={needsOnboarding ? onboardingHref : "/sign-in?next=%2Fcart"}>
             {needsOnboarding ? "Finish setting up your account" : "Sign in to check out"}
           </a>
@@ -368,6 +373,16 @@ function AccountCart() {
             sellerKey: g.sellerKey,
             sellerName: g.sellerName,
             itemNames: g.lines.filter((l) => l.issue === null).map((l) => l.name),
+            items: g.lines
+              .filter((l) => l.issue === null)
+              .map((l) => {
+                const imageSrc = photoSrcOf({
+                  name: l.name,
+                  sellerKey: g.sellerKey,
+                  sellerName: g.sellerKey === "SEED" ? null : g.sellerName,
+                });
+                return { name: l.name, hue: l.templateId, ...(imageSrc ? { imageSrc } : {}) };
+              }),
           })),
           couponCode: applied,
         },
@@ -444,10 +459,7 @@ function AccountCart() {
       </div>
 
       <div className="flex flex-col gap-4">
-        <section
-          aria-label="Coupon"
-          className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4"
-        >
+        <section aria-label="Coupon" className="flex flex-col gap-2 rounded-lg bg-surface p-4">
           <Heading level={2} size="sm">
             Coupon
           </Heading>
@@ -483,6 +495,7 @@ function AccountCart() {
                   </p>
                 ) : null}
                 <Button
+                  variant="cta"
                   size="lg"
                   loading={paying}
                   aria-disabled={block !== null || undefined}

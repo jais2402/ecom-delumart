@@ -68,7 +68,7 @@ export function SavedPanel() {
           title="Nothing saved yet"
           description="Tap the heart on a product to keep it here."
           action={
-            <Button asChild>
+            <Button asChild variant="cta">
               <a href="/">Start shopping</a>
             </Button>
           }

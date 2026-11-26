@@ -55,7 +55,7 @@ export function SellingSummary() {
           <Text size="sm" muted>
             Your creator studio is open. Register a shop to start.
           </Text>
-          <Button asChild className="self-start">
+          <Button asChild variant="cta" className="self-start">
             <a href="/sell/register">Register a shop</a>
           </Button>
         </>

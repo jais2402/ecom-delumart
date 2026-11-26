@@ -9,6 +9,8 @@ export interface CartCheckoutGroup {
   sellerKey: string;
   sellerName: string;
   itemNames: string[];
+  /** The same items with what is needed to draw their photos; absent on contexts saved earlier. */
+  items?: { name: string; hue: number; imageSrc?: string }[];
 }
 
 /** Present when the session was created from the cart: what the review step lists. */

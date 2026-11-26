@@ -190,7 +190,11 @@ export function AddressesPanel() {
         <EmptyState
           title="No saved addresses"
           description="You can shop with the fictional delivery spot, or add a real address for a more lifelike checkout."
-          action={<Button onClick={() => open({ mode: "add" })}>Add an address</Button>}
+          action={
+            <Button variant="cta" onClick={() => open({ mode: "add" })}>
+              Add an address
+            </Button>
+          }
         />
       ) : null}
 
@@ -219,7 +223,9 @@ export function AddressesPanel() {
           </Text>
         ) : (
           <div>
-            <Button onClick={() => open({ mode: "add" })}>Add an address</Button>
+            <Button variant="cta" onClick={() => open({ mode: "add" })}>
+              Add an address
+            </Button>
           </div>
         )
       ) : null}

@@ -49,7 +49,7 @@ export function OrdersPanel() {
           title="No orders yet"
           description="When you buy something it will appear here."
           action={
-            <Button asChild>
+            <Button asChild variant="cta">
               <a href="/">Start shopping</a>
             </Button>
           }

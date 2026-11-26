@@ -102,7 +102,7 @@ export function CollectionPanel() {
           title="Nothing collected yet"
           description="Things you buy will live here."
           action={
-            <Button asChild>
+            <Button asChild variant="cta">
               <a href="/">Start shopping</a>
             </Button>
           }

@@ -30,7 +30,7 @@ export function AccountShell({ children }: { children: ReactNode }) {
     <AccountLayout
       header={<SessionHeader />}
       footer={<ShopFooter />}
-      sidebar={<SidebarNav label="Account" items={ITEMS} currentHref={pathname} />}
+      sidebar={<SidebarNav label="Account" items={ITEMS} currentHref={pathname} layout="pills" />}
     >
       {ok ? (
         children

@@ -211,7 +211,7 @@ export function ProfilePanel() {
             ) : null}
           </div>
           {formError ? <Alert tone="danger">{formError}</Alert> : null}
-          <Button type="submit" size="lg" loading={saving} className="self-start">
+          <Button type="submit" variant="cta" size="lg" loading={saving} className="self-start">
             Save changes
           </Button>
         </form>

@@ -74,7 +74,7 @@ export function OverviewPanel() {
             title="No orders yet"
             description="Your first purchase will show up here."
             action={
-              <Button asChild>
+              <Button asChild variant="cta">
                 <a href="/">Start shopping</a>
               </Button>
             }
