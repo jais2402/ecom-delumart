@@ -55,6 +55,10 @@ node tests/e2e/analytics.spec.mjs
 ```
 
 ```bash
+DEV_DB_NAME=delulu_dev node tests/e2e/sale.spec.mjs
+```
+
+```bash
 node tests/a11y/audit.js
 ```
 
@@ -82,6 +86,7 @@ node tests/a11y/audit.js
 | Delivery addresses | Up to 5 per player, encrypted on the web server, chosen at checkout with the fictional spot pre-selected, copied onto the order, never shown to sellers, never affecting price; deleting one wipes it from past orders | Address suites; address journey |
 | Jobs | Signed, replay-protected jobs endpoint; the jobs database role has no direct table access and works only through seven narrow functions; watchdog with a 5-second floor | Generated privilege test over every application table |
 | Web server | Typed configuration with server-only secrets, separate database pools per role, opaque session cookie, session-bound CSRF token and origin check, uniform error envelope, database-backed rate limits, content security policy with per-request nonce, private pages uncacheable | 462 web tests against PostgreSQL; production build checked for secrets in browser code |
+| Sale price and free delivery | Owner sets and ends a sale (new version at the sale price, list price kept, 24-hour "was" rule from the price history, `REFERENCE_PRICE_INELIGIBLE` on request, daily price-change allowance), Pricing and Shipping portal pages with price history, discount-given column in Earnings (migrations 0080-0082, decisions.md #15) | `sale-price` suite in db, sale routes in `listing` web suite, sale-priced listings in the 50-random-cart test, `tests/e2e/sale.spec.mjs` |
 | Ratings and reviews | Owners review what they bought (migrations 0078-0079, decisions.md #14): one per product, versions on edit, delete, screening, public average and bars from integer sums, public from the next reporting day, Super Admin hide and restore; product page section and console page | `reviews` suites in db and web; `tests/e2e/reviews.spec.mjs` |
 | Screens | Storefront, sign-in and onboarding, cart, checkout, receipt and tracking, account, selling hub, passport, shop registration, public shop page, studio (products, orders, earnings, inventory, coupons, appeals), console (moderation, reports, analytics) | Seven browser journeys (21, 19, 15, 17, 15, 10 and 9 steps) |
 | Process | Standards, test catalogue, review mechanism, project agents with model tiers | `docs/engineering-standards.md`, `CLAUDE.md`, `.claude/agents/` |
@@ -117,6 +122,7 @@ Nine independent adversarial reviews, each followed by a fix round with tests th
 | Deployment | Scripts, Vercel configuration, a scheduled-jobs workflow and `docs/deploy-runbook.md` exist. The migrations have never run on real Supabase; the runbook lists 30 assumptions to verify on first deploy. The Turnstile check on sign-in and phone steps has only run against a local stand-in; Cloudflare's own widget has never loaded. |
 | Back office | Console configuration areas (catalogue, delivery, payments, platform coupons). Analytics has no hourly figures and no export. |
 | Payments | DeluluPay ID and net banking methods, platform coupons, membership, warehouse purchases, reversals |
+| Sale price extras | Scheduled sale end, worker price proposals (no seats yet), coupon performance and delivery-speed analytics |
 | Shopping extras | Public shelf, share cards, Express on seed products |
 | Later phases | Brand teams, extra warehouses, collector screens, NPC sandbox, experiments, research dataset |
 | Legal | Privacy notice, terms, research wording |

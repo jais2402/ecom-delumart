@@ -31,6 +31,8 @@ const pages = [
   { path: '/studio/{listing}', as: 'owner', operator: true, label: '/studio/[id] (published listing)' },
   { path: '/studio/{draft}', as: 'owner', operator: true, label: '/studio/[id] (draft)' },
   { path: '/studio/inventory', as: 'owner', operator: true },
+  { path: '/studio/pricing', as: 'owner', operator: true },
+  { path: '/studio/shipping', as: 'owner', operator: true },
   { path: '/studio/overview', as: 'owner', operator: true },
   { path: '/studio/orders', as: 'owner', operator: true },
   { path: '/studio/earnings', as: 'owner', operator: true },

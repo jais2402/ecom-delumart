@@ -20,6 +20,7 @@ On 20 November 2026 the owner asked for open decisions to be made for them. Each
 | 12 | Raw analytics retention on the free database | 30 days, then archive | Keeps the database under its size limit | Raise it on a paid plan |
 | 13 | Tonight's build order | Foundation that can be proven without external accounts: design system, domain logic, database schema and tests, storefront pages on seed data | Everything else needs accounts only the owner can create | — |
 | 14 | Ratings and reviews (not in the PRD; the owner asked for big-marketplace features and delegated product decisions, 26 November 2026) | Owners of a product review it; details below | The most visible missing marketplace feature; kept small and private by default | Hide the product page section and revoke the review functions; the tables can stay |
+| 15 | Sale price, reference price and merchant-funded delivery (PRD R6.2, R6.5, R6.6, R8; the PRD is silent or loose on the points below, so the safer reading was taken, 26 November 2026) | Details below | A sale must not become a way to fake a discount, leak buyer timing, or move money outside the pricing function | Revoke `core.product_set_sale_price` and `core.product_end_sale`; `core.product_sale` can stay |
 
 ### 14. Ratings and reviews
 
@@ -37,6 +38,24 @@ On 20 November 2026 the owner asked for open decisions to be made for them. Each
 | Analytics | `review_submitted` and `review_hidden` server events, with no props, user id or text. |
 | Why the next day (decided in review round 1) | A review under a public handle says that this player owns the product, which is its purpose. The seller sees each order to the minute with no buyer. Publishing a review the moment it is written (or the minute after the purchase) would let a seller match a handle to an order for a product that sells rarely; publishing only the next day, and showing only the day, decouples the review from the order's time, so a review says no more than "bought on or before that day". |
 | Not in this round | Reporting a review (use the console for now), helpfulness votes, photos, seller replies. |
+
+### 15. Sale price, reference price and merchant-funded delivery
+
+| Point | Choice |
+|---|---|
+| What a sale is | A lower live price for a published listing, put there by the owner (`PUT /api/v1/studio/products/{id}/sale-price`, migration 0081). It is a new product version at the sale price, so quotes, carts, purchases and the 5% fee all use it through the one pricing function; outstanding quotes fail at pay with `CART_CHANGED` (US-08). The list price it returns to is kept in `core.product_sale` (one open sale per product; no role reads or writes it directly). The fee is on the sale price (R6.6: "what the seller is selling it for"). |
+| Sale price is not a "discount given" | "Discount given" in finances is the seller-funded coupon discount only (R6.6, R8). A sale shows up as a lower gross, never as a discount, so nothing is counted twice. |
+| Ending a sale | Manual only (`DELETE` on the same route): a new version at the list price. No scheduled end date (the PRD has none). |
+| List price during a sale | `core.product_set_price` is refused (`NOT_EDITABLE`) while a sale is open: end the sale first. Otherwise the price a sale returns to could move under it. |
+| The reference ("was") price | Derived, never stored: `core.reference_price` (0043) from the price history. It shows only when the price right before the current one was the published price for at least `reference_price_min_hours` (24) continuous hours and the listing was not hidden meanwhile. A sale ended and restarted shows none until the list price has been live 24 hours again; a lowered sale price takes the earlier sale price as its reference only if that one lasted 24 hours. |
+| Asking for a reference | `requireReference: true` makes the command refuse with `REFERENCE_PRICE_INELIGIBLE` (HTTP 422), changing nothing, when no reference would show. Without it the sale applies and the shop shows only the current price. The owner's listing view carries `canShowReference` so the screen can say what will happen. |
+| Allowance | `price_changes_per_product_per_day` (20) within `price_change_window_hours` (24), per listing, counted over price changes, sales, sale price changes and ends: beyond it `RATE_LIMITED`. A same-price call writes and counts nothing. Stops a price being flipped to keep quotes failing or to manufacture a reference. |
+| Workers | R8 says a worker cannot change a live price. There are no worker seats yet; every studio command finds the company by `owner_user_id`, so a non-owner gets `NOT_FOUND` (another company's listing) or `COMPANY_FEE_REQUIRED`. Tested as such; revisit when seats exist. |
+| Free Standard delivery | Per product (R8 Shipping row), toggled in the product editor and on the new Shipping page. A seller order is delivery-free only when every line in it offers it (LLD §5.1); otherwise the buyer pays the fee. If the proceeds cannot fund the fee, the quote is refused (`DELIVERY_UNAVAILABLE`, existing rule), which a deep sale price can trigger. The fee is taken from the seller and goes to SINK. |
+| Events | `sale_price_set` (start or change) and `sale_price_ended` are domain events in the outbox with ids and prices only. They are not product-analytics events: the analytics allow-lists (0052) are unchanged. |
+| Finances | `core.earnings_totals` gains `discountPaise`. Each period shows gross (after seller discounts), discounts given, marketplace fees, merchant-funded delivery and net once each; net = gross - fees - merchant-funded delivery and equals the owner's ledger credit. Order times stay delayed by a minute (0060). |
+| Cart preview and coupons | When a cart cannot be priced even without its coupon, the preview now reports the coupon's refusal first, as checkout does. Found by the extended 50-random-cart test. |
+| Delulu Plus | Not built. The pricing function's member flag is untouched: a member's Standard fee is 0, so a merchant-funded Standard delivery then costs the seller 0. |
 
 ## Cannot be decided for you
 
