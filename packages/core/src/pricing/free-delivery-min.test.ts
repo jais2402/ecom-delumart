@@ -44,6 +44,19 @@ describe("minPriceForFreeDelivery", () => {
     );
   });
 
+  it("the price minimum is a parameter (the configured price_min_paise) and defaults to the seed", () => {
+    // a Standard fee of ₹0 leaves only the minimum price
+    const noFee: PricingConfig = {
+      ...DEFAULT_PRICING_CONFIG,
+      deliveryFeePaise: { ...DEFAULT_PRICING_CONFIG.deliveryFeePaise, STANDARD: 0n },
+    };
+    expect(minPriceForFreeDelivery(noFee)).toBe(MIN_PRICE_PAISE);
+    expect(minPriceForFreeDelivery(noFee, 50_000n)).toBe(50_000n);
+    // a higher configured minimum lifts a floor that would be lower, and never lowers a higher one
+    expect(minPriceForFreeDelivery(DEFAULT_PRICING_CONFIG, 500_000n)).toBe(500_000n);
+    expect(minPriceForFreeDelivery(DEFAULT_PRICING_CONFIG, 20_000n)).toBe(105_300n);
+  });
+
   it("a 100% fee can never fund it", () => {
     expect(minPriceForFreeDelivery({ ...DEFAULT_PRICING_CONFIG, feePercent: 100 })).toBeNull();
   });

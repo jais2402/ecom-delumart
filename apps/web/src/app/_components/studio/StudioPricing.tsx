@@ -227,7 +227,9 @@ function PricingCard({ initial }: { initial: Listing }) {
           priceReading(price) ??
           (sale.canShowReference && sale.referenceCeilingPaise
             ? `A "Was" price of ${formatInrExact(parsePaise(sale.referenceCeilingPaise))} will show if you set a lower sale price now (the lowest price of the last ${rules.referenceLookbackDays} days).`
-            : `A "Was" price would not show now: the listing has not been published for ${rules.referenceMinHours} hours yet (hidden time does not count).`) +
+            : sale.referenceCeilingPaise
+              ? `The lowest price of the last ${rules.referenceLookbackDays} days is ${formatInrExact(parsePaise(sale.referenceCeilingPaise))}, which leaves no lower sale price that could show as "Was".`
+              : `A "Was" price would not show now: the listing has not been published for ${rules.referenceMinHours} hours yet (hidden time does not count).`) +
             (listing.freeStandardDelivery && freeMin !== null
               ? ` Free Standard delivery is on: the price must be at least ${formatInrExact(freeMin)}.`
               : "") +

@@ -9,16 +9,22 @@ import fc from "fast-check";
 import type pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { catalogProduct, catalogProducts, storeProducts } from "../src/catalog";
+import { createCheckoutSession } from "../src/checkout";
 import {
   archiveProduct,
+  createDraft,
+  decideListing,
   endSale,
   hideListing,
   myProduct,
   myProducts,
   restoreListing,
+  reviseProduct,
   setProductPrice,
   setProductShipping,
   setSalePrice,
+  submitProduct,
+  updateDraft,
 } from "../src/listing";
 import { createCoupon, myEarnings } from "../src/merchant";
 import {
@@ -26,7 +32,9 @@ import {
   CLEAN,
   checkout,
   codeOf,
+  count,
   journalPostings,
+  key,
   type ProductFixture,
   payFor,
   RUPEE,
@@ -36,7 +44,15 @@ import {
   user,
 } from "./checkout-fixtures";
 import { createTestDatabase, inTx, plant, stateOf, type TestDatabase, type TestUser } from "./helpers";
-import { asFixture, type Creator, creator, ensureCategories, publishListing } from "./listing-fixtures";
+import {
+  asFixture,
+  type Creator,
+  creator,
+  draftInput,
+  ensureCategories,
+  publishListing,
+  screen,
+} from "./listing-fixtures";
 import { published } from "./selling-fixtures";
 
 const REASON = "Checking the sale price rules.";
@@ -85,6 +101,35 @@ describe("sale price and merchant-funded delivery (migrations 0080-0082)", () =>
     );
   const ref = async (productId: string) => (await catalogProduct(pool, productId))?.referencePricePaise;
   const live = async (c: Creator, productId: string) => myProduct(pool, { ...as(c.u), productId });
+  /** Runs fn under a configuration version with `json` merged into the latest values, then puts those keys back. */
+  const withConfig = async (json: string, fn: () => Promise<void>) => {
+    const keys = Object.keys(JSON.parse(json) as Record<string, unknown>);
+    const before = (
+      await pool.query<{ v: Record<string, unknown> }>(
+        "SELECT values AS v FROM core.config_version ORDER BY id DESC LIMIT 1",
+      )
+    ).rows[0]?.v as Record<string, unknown>;
+    await inTx(pool, async (x) => {
+      await x.query(
+        `INSERT INTO core.config_version (values, effective_from, note)
+         SELECT values || $1::jsonb, now(), 'sale price test' FROM core.config_version ORDER BY id DESC LIMIT 1`,
+        [json],
+      );
+    });
+    try {
+      await fn();
+    } finally {
+      const restore = Object.fromEntries(keys.filter((k) => k in before).map((k) => [k, before[k]]));
+      await inTx(pool, async (x) => {
+        await x.query(
+          `INSERT INTO core.config_version (values, effective_from, note)
+           SELECT (values - $1::text[]) || $2::jsonb, now(), 'sale price test: restore'
+             FROM core.config_version ORDER BY id DESC LIMIT 1`,
+          [keys, JSON.stringify(restore)],
+        );
+      });
+    }
+  };
   const versions = (productId: string) =>
     pool
       .query<{ n: string }>("SELECT count(*) AS n FROM core.product_version WHERE product_id = $1", [
@@ -348,57 +393,55 @@ describe("sale price and merchant-funded delivery (migrations 0080-0082)", () =>
       expect(await versions(l.productId)).toBe(n);
     });
 
-    it("US-08: price changes per listing per day are limited from configuration (RATE_LIMITED); ending a sale is never blocked or counted", async () => {
-      await inTx(pool, async (x) => {
-        await x.query(
-          `INSERT INTO core.config_version (values, effective_from, note)
-           SELECT values || '{"price_changes_per_product_per_day": 3}'::jsonb, now(), 'price change cap test'
-             FROM core.config_version ORDER BY id DESC LIMIT 1`,
-        );
-      });
-      try {
+    it("US-08: price changes per listing per day are limited from configuration (RATE_LIMITED); an end is never blocked but counts, so start/end cycles are bounded", async () => {
+      await withConfig('{"price_changes_per_product_per_day": 3}', async () => {
         const c = await store();
         const l = await publishListing(pool, c, { pricePaise: 1_000n * RUPEE });
         const go = (p: bigint) =>
           setSalePrice(pool, { ...as(c.u), productId: l.productId, salePricePaise: p });
+        const end = () => endSale(pool, { ...as(c.u), productId: l.productId });
         expect((await live(c, l.productId)).sale.rules).toMatchObject({
           priceChangesPerDay: 3,
           changesRemaining: 3,
         });
-        await go(900n * RUPEE); // 1
-        await go(800n * RUPEE); // 2
-        await go(700n * RUPEE); // 3: at the cap
+        await go(900n * RUPEE); // 1: start
+        await end(); // 2: end
+        await go(900n * RUPEE); // 3: start again; at the cap with a sale open
         expect((await live(c, l.productId)).sale.rules.changesRemaining).toBe(0);
-        expect(await codeOf(go(600n * RUPEE))).toBe("RATE_LIMITED");
+        // no more starts or changes, and no list price change, at the cap
+        expect(await codeOf(go(800n * RUPEE))).toBe("RATE_LIMITED");
         // fixing a mistake: ending the sale still works at the cap, and writes its history row
-        const ended = await endSale(pool, { ...as(c.u), productId: l.productId });
+        const ended = await end();
         expect(ended.live?.pricePaise).toBe(1_000n * RUPEE);
         expect(ended.priceHistory[0]?.reason).toBe("SALE_END");
-        // starting a sale and changing the list price stay capped
+        // ... but it counted: the next start is refused, and so is a list price change
         expect(await codeOf(go(900n * RUPEE))).toBe("RATE_LIMITED");
         expect(
           await codeOf(
             setProductPrice(pool, { ...as(c.u), productId: l.productId, pricePaise: 1_200n * RUPEE }),
           ),
         ).toBe("RATE_LIMITED");
-        // the end did not use up an allowance (another listing has its own, and an end counts for none)
+        // another listing has its own allowance
         const other = await publishListing(pool, c, { pricePaise: 1_000n * RUPEE });
-        expect(
-          await codeOf(
-            setSalePrice(pool, { ...as(c.u), productId: other.productId, salePricePaise: 900n * RUPEE }),
-          ),
-        ).toBe("ok");
-        expect(await codeOf(endSale(pool, { ...as(c.u), productId: other.productId }))).toBe("ok");
-        expect((await live(c, other.productId)).sale.rules.changesRemaining).toBe(2);
-      } finally {
-        await inTx(pool, async (x) => {
-          await x.query(
-            `INSERT INTO core.config_version (values, effective_from, note)
-             SELECT values || '{"price_changes_per_product_per_day": 20}'::jsonb, now(), 'price change cap test: restore'
-               FROM core.config_version ORDER BY id DESC LIMIT 1`,
-          );
-        });
+        await setSalePrice(pool, { ...as(c.u), productId: other.productId, salePricePaise: 900n * RUPEE });
+        await endSale(pool, { ...as(c.u), productId: other.productId });
+        expect((await live(c, other.productId)).sale.rules.changesRemaining).toBe(1);
+      });
+    });
+
+    it("US-08: with the default allowance of 20, ten start/end cycles use it up (20 cycles are no longer possible)", async () => {
+      const c = await store();
+      const l = await publishListing(pool, c, { pricePaise: 1_000n * RUPEE });
+      for (let i = 0; i < 10; i++) {
+        await setSalePrice(pool, { ...as(c.u), productId: l.productId, salePricePaise: 900n * RUPEE });
+        await endSale(pool, { ...as(c.u), productId: l.productId });
       }
+      expect(
+        await codeOf(
+          setSalePrice(pool, { ...as(c.u), productId: l.productId, salePricePaise: 900n * RUPEE }),
+        ),
+      ).toBe("RATE_LIMITED");
+      expect((await live(c, l.productId)).sale.rules.changesRemaining).toBe(0);
     });
   });
 
@@ -991,6 +1034,257 @@ describe("sale price and merchant-funded delivery (migrations 0080-0082)", () =>
       expect(shown).toBeGreaterThan(0);
       expect(refused).toBeGreaterThan(0);
     }, 300_000);
+  });
+
+  describe("free delivery cannot bypass the floor (review round 2, major 1)", () => {
+    const floor = 1_053n * RUPEE;
+    const draftErr = (fn: () => Promise<unknown>) =>
+      fn().then(
+        () => null,
+        (e: unknown) => e as { code: string; message: string },
+      );
+
+    it("R6.5: a draft created, updated or submitted with free Standard delivery on at a price that cannot fund it is refused, naming the minimum", async () => {
+      const c = await store();
+      const e1 = await draftErr(() =>
+        createDraft(pool, {
+          ...as(c.u),
+          draft: draftInput({ pricePaise: 100n * RUPEE, freeStandardDelivery: true }),
+        }),
+      );
+      expect(e1?.code).toBe("FREE_DELIVERY_UNFUNDED");
+      expect(e1?.message).toContain("1053");
+      // a draft without the flag is fine, and updating it into the flag at ₹100 is refused
+      const d = await createDraft(pool, { ...as(c.u), draft: draftInput({ pricePaise: 100n * RUPEE }) });
+      const e2 = await draftErr(() =>
+        updateDraft(pool, { ...as(c.u), productId: d.productId, changes: { freeStandardDelivery: true } }),
+      );
+      expect(e2?.code).toBe("FREE_DELIVERY_UNFUNDED");
+      expect((await myProduct(pool, { ...as(c.u), productId: d.productId })).freeStandardDelivery).toBe(
+        false,
+      );
+      // lowering the price of a flagged draft under the floor is refused; at the floor it is fine
+      const f = await createDraft(pool, {
+        ...as(c.u),
+        draft: draftInput({ pricePaise: floor, freeStandardDelivery: true }),
+      });
+      expect(
+        (
+          await draftErr(() =>
+            updateDraft(pool, { ...as(c.u), productId: f.productId, changes: { pricePaise: floor - RUPEE } }),
+          )
+        )?.code,
+      ).toBe("FREE_DELIVERY_UNFUNDED");
+      expect(
+        await codeOf(
+          updateDraft(pool, { ...as(c.u), productId: f.productId, changes: { name: "Still fine" } }),
+        ),
+      ).toBe("ok");
+      // a draft that got an unfunded flag some other way (the floor moved) cannot be submitted
+      await withConfig('{"fee_percent": 50}', async () => {
+        expect(
+          (await draftErr(() => submitProduct(pool, { ...as(c.u), productId: f.productId })))?.code,
+        ).toBe("FREE_DELIVERY_UNFUNDED");
+      });
+      expect(await codeOf(submitProduct(pool, { ...as(c.u), productId: f.productId }))).toBe("ok");
+    });
+
+    it("R6.5: the approval backstop: a first submission that became unfunded before approval is rejected with the reason, never published", async () => {
+      const c = await store();
+      const d = await createDraft(pool, {
+        ...as(c.u),
+        draft: draftInput({ pricePaise: floor, freeStandardDelivery: true, quantity: 2 }),
+      });
+      await submitProduct(pool, { ...as(c.u), productId: d.productId });
+      await withConfig('{"fee_percent": 50}', async () => {
+        expect(await screen(pool, d.productId, "OK")).toMatchObject({ outcome: "REJECTED" });
+      });
+      const after = await myProduct(pool, { ...as(c.u), productId: d.productId });
+      expect(after.status).toBe("REJECTED");
+      expect(after.moderationReason).toMatch(/free Standard delivery needs a price of at least ₹\d+/);
+      expect(after.lastDecision).toMatchObject({
+        state: "REJECTED",
+        reasons: [{ field: "freeStandardDelivery", code: "UNFUNDED" }],
+      });
+      expect(after.live).toBeNull();
+      expect(
+        await count(pool, "SELECT count(*) AS n FROM core.inventory_unit WHERE product_id = $1", [
+          d.productId,
+        ]),
+      ).toBe(0);
+    });
+
+    it("R6.5: the approval backstop for a revision: the revision is rejected and the live listing stays as it was", async () => {
+      const c = await store();
+      const l = await publishListing(pool, c, {
+        pricePaise: 1_500n * RUPEE,
+        quantity: 2,
+        freeStandardDelivery: true,
+      });
+      await reviseProduct(pool, {
+        ...as(c.u),
+        productId: l.productId,
+        revision: { name: "Moon Lamp Deluxe" },
+      });
+      await withConfig('{"fee_percent": 50}', async () => {
+        expect(await screen(pool, l.productId, "OK")).toMatchObject({ outcome: "REJECTED" });
+      });
+      const after = await myProduct(pool, { ...as(c.u), productId: l.productId });
+      expect(after.status).toBe("PUBLISHED");
+      expect(after.live?.name).toBe(l.live?.name);
+      expect(after.lastDecision).toMatchObject({ kind: "REVISION", state: "REJECTED" });
+      expect(after.lastDecision?.reason).toMatch(/at least ₹/);
+    });
+
+    it("R6.5: a Super Admin approval is held to the same backstop, and publishing from a stock wait refuses an unfunded listing", async () => {
+      const c = await store();
+      const d = await createDraft(pool, {
+        ...as(c.u),
+        draft: draftInput({ pricePaise: floor, freeStandardDelivery: true, quantity: 2 }),
+      });
+      await submitProduct(pool, { ...as(c.u), productId: d.productId });
+      await screen(pool, d.productId, "NEEDS_REVIEW");
+      await withConfig('{"fee_percent": 50}', async () => {
+        const r = await decideListing(pool, {
+          ...as(admin),
+          productId: d.productId,
+          versionId: (await myProduct(pool, { ...as(c.u), productId: d.productId })).pending?.version
+            .versionId as string,
+          decision: "APPROVE",
+          reason: REASON,
+        });
+        expect(r.outcome).toBe("REJECTED");
+      });
+      expect((await myProduct(pool, { ...as(c.u), productId: d.productId })).status).toBe("REJECTED");
+    });
+  });
+
+  describe("the floor against the real checkout under another configuration (review round 2, minor 1)", () => {
+    it("R6.5: at a non-default fee and Standard fee, a quote at the SQL floor minus one rupee is refused and at the floor accepted", async () => {
+      const cfg = {
+        ...DEFAULT_PRICING_CONFIG,
+        feePercent: 10,
+        deliveryFeePaise: { ...DEFAULT_PRICING_CONFIG.deliveryFeePaise, STANDARD: 250_000n },
+      };
+      const expected = minPriceForFreeDelivery(cfg) as bigint;
+      expect(expected).toBe(277_800n);
+      const c = await store();
+      // listed under the default configuration, where both prices fund the fee
+      const below = await publishListing(pool, c, {
+        pricePaise: expected - RUPEE,
+        quantity: 2,
+        freeStandardDelivery: true,
+      });
+      const at = await publishListing(pool, c, {
+        pricePaise: expected,
+        quantity: 2,
+        freeStandardDelivery: true,
+      });
+      await withConfig(
+        '{"fee_percent": 10, "delivery_fee_paise": {"STANDARD": "250000", "EXPRESS": "1000000", "ZAP": "5000000"}}',
+        async () => {
+          expect((await live(c, at.productId)).sale.rules.freeDeliveryMinPaise).toBe(expected);
+          const buyer = await user(pool);
+          const quote = (l: typeof below) =>
+            createCheckoutSession(pool, {
+              authSessionId: buyer.authSessionId,
+              lines: [{ productId: l.productId }],
+              speedBySeller: std(c),
+              idempotencyKey: key(),
+            });
+          expect(await codeOf(quote(below))).toBe("DELIVERY_UNAVAILABLE");
+          const ok = await quote(at);
+          expect(ok.totalPaise).toBe(expected);
+          // and the sale-price path agrees at the same floor
+          expect(
+            await codeOf(
+              setSalePrice(pool, { ...as(c.u), productId: at.productId, salePricePaise: expected - RUPEE }),
+            ),
+          ).toBe("FREE_DELIVERY_UNFUNDED");
+        },
+      );
+    });
+
+    it("R6.5: the quote-time guard still fires for a reachable unfunded case: a merchant coupon that pushes the seller's credit below the fee", async () => {
+      const c = await store();
+      const l = await publishListing(pool, c, {
+        pricePaise: 2_000n * RUPEE,
+        quantity: 3,
+        freeStandardDelivery: true,
+      });
+      await createCoupon(pool, {
+        ...as(c.u),
+        coupon: { kind: "PERCENT", value: 50n, isPublic: true, publicCode: "HALFOFF" },
+      });
+      const buyer = await user(pool);
+      // ₹2,000 funds the fee; after 50% off the seller's credit (₹1,000 - ₹50 fee) is below the ₹1,000 fee
+      expect(await codeOf(checkout(pool, buyer, [asFixture(l)], std(c), "halfoff"))).toBe(
+        "DELIVERY_UNAVAILABLE",
+      );
+      expect(await codeOf(checkout(pool, buyer, [asFixture(l)], std(c)))).toBe("ok");
+    });
+  });
+
+  describe("configuration edges (review round 2, minor 2)", () => {
+    it("the free-delivery floor reads the configured price minimum, as core's function does with it as a parameter", async () => {
+      await withConfig(
+        '{"price_min_paise": "500000", "delivery_fee_paise": {"STANDARD": "0", "EXPRESS": "1000000", "ZAP": "5000000"}}',
+        async () => {
+          const c = await store();
+          const l = await publishListing(pool, c, { pricePaise: 5_000n * RUPEE, quantity: 2 });
+          const expected = minPriceForFreeDelivery(
+            {
+              ...DEFAULT_PRICING_CONFIG,
+              deliveryFeePaise: { ...DEFAULT_PRICING_CONFIG.deliveryFeePaise, STANDARD: 0n },
+            },
+            500_000n,
+          );
+          expect((await live(c, l.productId)).sale.rules.freeDeliveryMinPaise).toBe(expected);
+          expect(expected).toBe(500_000n);
+        },
+      );
+    });
+
+    it("a zero, huge or negative reference or window configuration is clamped, never an error on a public read", async () => {
+      const c = await store();
+      const l = await publishListing(pool, c, { pricePaise: 1_000n * RUPEE });
+      await ageHistory(l.productId, "50 hours");
+      await setSalePrice(pool, { ...as(c.u), productId: l.productId, salePricePaise: 800n * RUPEE });
+      const cases: [string, Record<string, number>][] = [
+        [
+          '{"reference_price_lookback_days": 0, "reference_price_min_hours": 0, "price_change_window_hours": 0}',
+          { referenceLookbackDays: 1, referenceMinHours: 1, priceChangeWindowHours: 1 },
+        ],
+        [
+          '{"reference_price_lookback_days": 999999999999, "reference_price_min_hours": 999999999999, "price_change_window_hours": 999999999999}',
+          { referenceLookbackDays: 365, referenceMinHours: 8760, priceChangeWindowHours: 8760 },
+        ],
+        // a negative number is not a configuration value: the default applies
+        [
+          '{"reference_price_lookback_days": -5, "reference_price_min_hours": -1, "price_change_window_hours": -3}',
+          { referenceLookbackDays: 30, referenceMinHours: 24, priceChangeWindowHours: 24 },
+        ],
+        // hours above lookback x 24 are clamped to it
+        [
+          '{"reference_price_lookback_days": 2, "reference_price_min_hours": 500}',
+          { referenceLookbackDays: 2, referenceMinHours: 48 },
+        ],
+      ];
+      for (const [json, expected] of cases) {
+        await withConfig(json, async () => {
+          // public reads and the owner's view never error
+          expect(await catalogProduct(pool, l.productId)).toMatchObject({ productId: l.productId });
+          expect((await catalogProducts(pool, { cursor: null, pageSize: 50 })).items.length).toBeGreaterThan(
+            0,
+          );
+          expect((await live(c, l.productId)).sale.rules).toMatchObject(expected);
+        });
+      }
+      // with the minimum hours clamped to 1, a price live for 50 hours shows its reference to a lower sale
+      await withConfig('{"reference_price_min_hours": 0}', async () => {
+        expect((await live(c, l.productId)).sale.canShowReference).toBe(true);
+      });
+    });
   });
 
   describe("configuration is visible (review minor 5)", () => {
