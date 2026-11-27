@@ -34,6 +34,11 @@ export interface ApiRequest {
   /** One key per user intent; the same key is reused on every retry. */
   idempotencyKey?: string;
   signal?: AbortSignal;
+  /**
+   * Let a small write finish even if the page is left straight after it (fetch keepalive). For
+   * optimistic toggles such as saving a product, where the control already shows the new state.
+   */
+  keepalive?: boolean;
 }
 
 type Sleep = (ms: number) => Promise<void>;
@@ -114,6 +119,7 @@ export async function api<T>(path: string, request: ApiRequest = {}): Promise<T>
       const init: RequestInit = { method, credentials: "same-origin", headers, cache: "no-store" };
       if (request.body !== undefined) init.body = JSON.stringify(request.body);
       if (request.signal) init.signal = request.signal;
+      if (request.keepalive) init.keepalive = true;
 
       const response = await fetch(path, init);
       if (response.ok) return (await response.json()) as T;

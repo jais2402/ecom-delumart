@@ -76,8 +76,9 @@ export async function toggleSaved(productId: string): Promise<ToggleResult> {
   else optimistic.add(id);
   set({ ...state, ids: optimistic });
   try {
-    if (wasSaved) await api(`/api/v1/saves/${id}`, { method: "DELETE" });
-    else await api("/api/v1/saves", { method: "POST", body: { productId: id } });
+    // keepalive: the heart already shows the new state, so leaving the page at once must not drop it
+    if (wasSaved) await api(`/api/v1/saves/${id}`, { method: "DELETE", keepalive: true });
+    else await api("/api/v1/saves", { method: "POST", body: { productId: id }, keepalive: true });
     if (inflight) overrides.set(id, !wasSaved);
     return { ok: true, saved: !wasSaved };
   } catch (error) {

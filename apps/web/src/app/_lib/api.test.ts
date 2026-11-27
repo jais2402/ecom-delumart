@@ -38,6 +38,17 @@ describe("api client", () => {
     expect(post?.[1]?.credentials).toBe("same-origin");
   });
 
+  it("asks the browser to finish a keepalive write even if the page is left, and only when asked", async () => {
+    fetchMock.mockImplementation(async (input) =>
+      String(input).endsWith("/csrf") ? json(200, { csrfToken: "tok" }) : json(200, { ok: true }),
+    );
+    await api("/api/v1/saves", { method: "POST", body: { productId: "p" }, keepalive: true });
+    await api("/api/v1/other", { method: "POST", body: {} });
+    const calls = fetchMock.mock.calls;
+    expect(calls.find(([url]) => url === "/api/v1/saves")?.[1]?.keepalive).toBe(true);
+    expect(calls.find(([url]) => url === "/api/v1/other")?.[1]?.keepalive).toBeUndefined();
+  });
+
   it("throws a typed ApiError and does not retry a non-retryable error", async () => {
     fetchMock.mockResolvedValue(failure(422, "PIN_INCORRECT", false));
     await expect(api("/api/v1/me")).rejects.toMatchObject({ code: "PIN_INCORRECT", retryable: false });
