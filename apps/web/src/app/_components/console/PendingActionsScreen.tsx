@@ -3,11 +3,11 @@
 import { formatCountdown, secondsUntil } from "@delulu/core";
 import { Alert, Badge, DataTable, DecisionForm, EmptyState, Heading, Pagination, Text } from "@delulu/ui";
 import { useCallback, useEffect, useState } from "react";
+import { actionWords } from "../../_lib/action-words";
 import {
   type AdminActionItem,
   type AdminActionsResponse,
   actionErrorText,
-  actionSentence,
   formatWhen,
   stateBadge,
 } from "../../_lib/admin-actions";
@@ -126,7 +126,7 @@ export function PendingActionsScreen() {
             emptyTitle="No history yet"
             emptyDescription="Applied, cancelled and failed changes are listed here."
             columns={[
-              { key: "change", header: "Change", cell: (a) => actionSentence(a) },
+              { key: "change", header: "Change", cell: (a) => actionWords(a) },
               {
                 key: "state",
                 header: "Result",
@@ -175,7 +175,7 @@ function WaitingCard({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const sentence = actionSentence(action);
+  const sentence = actionWords(action);
   const left = secondsUntil(action.notBefore, serverNow);
 
   async function cancel(reason: string) {

@@ -20,6 +20,8 @@ export interface AdminActionItem {
   kind: string;
   key: string | null;
   value: string | null;
+  /** A `payment_method.set` action's new settings (limits as decimal strings); absent for other kinds. */
+  details?: Record<string, unknown>;
   reason: string | null;
   state: AdminActionState;
   proposedAt: string;

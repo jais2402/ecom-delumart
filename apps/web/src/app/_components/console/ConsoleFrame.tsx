@@ -27,6 +27,7 @@ export function ConsoleFrame({ current, children }: { current: string; children:
             { label: "Reviews", href: "/console/reviews" },
             { label: "Pending actions", href: "/console/actions" },
             { label: "Configuration", href: "/console/configuration" },
+            { label: "Payment methods", href: "/console/payment-methods" },
             { label: "Analytics", href: "/console/analytics" },
             { label: "Usage by place", href: "/console/analytics/places" },
             { label: "Top sellers", href: "/console/analytics/top" },
