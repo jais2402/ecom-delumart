@@ -175,6 +175,12 @@ try {
       await page.getByRole("heading", { level: 1, name: product.name }).waitFor();
       await page.getByRole("button", { name: `Save ${product.name}` }).click();
       await page.getByRole("button", { name: `Remove ${product.name} from saved` }).waitFor();
+      // The heart flips at once (optimistic); the polite announcement is only made after the server
+      // has confirmed. Wait for it, or the next page.goto cancels the POST still in flight.
+      await page
+        .getByRole("status")
+        .filter({ hasText: `${product.name} saved.` })
+        .waitFor();
     }
     await page.goto("/account/saved");
     await page.getByRole("heading", { level: 1, name: "Saved products" }).waitFor();
