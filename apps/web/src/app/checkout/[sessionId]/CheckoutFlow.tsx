@@ -1,5 +1,6 @@
 "use client";
 
+import { looksLikeRealPaymentData, PAYMENT_SCENARIOS, parseDeluluPayId } from "@delulu/core";
 import {
   Alert,
   BankChallenge,
@@ -10,13 +11,16 @@ import {
   DestinationChoice,
   EmptyState,
   FictionLabel,
+  FormField,
   Heading,
+  Input,
   OrderGroupReview,
   type OrderItem,
   OrderItemsList,
   OrderSummary,
   PaymentMethodOption,
   Price,
+  Select,
   SiteFooter,
   Spinner,
   Text,
@@ -24,6 +28,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LoadingBlock } from "../../_components/LoadState";
+import { DeluluPayStep } from "../../_components/payments/DeluluPayStep";
 import { SessionHeader } from "../../_components/SessionHeader";
 import { addAddressHref, FICTIONAL_SPOT } from "../../_lib/addresses";
 import {
@@ -45,6 +50,8 @@ import {
   saveCheckoutContext,
 } from "../../_lib/checkout-context";
 import { parsePaise } from "../../_lib/money";
+import { formatWhen } from "../../_lib/orders";
+import { methodLabel, type PaymentMethodsResponse, unavailableText } from "../../_lib/payments";
 import { photoSrcOf } from "../../_lib/product-photos";
 import { refreshSession } from "../../_lib/session-store";
 import { requestQuote } from "../../_lib/start-checkout";
@@ -53,8 +60,8 @@ import { useProducts } from "../../_lib/use-products";
 import { useRequireAccount } from "../../_lib/use-require-account";
 
 type Step = "speed" | "payment" | "review";
-type Method = "CARD" | "BALANCE";
-type Phase = "idle" | "challenge" | "processing";
+type Method = "CARD" | "DELULUPAY_ID" | "NET_BANKING" | "BALANCE";
+type Phase = "idle" | "challenge" | "bank" | "processing";
 
 interface Notice {
   tone: "danger" | "warning" | "info";
@@ -87,6 +94,10 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
   const [status, setStatus] = useState("");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [pinError, setPinError] = useState<string | undefined>();
+  const [typedId, setTypedId] = useState<string | null>(null);
+  const [idError, setIdError] = useState<string | undefined>();
+  const [scenario, setScenario] = useState("");
+  const offers = useApiGet<PaymentMethodsResponse>(ok ? "/api/v1/payment-methods" : null);
   const [unavailable, setUnavailable] = useState<ReadonlySet<Speed>>(new Set());
   const attemptId = useRef<string | null>(null);
   const payKey = useRef<string | null>(null);
@@ -184,7 +195,25 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
       : !card.pinSet
         ? "Set your game PIN first."
         : undefined;
-  const effectiveMethod: Method = method === "CARD" && cardReason ? "BALANCE" : method;
+  // what the bank offers now (configuration, switches, maintenance); until it answers, the four as configured
+  const offerOf = (m: Method) =>
+    offers.status === "ready" ? offers.data.methods.find((o) => o.method === m) : undefined;
+  const methodReason = (m: Method): string | undefined => {
+    if (m === "CARD" && cardReason) return cardReason;
+    const offer = offerOf(m);
+    if (offer && !offer.available) return unavailableText(offer, formatWhen);
+    return undefined;
+  };
+  const orderedMethods: Method[] =
+    offers.status === "ready"
+      ? [...offers.data.methods].sort((a, b) => a.displayOrder - b.displayOrder).map((o) => o.method)
+      : ["CARD", "DELULUPAY_ID", "NET_BANKING", "BALANCE"];
+  const effectiveMethod: Method = !methodReason(method)
+    ? method
+    : (orderedMethods.find((m) => !methodReason(m)) ?? "BALANCE");
+  const ownId = session.account?.delulupayId ?? "";
+  const idText = typedId ?? ownId;
+  const accountAlias = session.account?.bankAlias ?? "Your Delulu Bank account";
   const offered: Speed[] = ["STANDARD", ...ALTERNATIVES.filter((s) => ctx.quotes[s])];
   const saved = addresses.status === "ready" ? addresses.data.items : [];
   // the fictional spot is pre-selected (decisions.md #4); a chosen address that is gone falls back to it
@@ -340,11 +369,27 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
       case "AUTH_REQUIRED":
         router.replace(`/sign-in?next=${encodeURIComponent(`/checkout/${sessionId}`)}`);
         return;
+      case "CANCELLED":
+        setNotice({
+          tone: "info",
+          title: "Payment cancelled",
+          text: `You declined this payment. ${nothingMoved}`,
+        });
+        return;
+      case "CHALLENGE_LOCKED":
+      case "CHALLENGE_EXPIRED":
+      case "METHOD_UNAVAILABLE":
+      case "METHOD_LIMIT_EXCEEDED":
+      case "BANK_UNAVAILABLE":
+        // the server's wording already says that no fictional money moved; pick another method or start again
+        offers.reload();
+        setNotice({ tone: "warning", title: "Payment not completed", text: err.message });
+        return;
       default:
         setNotice({
           tone: "danger",
           title: "Payment not completed",
-          text: `${err.message} ${nothingMoved}`,
+          text: err.message.includes(nothingMoved) ? err.message : `${err.message} ${nothingMoved}`,
         });
     }
   }
@@ -382,7 +427,13 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
     if (working.current) return;
     working.current = true;
     setPhase("processing");
-    begin(effectiveMethod === "CARD" ? "Opening the card check…" : "Starting your payment…");
+    begin(
+      effectiveMethod === "CARD"
+        ? "Opening the card check…"
+        : effectiveMethod === "NET_BANKING"
+          ? "Opening Delulu Bank…"
+          : "Starting your payment…",
+    );
     try {
       // where the order goes; the database checks the address is the player's own, again at payment
       await api(`/api/v1/checkout-sessions/${quote.id}`, {
@@ -393,8 +444,16 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
         `/api/v1/checkout-sessions/${quote.id}/attempts`,
         {
           method: "POST",
-          body:
-            effectiveMethod === "CARD" && card ? { method: "CARD", cardId: card.id } : { method: "BALANCE" },
+          body: {
+            ...(effectiveMethod === "CARD" && card
+              ? { method: "CARD", cardId: card.id }
+              : effectiveMethod === "DELULUPAY_ID"
+                ? { method: "DELULUPAY_ID", delulupayId: idText.trim() }
+                : effectiveMethod === "NET_BANKING"
+                  ? { method: "NET_BANKING" }
+                  : { method: "BALANCE" }),
+            ...(scenario && offers.status === "ready" && offers.data.scenariosAllowed ? { scenario } : {}),
+          },
         },
       );
       attemptId.current = attempt.id;
@@ -402,6 +461,10 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
       working.current = false;
       if (attempt.authenticated) {
         await pay();
+      } else if (effectiveMethod === "NET_BANKING" || effectiveMethod === "DELULUPAY_ID") {
+        // the bank step: a code from the inbox, or an approval in it
+        setStatus("");
+        setPhase("bank");
       } else {
         setPinError(undefined);
         setStatus("");
@@ -574,10 +637,42 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
             {...(pinError ? { error: pinError } : {})}
             onPay={(pin) => void submitPin(pin)}
             onCancel={() => {
+              const cancelled = attemptId.current;
               attemptId.current = null;
+              if (cancelled) {
+                void api(`/api/v1/attempts/${cancelled}/cancel`, { method: "POST" }).catch(() => undefined);
+              }
               setPhase("idle");
               setStatus("");
               setNotice(null);
+            }}
+          />
+        ) : null}
+
+        {phase === "bank" &&
+        attemptId.current &&
+        (effectiveMethod === "NET_BANKING" || effectiveMethod === "DELULUPAY_ID") ? (
+          <DeluluPayStep
+            sessionId={quote.id}
+            attemptId={attemptId.current}
+            method={effectiveMethod}
+            totalPaise={total}
+            accountAlias={accountAlias}
+            onAuthenticated={() => void pay()}
+            onEnded={(err) => {
+              attemptId.current = null;
+              payKey.current = null;
+              handle(err);
+            }}
+            onCancelled={() => {
+              attemptId.current = null;
+              setPhase("idle");
+              setStatus("");
+              setNotice({
+                tone: "info",
+                title: "Payment cancelled",
+                text: "You cancelled this payment. No fictional money moved.",
+              });
             }}
           />
         ) : null}
@@ -630,6 +725,13 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
             onSubmit={(event) => {
               event.preventDefault();
               setNotice(null);
+              if (effectiveMethod === "DELULUPAY_ID") {
+                const problem = idProblem(idText);
+                if (problem) {
+                  setIdError(problem);
+                  return;
+                }
+              }
               setStep("review");
             }}
           >
@@ -638,27 +740,62 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
             </Heading>
             <fieldset className="flex flex-col gap-2">
               <legend className="sr-only">Payment method</legend>
-              <PaymentMethodOption
-                name="method"
-                value="CARD"
-                checked={effectiveMethod === "CARD"}
-                onChange={() => setMethod("CARD")}
-                methodName="Delulu Card"
-                description={
-                  card
-                    ? `Ends in ${card.lastFour}. You will enter your game PIN.`
-                    : "Pay with your virtual card."
-                }
-                {...(cardReason ? { disabledReason: cardReason } : {})}
-              />
-              <PaymentMethodOption
-                name="method"
-                value="BALANCE"
-                checked={effectiveMethod === "BALANCE"}
-                onChange={() => setMethod("BALANCE")}
-                methodName="Bank balance"
-                description="Pay straight from your Delulu Bank balance."
-              />
+              {orderedMethods.map((m) => (
+                <PaymentMethodOption
+                  key={m}
+                  name="method"
+                  value={m}
+                  checked={effectiveMethod === m}
+                  onChange={() => setMethod(m)}
+                  methodName={methodLabel(m)}
+                  description={methodDescription(m, card?.lastFour)}
+                  {...(methodReason(m) ? { disabledReason: methodReason(m) } : {})}
+                />
+              ))}
+              {offers.status === "ready" && offers.data.scenariosAllowed ? (
+                <FormField
+                  label="Test scenario (staff and staging only)"
+                  hint="Forces an outcome for testing. Never offered to players in production."
+                >
+                  {(control) => (
+                    <Select
+                      {...control}
+                      value={scenario}
+                      onChange={(event) => setScenario(event.target.value)}
+                    >
+                      <option value="">None: pay normally</option>
+                      {PAYMENT_SCENARIOS.map((name) => (
+                        <option key={name} value={name}>
+                          {name.toLowerCase().replaceAll("_", " ")}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </FormField>
+              ) : null}
+              {effectiveMethod === "DELULUPAY_ID" ? (
+                <FormField
+                  label="DeluluPay ID"
+                  hint="Your game ID ends in @delulu. Never a real UPI ID."
+                  {...(idError ? { error: idError } : {})}
+                >
+                  {(control) => (
+                    <Input
+                      {...control}
+                      value={idText}
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      maxLength={80}
+                      invalid={Boolean(idError)}
+                      onChange={(event) => {
+                        setTypedId(event.target.value);
+                        setIdError(undefined);
+                      }}
+                    />
+                  )}
+                </FormField>
+              ) : null}
             </fieldset>
             {cardReason && card && !card.pinSet ? (
               <a className="inline-flex min-h-touch items-center text-action underline" href="/account/cards">
@@ -722,7 +859,13 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-fg-muted">Pay with</dt>
-                <dd className="text-fg">{effectiveMethod === "CARD" ? cardAlias : "Bank balance"}</dd>
+                <dd className="text-fg">
+                  {effectiveMethod === "CARD"
+                    ? cardAlias
+                    : effectiveMethod === "DELULUPAY_ID"
+                      ? idText.trim().toLowerCase()
+                      : methodLabel(effectiveMethod)}
+                </dd>
               </div>
               <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2">
                 <dt className="text-fg-muted">Balance after</dt>
@@ -803,6 +946,29 @@ export function CheckoutFlow({ sessionId }: { sessionId: string }) {
       </div>
     </CheckoutLayout>
   );
+}
+
+/** What each method says about itself under its name (checkout step 2). */
+function methodDescription(method: Method, lastFour: string | undefined): string {
+  switch (method) {
+    case "CARD":
+      return lastFour ? `Ends in ${lastFour}. You will enter your game PIN.` : "Pay with your virtual card.";
+    case "DELULUPAY_ID":
+      return "Approve a request from Delulu Bank in your bank inbox.";
+    case "NET_BANKING":
+      return "Go to Delulu Bank and enter the code from your bank inbox.";
+    case "BALANCE":
+      return "Pay straight from your Delulu Bank balance.";
+  }
+}
+
+/** A DeluluPay ID is `name@delulu`; anything that looks like a real card or UPI handle is refused here and by the server. */
+function idProblem(text: string): string | undefined {
+  if (looksLikeRealPaymentData(text) && !/^[a-z0-9._-]+@delulu$/i.test(text.trim())) {
+    return "That looks like real payment data. Type only your game DeluluPay ID, which ends in @delulu.";
+  }
+  if (!parseDeluluPayId(text).ok) return "A DeluluPay ID ends in @delulu.";
+  return undefined;
 }
 
 function Shell({ children }: { children: React.ReactNode }) {

@@ -215,7 +215,7 @@ describe("Super Admin delayed actions and configuration versions (migration 0090
         "config.set ",
       ])
         expect(await call(kind, { key: "fee_percent", value: "6" }), kind).toBe("ADMIN_ACTION_UNKNOWN");
-      expect([...ADMIN_ACTION_KINDS]).toEqual(["config.set"]);
+      expect([...ADMIN_ACTION_KINDS]).toEqual(["config.set", "payment_method.set"]);
     });
 
     it("R7: a key outside the allow-list or a value outside its bounds is refused when proposed (checkout cannot be broken)", async () => {

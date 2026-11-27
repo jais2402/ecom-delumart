@@ -30,6 +30,12 @@ export const SERVER_EVENT_NAMES = [
   // Super Admin configuration change (migration 0090): written by the database when a delayed
   // action runs; no props, no user id, no values
   "console_config_changed",
+  // DeluluPay (PRD R10, migration 0103): recorded by the server after the step succeeded, one prop
+  // (`method`), no user id, no code, no amount
+  "payment_method_selected",
+  "payment_challenge_issued",
+  "payment_challenge_passed",
+  "payment_challenge_failed",
 ] as const;
 export const ANALYTICS_EVENT_NAMES = [...BROWSER_EVENT_NAMES, ...SERVER_EVENT_NAMES] as const;
 

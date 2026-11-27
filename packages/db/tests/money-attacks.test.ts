@@ -2239,6 +2239,11 @@ describe("money attacks (security review)", () => {
     ["core.create_checkout_session($1::jsonb, 'k')", ['{"productIds":[]}']],
     ["core.create_payment_attempt($1, 'BALANCE', NULL)", [uuidv7()]],
     ["core.verify_card_pin($1, $2)", [uuidv7(), Buffer.alloc(32)]],
+    // 0101: the DeluluPay commands refuse a caller with no live sign-in session like every other
+    ["core.start_payment_attempt($1, 'NET_BANKING', NULL, NULL, NULL)", [uuidv7()]],
+    ["core.issue_payment_challenge($1)", [uuidv7()]],
+    ["core.verify_payment_challenge($1, NULL, 'APPROVE')", [uuidv7()]],
+    ["core.cancel_payment_attempt($1)", [uuidv7()]],
     ["core.commit_purchase($1, $2, 'k', '\\x00', NULL)", [uuidv7(), uuidv7()]],
   ];
 
@@ -3135,6 +3140,8 @@ describe("money attacks (security review)", () => {
         "core.admin_listing_hide(uuid,text)",
         "core.admin_listing_restore(uuid,text)",
         "core.admin_moderation_queue(uuid,integer)",
+        // 0100: the console's payment method configuration (Super Admin only; no money moves)
+        "core.admin_payment_methods()",
         "core.admin_report_resolve(uuid,text,text)",
         "core.admin_reports(uuid,integer)",
         // 0078: Super Admin review moderation (each refuses anyone but the Super Admin; no money moves)
@@ -3156,6 +3163,8 @@ describe("money attacks (security review)", () => {
         "core.cart_remove(uuid)",
         "core.catalog_product(uuid)",
         "core.catalog_products(text,uuid,integer)",
+        // 0103: what checkout offers the actor (read only)
+        "core.checkout_payment_methods()",
         "core.create_coupon(uuid,text,bigint,bigint,timestamp with time zone,timestamp with time zone,integer,boolean,text)",
         // 0032: the actor's own creator access, passport and saves (no money moves)
         "core.creator_access()",
@@ -3168,6 +3177,7 @@ describe("money attacks (security review)", () => {
         "core.is_published_version(uuid)",
         "core.my_addresses()",
         "core.my_appeals()",
+        "core.my_bank_inbox()", // 0103: the payer's own bank inbox, the one place a code is readable
         "core.my_blocks()",
         // 0042: the owner's merchant read models (read only; never a buyer's identity)
         "core.my_brand_progress()",
@@ -3183,6 +3193,9 @@ describe("money attacks (security review)", () => {
         // 0058: the buyer's own order destination
         "core.my_order_delivery(uuid)",
         "core.my_orders(uuid,integer)",
+        // 0103: the actor's own payment attempts (read only)
+        "core.my_payment_attempt(uuid)",
+        "core.my_payments(text,integer)",
         "core.my_product(uuid)",
         "core.my_products(text,uuid,integer)",
         "core.my_reports()",
@@ -3264,6 +3277,8 @@ describe("money attacks (security review)", () => {
         "core.actor_id()",
         // sixth review (0050): text stored on the strength of the server's screening is app_pay's
         "core.appeal_create(uuid,text)",
+        // 0101: the authentication step's commands (cancel, issue a code or approval request, verify)
+        "core.cancel_payment_attempt(uuid)",
         "core.cart_add(uuid)",
         "core.cart_clear()",
         "core.cart_merge(uuid[])",
@@ -3272,6 +3287,8 @@ describe("money attacks (security review)", () => {
         // 0058: the checkout destination (the actor's own address or the fictional spot)
         "core.checkout_address_check(uuid)",
         "core.checkout_inputs(jsonb,text)",
+        // 0103: what checkout offers the actor (read only)
+        "core.checkout_payment_methods()",
         "core.checkout_set_destination(uuid,uuid)",
         // 0033: the relief grant (a money command)
         "core.claim_relief(uuid)",
@@ -3282,7 +3299,11 @@ describe("money attacks (security review)", () => {
         "core.create_checkout_session(jsonb,text)",
         "core.create_payment_attempt(uuid,text,uuid)",
         "core.is_published_version(uuid)",
+        "core.issue_payment_challenge(uuid)",
+        "core.my_bank_inbox()",
         "core.my_cart()",
+        "core.my_payment_attempt(uuid)",
+        "core.my_payments(text,integer)",
         "core.my_wallet()",
         "core.onboarding_status()",
         "core.owns_products(uuid[])",
@@ -3296,8 +3317,12 @@ describe("money attacks (security review)", () => {
         "core.reset_card_pin(uuid,bytea)",
         "core.set_card_frozen(uuid,boolean)",
         "core.set_card_pin(uuid,bytea,bytea)",
+        // 0101: an attempt with any of the four methods (core.create_payment_attempt delegates to it)
+        "core.start_payment_attempt(uuid,text,uuid,text,text)",
         "core.update_store(text,text)",
-        "core.verify_card_pin(uuid,bytea)", // eighth review (0060): the journal policy's question (a party to the journal, and its
+        "core.verify_card_pin(uuid,bytea)",
+        "core.verify_payment_challenge(uuid,text,text)",
+        // eighth review (0060): the journal policy's question (a party to the journal, and its
         // order, if any, is the actor's own as buyer); answers only for the actor
         "ledger.journal_readable(uuid)",
       ]);

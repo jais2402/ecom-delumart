@@ -26,9 +26,11 @@ export interface AdminActionOutcome {
 export interface AdminActionView {
   id: string;
   kind: AdminActionKind | string;
-  /** The configuration key of a `config.set` action. */
+  /** The configuration key of a `config.set` action; `payment_method.<METHOD>` for a payment method change. */
   key: string | null;
   value: string | null;
+  /** A `payment_method.set` action's new settings (limits as decimal strings); absent for other kinds. */
+  details?: Record<string, unknown>;
   reason: string | null;
   state: AdminActionState;
   proposedAt: string;

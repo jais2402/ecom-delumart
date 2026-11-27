@@ -41,7 +41,7 @@ export const ADMIN_ACTION_RULES = {
 } as const;
 
 /** Allow-listed action kinds. Anything else is refused when proposed and again when due. */
-export const ADMIN_ACTION_KINDS = ["config.set"] as const;
+export const ADMIN_ACTION_KINDS = ["config.set", "payment_method.set"] as const;
 export type AdminActionKind = (typeof ADMIN_ACTION_KINDS)[number];
 
 export const ADMIN_ACTION_STATES = ["QUEUED", "CANCELLED", "EXECUTED", "FAILED"] as const;

@@ -23,6 +23,12 @@ const pages = [
   { path: '/account/reports', signedIn: true },
   { path: '/account/blocks', signedIn: true },
   { path: '/account/addresses', signedIn: true },
+  // DeluluPay (PRD R4): the Payments list and the bank inbox with rows (see makePayments), and the two
+  // bank steps of checkout (net banking with a code in the inbox, an approval request in it)
+  { path: '/account/payments', signedIn: true, payments: true },
+  { path: '/account/bank-inbox', signedIn: true, payments: true },
+  { path: '/p/{product}', signedIn: true, flow: 'netBanking', label: '/checkout (net banking step)' },
+  { path: '/p/{product}', signedIn: true, flow: 'approval', label: '/checkout (DeluluPay ID approval step)' },
   { path: '/account/addresses?add=1', signedIn: true, label: '/account/addresses (add form)' },
   { path: '/p/{product}', signedIn: true, openDialog: 'Report this product', label: '/p/[id] report dialog' },
   // the Partner Portal and the Commerce Console: operator frames have no site footer
@@ -264,8 +270,52 @@ async function addToServerCart(page, productId) {
   }, productId);
 }
 
+// A captured balance payment, and a net banking attempt waiting on its code, so the Payments list and the
+// bank inbox have rows to audit. Uses two platform products that no other page of the audit buys.
+async function makePayments(page, bought, waiting) {
+  await page.evaluate(async ({ bought: b, waiting: w }) => {
+    const call = async (method, path, body, extra = {}) => {
+      const token = (await (await fetch('/api/v1/auth/csrf', { credentials: 'same-origin' })).json()).csrfToken;
+      const r = await fetch(path, { method, credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf-token': token, ...extra }, body: body === undefined ? undefined : JSON.stringify(body) });
+      const json = await r.json();
+      if (!r.ok) throw new Error(path + ' ' + r.status + ' ' + JSON.stringify(json).slice(0, 160));
+      return json;
+    };
+    const session = async (p) => call('POST', '/api/v1/checkout-sessions', { lines: [{ productId: p.id }], speedBySeller: { [p.seller]: 'STANDARD' } }, { 'idempotency-key': crypto.randomUUID() });
+    const q1 = await session(b);
+    const a1 = await call('POST', '/api/v1/checkout-sessions/' + q1.id + '/attempts', { method: 'BALANCE' });
+    await call('POST', '/api/v1/checkout-sessions/' + q1.id + '/pay', { attemptId: a1.id }, { 'idempotency-key': crypto.randomUUID() });
+    const q2 = await session(w);
+    await call('POST', '/api/v1/checkout-sessions/' + q2.id + '/attempts', { method: 'NET_BANKING' });
+    await call('POST', '/api/v1/checkout-sessions/' + q2.id + '/challenge');
+  }, { bought: { id: bought.id, seller: bought.sellerKey }, waiting: { id: waiting.id, seller: waiting.sellerKey } });
+}
+
+// Opens checkout for the product and goes to the bank step of the method, leaving it open for the audit.
+async function toBankStep(page, method) {
+  await page.getByRole('button', { name: 'Buy now' }).click();
+  await page.waitForURL(/\/checkout\//);
+  await page.getByRole('radio', { name: /Standard/ }).check();
+  await page.getByRole('button', { name: 'Continue to payment' }).click();
+  await page.getByRole('radio', { name: method === 'netBanking' ? /Net banking/ : /DeluluPay ID/ }).check();
+  await page.getByRole('button', { name: 'Review your order' }).click();
+  await page.getByRole('button', { name: 'Pay now' }).click();
+  if (method === 'netBanking') {
+    await page.getByRole('form', { name: 'Delulu Bank SecureCheck' }).waitFor();
+    await page.getByRole('button', { name: 'Send me a code' }).click();
+    await page.getByTestId('inbox-code').waitFor();
+  } else {
+    await page.getByRole('heading', { level: 2, name: 'Delulu Bank approval request' }).waitFor();
+    await page.getByRole('button', { name: 'Approve' }).waitFor();
+  }
+  await page.waitForLoadState('networkidle');
+}
+
 (async () => {
   const products = await discoverProducts();
+  // platform products have unlimited stock: the DeluluPay pages are audited with those, so repeated runs never sell out
+  const seed = products.filter((p) => p.sellerKey === 'SEED');
+  if (seed.length < 6) throw new Error('the audit needs six unlimited platform products (run pnpm dev:setup)');
   const browser = await chromium.launch();
   const handle = `audit-${rand()}`;
   const ownerEmail = `audit-owner-${rand()}@example.com`;
@@ -294,6 +344,7 @@ async function addToServerCart(page, productId) {
       if (list.length === 0) continue;
       const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme, baseURL: BASE });
       const page = await ctx.newPage();
+      let paymentsMade = false;
       if (role === 'owner') {
         await signInOnly(page, ownerEmail);
       } else if (role === 'admin') {
@@ -308,12 +359,14 @@ async function addToServerCart(page, productId) {
       }
       for (const entry of list) {
         if (role === 'mocked') { await page.unroute('**/api/v1/admin/analytics/**').catch(() => {}); await mockAnalytics(page, entry.mockMode || 'data'); }
-        const p = entry.path.replace('{product}', products[0].id).replace('{handle}', handle).replace('{listing}', ids.live).replace('{draft}', ids.draft);
+        const p = entry.path.replace('{product}', (entry.flow === 'netBanking' ? seed[2] : entry.flow === 'approval' ? seed[3] : products[0]).id).replace('{handle}', handle).replace('{listing}', ids.live).replace('{draft}', ids.draft);
+        if (entry.payments && !paymentsMade) { await makePayments(page, seed[4], seed[5]); paymentsMade = true; }
         await page.goto(BASE + p, { waitUntil: 'networkidle' });
         // client screens fill in after the first paint: wait for a heading and for loading to settle
         await page.getByRole('heading', { level: 1 }).first().waitFor();
         await page.waitForLoadState('networkidle');
         if (entry.cart) await page.waitForSelector('button[aria-label^="Remove "]');
+        if (entry.flow) await toBankStep(page, entry.flow);
         if (entry.openDialog) {
           await page.getByRole('button', { name: entry.openDialog }).click();
           await page.getByRole('dialog').waitFor();
@@ -322,6 +375,7 @@ async function addToServerCart(page, productId) {
         const r = await page.evaluate(pageFn);
         const focus = [];
         // screens that move focus to their heading on arrival start tabbing after it, not at the skip link
+        if (entry.flow) await page.evaluate(() => { const b = document.body; b.tabIndex = -1; b.focus(); b.blur(); b.removeAttribute('tabindex'); window.scrollTo(0, 0); });
         const startedOnHeading = await page.evaluate(() => !!document.activeElement && /^H[1-6]$/.test(document.activeElement.tagName));
         await page.evaluate(() => document.activeElement && document.activeElement.blur());
         for (let i = 0; i < 15; i++) {

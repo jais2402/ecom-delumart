@@ -1,4 +1,5 @@
 import "./server-only";
+import { looksLikeRealPaymentData } from "@delulu/core";
 import { cartWithPreview } from "@delulu/db/runtime";
 import { z } from "zod";
 import { SERVER_CONFIG } from "./config";
@@ -11,7 +12,17 @@ export const speedBySellerSchema = z.record(
   z.enum(["STANDARD", "EXPRESS", "ZAP"]),
 );
 
-export const couponCodeSchema = z.string().min(1).max(64);
+/**
+ * A coupon code is a free-text field in checkout, so it is screened like every other (PRD R4.5, US-37):
+ * a card number, a real UPI handle, a CVV, an expiry or a password is refused before it goes anywhere.
+ */
+export const couponCodeSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine((v) => !looksLikeRealPaymentData(v), {
+    message: "That is not a coupon code. Never type card or bank details here.",
+  });
 
 /**
  * The response of GET /api/v1/cart and of every cart change: the caller's cart grouped by seller

@@ -5,6 +5,7 @@
  *  2. runs the migrations as the owner (the admin connection, DATABASE_URL);
  *  3. sets LOGIN passwords for app_web, app_pay and app_jobs (ALTER ROLE ... PASSWORD);
  *  4. seeds the 60-product catalog from apps/web/src/data/seed-catalog.ts;
+ *  4b. turns the payment test scenarios on (deployment_setting 'payments.test_scenarios'; PRD R4.6);
  *  5. optionally makes one dev account the Super Admin (SUPER_ADMIN_EMAIL, below);
  *  5b. optionally (SEED_ANALYTICS=1) writes ~30 days of synthetic analytics traffic across Indian
  *     states and cities and rolls it up, through the owner-only
@@ -136,6 +137,14 @@ async function main(): Promise<void> {
       `catalog: ${seeded.categories} categories, ${seeded.productsCreated} products created, ` +
         `${seeded.versionsCreated} versions created (of ${SEED_PRODUCTS.length})`,
     );
+
+    // PRD R4.6: payment test scenarios (forced declines, a slow or unavailable bank, a code that expires)
+    // are open in local development and staging, never by default: the migrations leave this 'off', and
+    // this script (which uses the owner login and is never run against production) turns it on.
+    await owner.query(
+      "UPDATE core.deployment_setting SET value = 'on' WHERE key = 'payments.test_scenarios'",
+    );
+    log("payment test scenarios: on (local development only)");
 
     const identityKey = hexKey("IDENTITY_KEY");
     const adminEmail = process.env.SUPER_ADMIN_EMAIL;

@@ -16,8 +16,13 @@ import {
   DEFAULT_PRICING_CONFIG,
   DomainError,
   type ErrorCode,
+  isPaymentScenario,
+  PAYMENT_METHODS,
+  type PaymentMethod,
+  type PaymentScenario,
   type Priced,
   type PricingConfig,
+  parseDeluluPayId,
   price,
   SEED_SELLER,
   type Speed,
@@ -27,7 +32,7 @@ import { asPay, domainErrorOf, isUuid, requireUuid } from "./command";
 
 // ---------------------------------------------------------------------------- public types
 
-export type PaymentMethod = "BALANCE" | "CARD";
+export type { PaymentMethod };
 
 export interface CreateCheckoutSessionInput {
   /** The caller's sign-in session (auth.sessions id). */
@@ -69,6 +74,10 @@ export interface CreatePaymentAttemptInput {
   sessionId: string;
   method: PaymentMethod;
   cardId?: string;
+  /** DELULUPAY_ID only: the payer's own DeluluPay ID (or, for staff and staging, a reserved test ID). */
+  delulupayId?: string;
+  /** A forced test outcome (PRD R4.6); refused unless staff, or the owner switched scenarios on. */
+  scenario?: PaymentScenario;
 }
 
 export interface PaymentAttemptResult {
@@ -391,28 +400,58 @@ export async function createCheckoutSession(
 
 // ---------------------------------------------------------------------------- B2: payment attempt
 
-/** Creates a PENDING attempt; BALANCE is authenticated immediately, CARD after its PIN is verified. */
+/**
+ * Creates a PENDING attempt. BALANCE is authenticated immediately; CARD after its PIN is verified
+ * (core.verify_card_pin); DELULUPAY_ID and NET_BANKING after their challenge (migration 0101,
+ * ./payment). The method must be available and the amount within its limits (migration 0100), or
+ * this throws METHOD_UNAVAILABLE / METHOD_LIMIT_EXCEEDED with nothing created.
+ */
 export async function createPaymentAttempt(
   pool: Pool,
   input: CreatePaymentAttemptInput,
 ): Promise<PaymentAttemptResult> {
   requireUuid(input.sessionId, "sessionId");
-  if (input.method !== "BALANCE" && input.method !== "CARD") {
+  if (!(PAYMENT_METHODS as readonly string[]).includes(input.method)) {
     throw new DomainError("VALIDATION_FAILED", "unsupported payment method");
   }
   if (input.method === "CARD") requireUuid(input.cardId ?? "", "cardId");
   else if (input.cardId !== undefined) {
     throw new DomainError("VALIDATION_FAILED", "a card is only given for CARD payments");
   }
+  if (input.method === "DELULUPAY_ID") {
+    if (typeof input.delulupayId !== "string" || input.delulupayId.length > 80) {
+      throw new DomainError("VALIDATION_FAILED", "give your DeluluPay ID");
+    }
+    if (!parseDeluluPayId(input.delulupayId).ok) {
+      throw new DomainError("VALIDATION_FAILED", "DeluluPay IDs end in @delulu");
+    }
+  } else if (input.delulupayId !== undefined) {
+    throw new DomainError("VALIDATION_FAILED", "a DeluluPay ID is only given for DELULUPAY_ID payments");
+  }
+  if (input.scenario !== undefined && !isPaymentScenario(input.scenario)) {
+    throw new DomainError("VALIDATION_FAILED", "unknown scenario");
+  }
   return asPay(pool, input.authSessionId, async (c) => {
     const { rows } = await c.query<{ r: PaymentAttemptResult }>(
-      "SELECT core.create_payment_attempt($1, $2, $3) AS r",
-      [input.sessionId, input.method, input.cardId ?? null],
+      "SELECT core.start_payment_attempt($1, $2, $3, $4, $5) AS r",
+      [
+        input.sessionId,
+        input.method,
+        input.cardId ?? null,
+        input.delulupayId === undefined ? null : parseDeluluPayIdOrThrow(input.delulupayId),
+        input.scenario ?? null,
+      ],
     );
     const r = rows[0]?.r;
-    if (!r) throw new Error("create_payment_attempt returned nothing");
+    if (!r) throw new Error("start_payment_attempt returned nothing");
     return r;
   });
+}
+
+function parseDeluluPayIdOrThrow(text: string): string {
+  const id = parseDeluluPayId(text);
+  if (!id.ok) throw new DomainError("VALIDATION_FAILED", "DeluluPay IDs end in @delulu");
+  return id.id;
 }
 
 // ---------------------------------------------------------------------------- B3: pay

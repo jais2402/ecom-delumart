@@ -14,8 +14,10 @@ import { PinField } from "../../molecules/PinField";
 
 export type BankChallengeProps = Omit<ComponentPropsWithRef<"form">, "onSubmit" | "children"> & {
   amountPaise: bigint;
-  /** Friendly name of the virtual card, e.g. "Everyday card". Never a number. */
+  /** Friendly name of the virtual card, e.g. "Everyday card", or of the bank account. Never a number. */
   cardAlias: string;
+  /** What `cardAlias` names; "Card" for a card payment, "Account" on the net banking page. */
+  sourceLabel?: string;
   merchantName?: string;
   /** Ask for the six-digit game PIN or a six-digit SecureCheck code. */
   method?: "pin" | "code";
@@ -31,6 +33,7 @@ export type BankChallengeProps = Omit<ComponentPropsWithRef<"form">, "onSubmit" 
 export function BankChallenge({
   amountPaise,
   cardAlias,
+  sourceLabel = "Card",
   merchantName = "DeluluMart",
   method = "pin",
   onPay,
@@ -72,7 +75,7 @@ export function BankChallenge({
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-3">
-          <dt className="text-fg-muted">Card</dt>
+          <dt className="text-fg-muted">{sourceLabel}</dt>
           <dd className="font-medium text-fg">{cardAlias}</dd>
         </div>
       </dl>
