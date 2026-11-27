@@ -1,8 +1,9 @@
-import { Breadcrumbs, Button, EmptyState, Heading, ProductPicture, Text } from "@delulu/ui";
+import { Breadcrumbs, Heading, ProductPicture, Text } from "@delulu/ui";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BuyPanel } from "../../_components/BuyPanel";
 import { RecentlyViewedRail, RecentlyViewedRecorder } from "../../_components/RecentlyViewed";
+import { RecoveryScreen } from "../../_components/recovery/RecoveryScreen";
 import { ProductReviews } from "../../_components/reviews/ProductReviews";
 import { ShopShell } from "../../_components/ShopShell";
 import { ProductSafetyActions } from "../../_components/safety/ProductSafetyActions";
@@ -28,20 +29,10 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   if (!page) notFound();
   if (page.status === "UNAVAILABLE") {
     return (
-      <ShopShell>
-        <div className="mx-auto flex max-w-reading flex-col items-center gap-4 py-8 text-center">
-          <EmptyState
-            title="No longer available"
-            description="This product is not on sale any more. Anyone who already bought it keeps it."
-            headingLevel={1}
-            action={
-              <Button asChild>
-                <a href="/">Keep shopping</a>
-              </Button>
-            }
-          />
-        </div>
-      </ShopShell>
+      <RecoveryScreen
+        title="No longer available"
+        message="This product is not on sale any more. Anyone who already bought it keeps it. Search for something similar, or pick a department."
+      />
     );
   }
   const product = page.product;

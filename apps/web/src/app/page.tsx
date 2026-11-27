@@ -123,7 +123,7 @@ export default async function HomePage() {
               tone="brand"
               title="Delivery in minutes with Zap"
               text={`Choose Zap at checkout on eligible products and get your order in ${arrivalPhrase("ZAP")}.`}
-              cta={{ label: "How delivery works", href: "#how-it-works" }}
+              cta={{ label: "How delivery works", href: "/help#delivery" }}
               art={{ hue: 150, seed: "promo-gadget", motif: "tech" }}
             />
           </>

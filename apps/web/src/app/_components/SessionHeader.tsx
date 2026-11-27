@@ -17,8 +17,10 @@ import { DELIVERY_PILL } from "../_lib/speeds";
 import { useFullCatalog } from "../_lib/use-full-catalog";
 
 const SERVICES = [
+  { name: "Deals", href: "/deals" },
   { name: "Sell on DeluluMart", href: "/sell" },
-  { name: "How it works", href: "/#how-it-works" },
+  { name: "How it works", href: "/help#how-it-works" },
+  { name: "Help centre", href: "/help" },
   { name: "Your orders", href: "/account/orders" },
   { name: "Your wallet", href: "/account/wallet" },
 ] as const;

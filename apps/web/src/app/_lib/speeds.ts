@@ -28,5 +28,5 @@ export const DELIVERY_PILL = {
     name: SPEED_COPY[speed].name,
     arrival: `Arrives in ${arrivalPhrase(speed)}`,
   })),
-  helpHref: "/#how-it-works",
+  helpHref: "/help#delivery",
 } as const;

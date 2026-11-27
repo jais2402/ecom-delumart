@@ -26,4 +26,10 @@ export const SHOP_CONFIG = {
     /** Cards in the home page's "Saved for later" rail. */
     railCount: 12,
   },
+  deals: {
+    /** Shops whose public coupons the Deals page reads (one public request each). */
+    maxShops: 40,
+    /** Shop coupon requests in flight at once. */
+    concurrency: 6,
+  },
 } as const;

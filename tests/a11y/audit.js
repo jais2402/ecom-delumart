@@ -20,6 +20,14 @@ const pages = [
   { path: '/sell', signedIn: true, label: '/sell (signed in)' },
   { path: '/sell/passport', signedIn: true },
   { path: '/store/{handle}' },
+  // information pages, the not-found page, and Deals empty of sales, then with sale products (mocked, see mockSale)
+  { path: '/deals' },
+  { path: '/deals', mockSale: true, label: '/deals (with sale products)' },
+  { path: '/help' },
+  { path: '/legal/terms' },
+  { path: '/legal/privacy' },
+  { path: '/legal/research' },
+  { path: '/no-such-page', label: '/not-found' },
   { path: '/account/reports', signedIn: true },
   { path: '/account/blocks', signedIn: true },
   { path: '/account/addresses', signedIn: true },
@@ -49,6 +57,7 @@ const pages = [
   { path: '/console/reviews', as: 'admin', operator: true },
   { path: '/console/actions', as: 'admin', operator: true },
   { path: '/console/configuration', as: 'admin', operator: true },
+  { path: '/console/payment-methods', as: 'admin', operator: true },
   // analytics screens: the admin API is answered by fixtures (no Super Admin needed, see mockAnalytics)
   { path: '/console/analytics', as: 'mocked', operator: true },
   { path: '/console/analytics/places', as: 'mocked', operator: true },
@@ -62,6 +71,7 @@ const pages = [
   { path: '/console/moderation', label: '/console/moderation (not available)' },
   { path: '/console/actions', label: '/console/actions (not available)' },
   { path: '/console/configuration', label: '/console/configuration (not available)' },
+  { path: '/console/payment-methods', label: '/console/payment-methods (not available)' },
 ];
 const sizes = [[1280, 900], [360, 800]];
 const schemes = ['light', 'dark'];
@@ -224,6 +234,26 @@ async function createStore(page, products, handle) {
 }
 
 
+// A public coupon on the audit shop, so Deals and the shop page have one to show.
+async function createPublicCoupon(page) {
+  await page.evaluate(async () => {
+    const token = (await (await fetch('/api/v1/auth/csrf', { credentials: 'same-origin' })).json()).csrfToken;
+    const r = await fetch('/api/v1/studio/coupons', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-csrf-token': token }, body: JSON.stringify({ kind: 'PERCENT', value: 10, minSpendRupees: 1000, isPublic: true, publicCode: 'SAVE10' }) });
+    if (!r.ok) throw new Error('coupon ' + r.status + ' ' + (await r.text()).slice(0, 160));
+  });
+}
+
+// Answers the public catalogue with real products, four of them carrying a reference price, so the Deals grid can be audited.
+async function mockSaleCatalog(page) {
+  await page.route('**/api/v1/catalog**', async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    let n = 0;
+    json.items = json.items.map((p) => (p.available && n++ < 4 ? { ...p, referencePricePaise: String(BigInt(p.pricePaise) + 10000000n) } : p));
+    await route.fulfill({ response, json });
+  });
+}
+
 // Sign an existing, finished account in again (the dev provider needs only the email).
 async function signInOnly(page, email) {
   await page.goto(BASE + '/');
@@ -327,6 +357,7 @@ async function toBankStep(page, method) {
     await signInAndOnboard(owner, ownerEmail);
     await createStore(owner, products, handle);
     ids = await createListings(owner);
+    await createPublicCoupon(owner);
     await ctx.close();
     // SKIP_ADMIN=1 leaves out the Super Admin setup (it runs `pnpm dev:setup`) and the pages that need it
     if (!process.env.SKIP_ADMIN) {
@@ -358,6 +389,7 @@ async function toBankStep(page, method) {
         await ctx.addInitScript((ids) => { try { if (!localStorage.getItem('dm.cart.v1')) localStorage.setItem('dm.cart.v1', JSON.stringify(ids)); } catch {} }, [products[0].id, products[1].id]);
       }
       for (const entry of list) {
+        if (entry.mockSale) await mockSaleCatalog(page);
         if (role === 'mocked') { await page.unroute('**/api/v1/admin/analytics/**').catch(() => {}); await mockAnalytics(page, entry.mockMode || 'data'); }
         const p = entry.path.replace('{product}', (entry.flow === 'netBanking' ? seed[2] : entry.flow === 'approval' ? seed[3] : products[0]).id).replace('{handle}', handle).replace('{listing}', ids.live).replace('{draft}', ids.draft);
         if (entry.payments && !paymentsMade) { await makePayments(page, seed[4], seed[5]); paymentsMade = true; }
@@ -371,6 +403,7 @@ async function toBankStep(page, method) {
           await page.getByRole('button', { name: entry.openDialog }).click();
           await page.getByRole('dialog').waitFor();
         }
+        if (entry.mockSale) await page.getByRole('list', { name: 'Products on sale' }).waitFor();
         const key = `${entry.label || p} ${w} ${scheme}`;
         const r = await page.evaluate(pageFn);
         const focus = [];
@@ -394,6 +427,7 @@ async function toBankStep(page, method) {
         r.touch.forEach((x) => issues.push('TOUCH ' + x)); r.contrast.forEach((x) => issues.push('CONTRAST ' + x));
         focus.forEach((x) => issues.push('FOCUS ' + x));
         const L = r.landmarks; if (L.main !== 1) issues.push('LM main=' + L.main); if (!L.banner) issues.push('LM banner missing'); if (!L.footer && !entry.operator) issues.push('LM footer=' + L.footer); L.unlabelledNavs.forEach((x) => issues.push('LM unlabelled nav ' + x));
+        if (entry.mockSale) await page.unroute('**/api/v1/catalog**');
         failures += issues.length;
         console.log(`== ${key}: ${issues.length} issues (contrast nodes ${r.n} min ${r.min && r.min.toFixed(2)})`);
         issues.slice(0, +process.env.MAX || 12).forEach((x) => console.log('   ' + x));

@@ -311,6 +311,69 @@ try {
     },
   );
 
+  await step(
+    "Payment methods: propose a change with a reason, see current and proposed, read the server's refusal, cancel",
+    async () => {
+      const open = await call(admin, "GET", "/api/v1/admin/actions?scope=OPEN&page=1");
+      for (const a of open.body.items.filter((x) => x.kind === "payment_method.set"))
+        await call(admin, "POST", `/api/v1/admin/actions/${a.id}/cancel`, {
+          reason: "Clearing an old check",
+        });
+      await admin.goto("/console/payment-methods");
+      await admin.getByRole("heading", { level: 1, name: "Payment methods" }).waitFor();
+      const net = admin.getByRole("article", { name: "Net banking (Delulu Bank)" });
+      await net.getByRole("switch", { name: "Offer this method at checkout" }).click();
+      await net.getByRole("button", { name: "Propose change: Net banking (Delulu Bank)" }).click();
+      await net.getByText("Give a reason of at least 5 characters.").waitFor();
+      await net.getByLabel(/^Reason/).fill(`Planned bank work ${tag}`);
+      await net.getByRole("button", { name: "Propose change: Net banking (Delulu Bank)" }).click();
+      await net.getByText("Change waiting").first().waitFor();
+      await net.getByRole("columnheader", { name: "Proposed" }).waitFor();
+      await net.getByText("No, switched off").waitFor();
+      await shot(admin, "admin-actions-pm-1-proposed");
+      // two more disables through the API (they only queue: each is judged again when it runs)
+      for (const m of ["CARD", "DELULUPAY_ID"]) {
+        const cur = (await call(admin, "GET", "/api/v1/admin/payment-methods")).body.methods.find(
+          (x) => x.method === m,
+        );
+        const r = await call(admin, "POST", "/api/v1/admin/payment-methods", {
+          method: m,
+          enabled: false,
+          displayOrder: cur.displayOrder,
+          perAttemptLimitPaise: cur.perAttemptLimitPaise,
+          perDayLimitPaise: cur.perDayLimitPaise,
+          maintenanceFrom: null,
+          maintenanceUntil: null,
+          reason: `Disable ${m} ${tag}`,
+        });
+        assert.equal(r.status, 201, JSON.stringify(r.body));
+      }
+      await admin.reload();
+      // a proposal that changes nothing is refused by the server, and the screen says so in words
+      const bal = admin.getByRole("article", { name: "Bank balance" });
+      await bal.getByLabel(/^Reason/).fill(`No change at all ${tag}`);
+      await bal.getByRole("button", { name: "Propose change: Bank balance" }).click();
+      await bal
+        .getByRole("alert")
+        .getByText(/same as the current settings/)
+        .waitFor();
+      await shot(admin, "admin-actions-pm-2-refused");
+      await noOverflowAt320(admin, "/console/payment-methods");
+      // clean up: cancel what was queued
+      await admin.goto("/console/actions");
+      for (let i = 0; i < 3; i++) {
+        const card = admin.getByRole("article", { name: /^Change .*: switched off/ }).first();
+        await card.waitFor();
+        await card.getByLabel(/^Reason/).fill("Cleaning up after the check");
+        await card.getByRole("button", { name: /^Cancel this change/ }).click();
+        await admin
+          .getByText(/^Cancelled: Change /)
+          .first()
+          .waitFor();
+      }
+    },
+  );
+
   await step("a non-admin and a visitor see only 'Not available'; the API refuses them", async () => {
     for (const [who, page] of [
       ["player", other],

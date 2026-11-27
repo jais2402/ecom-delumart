@@ -7,6 +7,7 @@ const GROUPS: readonly FooterGroup[] = [
     title: "Shop",
     links: [
       { label: "All products", href: "/search" },
+      { label: "Deals", href: "/deals" },
       { label: "Your cart", href: "/cart" },
     ],
   },
@@ -16,6 +17,15 @@ const GROUPS: readonly FooterGroup[] = [
       { label: "Sell on DeluluMart", href: "/sell" },
       { label: "Your wallet", href: "/account/wallet" },
       { label: "Your orders", href: "/account/orders" },
+    ],
+  },
+  {
+    title: "Help and policies",
+    links: [
+      { label: "Help centre", href: "/help" },
+      { label: "Terms of use (draft)", href: "/legal/terms" },
+      { label: "Privacy notice (draft)", href: "/legal/privacy" },
+      { label: "Research use (draft)", href: "/legal/research" },
     ],
   },
 ];
