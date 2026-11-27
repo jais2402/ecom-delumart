@@ -326,6 +326,11 @@ describe("no real payment data anywhere (PRD R4.5; US-37)", () => {
       "name@okaxis",
       "cvv 123",
       "exp 12/27",
+      "4111_1111_1111_1111",
+      "4111​1111​1111​1111",
+      "٤١١١١١١١١١١١١١١١",
+      "рin 1234",
+      "12​/25",
     ]) {
       const res = await b.call(R.checkoutSessions.POST, "POST", "/api/v1/checkout-sessions", {
         body: { lines: [{ productId: product(0).id }], speedBySeller: { SEED: "STANDARD" }, couponCode },
