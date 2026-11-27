@@ -45,6 +45,7 @@ export * from "./ProductGrid";
 export * from "./ProductRail";
 export * from "./PromoTile";
 export * from "./Receipt";
+export * from "./RecoveryPanel";
 export * from "./RegistrationReview";
 export * from "./ReliefPanel";
 export * from "./ReportDialog";

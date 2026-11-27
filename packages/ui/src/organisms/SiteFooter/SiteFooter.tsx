@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { Lock, Truck, Wallet } from "lucide-react";
-import type { ComponentPropsWithRef } from "react";
+import type { ComponentPropsWithRef, CSSProperties } from "react";
 import { Icon } from "../../atoms/Icon";
 import { LogoMark } from "../../atoms/LogoMark";
 import { cn } from "../../lib/cn";
@@ -81,7 +81,10 @@ export function SiteFooter({
         </ul>
       </div>
       <div className="bg-surface text-fg">
-        <div className="mx-auto grid max-w-content gap-8 px-4 py-10 md:grid-cols-[1.6fr_1fr_1fr_1fr]">
+        <div
+          style={{ "--footer-columns": groups.length } as CSSProperties}
+          className="mx-auto grid max-w-content gap-8 px-4 py-10 md:grid-cols-[1.4fr_repeat(var(--footer-columns),1fr)]"
+        >
           <div className="flex max-w-sm flex-col gap-3">
             <a
               href={homeHref}
